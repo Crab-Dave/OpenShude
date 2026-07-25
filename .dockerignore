@@ -1,0 +1,16 @@
+.git
+.agents
+.codex
+node_modules
+data
+artifacts
+test
+scripts
+.gitignore
+DESIGN.md
+README.md
+npm-debug.log*
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
