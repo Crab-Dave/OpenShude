@@ -90,7 +90,7 @@ jobs:
 
           chmod 600 ~/.ssh/known_hosts
 
-      - name: Upload production Compose file
+      - name: Upload production configuration
         shell: bash
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
@@ -104,6 +104,14 @@ jobs:
             -P "$SERVER_PORT" \
             compose.prod.yml \
             "$SERVER_USER@$SERVER_HOST:/opt/myapp/compose.prod.yml.next"
+
+          scp \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -i ~/.ssh/deploy_key \
+            -P "$SERVER_PORT" \
+            deploy/nginx-openshude.conf \
+            "$SERVER_USER@$SERVER_HOST:/opt/myapp/nginx-openshude.conf.next"
 
       - name: Deploy new image
         shell: bash
@@ -154,6 +162,81 @@ jobs:
             return 1
           }
 
+          configure_nginx() {
+            local nginx_bin="/usr/sbin/nginx"
+            local nginx_config="/etc/nginx/conf.d/openshude.conf"
+            local nginx_backup="/opt/myapp/nginx-openshude.conf.previous"
+            local had_previous=false
+            local -a elevate=()
+
+            if [[ $(id -u) -ne 0 ]]; then
+              if ! sudo -n true; then
+                echo "The deployment user needs passwordless sudo to configure Nginx"
+                return 1
+              fi
+              elevate=(sudo -n)
+            fi
+            if [[ ! -x "$nginx_bin" ]]; then
+              echo "Nginx is not installed; installing it now"
+              if command -v apt-get >/dev/null; then
+                "${elevate[@]}" apt-get update
+                "${elevate[@]}" apt-get install -y nginx
+              elif command -v dnf >/dev/null; then
+                "${elevate[@]}" dnf install -y nginx
+              elif command -v yum >/dev/null; then
+                "${elevate[@]}" yum install -y nginx
+              else
+                echo "No supported package manager was found"
+                return 1
+              fi
+            fi
+            if [[ ! -x "$nginx_bin" ]]; then
+              echo "Nginx installation did not provide $nginx_bin"
+              return 1
+            fi
+
+            if "${elevate[@]}" test -f "$nginx_config"; then
+              had_previous=true
+              "${elevate[@]}" cp "$nginx_config" "$nginx_backup"
+            fi
+
+            restore_nginx() {
+              if [[ "$had_previous" == true ]]; then
+                "${elevate[@]}" cp "$nginx_backup" "$nginx_config"
+              else
+                "${elevate[@]}" rm -f "$nginx_config"
+              fi
+              "${elevate[@]}" "$nginx_bin" -t || true
+              "${elevate[@]}" systemctl reload nginx || true
+            }
+
+            if ! "${elevate[@]}" install -m 644 /opt/myapp/nginx-openshude.conf.next "$nginx_config"; then
+              restore_nginx
+              return 1
+            fi
+            if ! "${elevate[@]}" "$nginx_bin" -t; then
+              restore_nginx
+              return 1
+            fi
+            if "${elevate[@]}" systemctl is-active --quiet nginx; then
+              if ! "${elevate[@]}" systemctl reload nginx; then
+                restore_nginx
+                return 1
+              fi
+            elif ! "${elevate[@]}" systemctl enable --now nginx; then
+              restore_nginx
+              return 1
+            fi
+            if ! curl --fail --silent --show-error --max-time 5 \
+              -H 'Host: 39.96.36.207' http://127.0.0.1/api/health >/dev/null; then
+              restore_nginx
+              return 1
+            fi
+
+            rm -f /opt/myapp/nginx-openshude.conf.next
+            "${elevate[@]}" rm -f "$nginx_backup"
+          }
+
           previous_tag=""
           temporary_rollback_image=""
           current_container=$(compose "$IMAGE_TAG" ps -q web)
@@ -199,6 +282,8 @@ jobs:
           elif ! compose "$IMAGE_TAG" up -d --remove-orphans; then
             failed=true
           elif ! wait_for_healthy "$IMAGE_TAG"; then
+            failed=true
+          elif ! configure_nginx; then
             failed=true
           fi
 
