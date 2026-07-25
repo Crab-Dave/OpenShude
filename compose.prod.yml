@@ -37,4 +37,5 @@ services:
 
 volumes:
   openshude-data:
+    external: true
     name: openshude-data
