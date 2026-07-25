@@ -1,0 +1,241 @@
+name: CI and Deploy
+
+on:
+  push:
+    branches:
+      - master
+
+  workflow_dispatch:
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  ACR_REGISTRY: crpi-yhz9m3hwh5p9orhs.cn-shanghai.personal.cr.aliyuncs.com
+  IMAGE_NAME: crpi-yhz9m3hwh5p9orhs.cn-shanghai.personal.cr.aliyuncs.com/openshude/openshude-1
+
+jobs:
+  build-and-push:
+    name: Build and Push Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Run tests
+        run: |
+          npm ci
+          npm test
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Alibaba Cloud ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ACR_REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to Production
+    needs:
+      - build-and-push
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    environment:
+      name: production
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          install -m 700 -d ~/.ssh
+
+          printf '%s\n' "${{ secrets.SERVER_SSH_KEY }}" \
+            > ~/.ssh/deploy_key
+
+          chmod 600 ~/.ssh/deploy_key
+
+          printf '%s\n' "${{ secrets.SERVER_KNOWN_HOSTS }}" \
+            > ~/.ssh/known_hosts
+
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Upload production Compose file
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          scp \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -i ~/.ssh/deploy_key \
+            -P "$SERVER_PORT" \
+            compose.prod.yml \
+            "$SERVER_USER@$SERVER_HOST:/opt/myapp/compose.prod.yml.next"
+
+      - name: Deploy new image
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          IMAGE_TAG: ${{ github.sha }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+        run: |
+          ssh \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -i ~/.ssh/deploy_key \
+            -p "$SERVER_PORT" \
+            "$SERVER_USER@$SERVER_HOST" \
+            "IMAGE_TAG='$IMAGE_TAG' IMAGE_NAME='$IMAGE_NAME' bash -se" <<'REMOTE'
+          set -Eeuo pipefail
+          cd /opt/myapp
+
+          IMAGE_TAG="$IMAGE_TAG" docker compose -f compose.prod.yml.next config --quiet
+          mv compose.prod.yml.next compose.prod.yml
+
+          compose() {
+            local tag="$1"
+            shift
+            IMAGE_TAG="$tag" docker compose -f compose.prod.yml "$@"
+          }
+
+          wait_for_healthy() {
+            local tag="$1"
+            local health_url="http://127.0.0.1:4173/"
+            if [[ "$tag" == "$IMAGE_TAG" ]]; then
+              health_url="http://127.0.0.1:4173/api/health"
+            fi
+
+            for ((attempt = 1; attempt <= 30; attempt++)); do
+              container=$(compose "$tag" ps -q web)
+              if [[ -n "$container" ]]; then
+                status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container")
+                if [[ "$status" == "healthy" ]] && \
+                   curl --fail --silent --show-error --max-time 5 "$health_url" >/dev/null; then
+                  return 0
+                fi
+              fi
+              sleep 2
+            done
+            return 1
+          }
+
+          previous_tag=""
+          temporary_rollback_image=""
+          current_container=$(compose "$IMAGE_TAG" ps -q web)
+          current_image_id=""
+          if [[ -n "$current_container" ]]; then
+            current_image_id=$(docker inspect --format '{{.Image}}' "$current_container")
+          fi
+
+          if [[ -f .deployed-image-tag ]]; then
+            previous_tag=$(<.deployed-image-tag)
+          fi
+          if [[ ! "$previous_tag" =~ ^[0-9a-f]{40}$ || "$previous_tag" == "$IMAGE_TAG" ]]; then
+            previous_tag=""
+            if [[ -n "$current_container" ]]; then
+              previous_tag="rollback-${IMAGE_TAG:0:12}"
+              temporary_rollback_image="$IMAGE_NAME:$previous_tag"
+              docker image tag "$current_image_id" "$temporary_rollback_image"
+            fi
+          fi
+
+          docker volume create openshude-data >/dev/null
+          if [[ -n "$current_container" ]] && \
+             ! docker run --rm --user root -v openshude-data:/target "$current_image_id" \
+               sh -c 'test -n "$(ls -A /target)"'; then
+            echo "Migrating existing application data to the managed volume"
+            docker stop "$current_container" >/dev/null
+            if ! docker run --rm --user root \
+              --volumes-from "$current_container:ro" \
+              -v openshude-data:/target \
+              "$current_image_id" \
+              sh -c 'cp -a /app/data/. /target/ && chown -R node:node /target'; then
+              docker run --rm --user root -v openshude-data:/target "$current_image_id" \
+                sh -c 'find /target -mindepth 1 -delete' || true
+              docker start "$current_container" >/dev/null || true
+              echo "Data migration failed; the previous container was restarted"
+              exit 1
+            fi
+          fi
+
+          failed=false
+          if ! compose "$IMAGE_TAG" pull; then
+            failed=true
+          elif ! compose "$IMAGE_TAG" up -d --remove-orphans; then
+            failed=true
+          elif ! wait_for_healthy "$IMAGE_TAG"; then
+            failed=true
+          fi
+
+          if [[ "$failed" == true ]]; then
+            compose "$IMAGE_TAG" ps || true
+            compose "$IMAGE_TAG" logs --tail=200 || true
+
+            if [[ -n "$previous_tag" && "$previous_tag" != "$IMAGE_TAG" ]]; then
+              echo "Deployment failed; rolling back to $previous_tag"
+              rollback_ready=true
+              if [[ "$previous_tag" =~ ^[0-9a-f]{40}$ ]] && ! compose "$previous_tag" pull; then
+                rollback_ready=false
+              fi
+              if [[ "$rollback_ready" == true ]] && \
+                 compose "$previous_tag" up -d --remove-orphans && \
+                 wait_for_healthy "$previous_tag"; then
+                echo "Rollback to $previous_tag completed"
+              else
+                echo "Rollback to $previous_tag failed"
+                compose "$previous_tag" ps || true
+                compose "$previous_tag" logs --tail=200 || true
+              fi
+            else
+              echo "Deployment failed and no previous image tag is available; stopping the failed stack"
+              compose "$IMAGE_TAG" down || true
+            fi
+            exit 1
+          fi
+
+          printf '%s\n' "$IMAGE_TAG" > .deployed-image-tag.tmp
+          mv .deployed-image-tag.tmp .deployed-image-tag
+          if [[ -n "$temporary_rollback_image" ]]; then
+            docker image rm "$temporary_rollback_image" || true
+          fi
+          docker image prune -f
+          REMOTE
+
+      - name: Remove temporary SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

@@ -1,0 +1,40 @@
+services:
+  web:
+    image: crpi-yhz9m3hwh5p9orhs.cn-shanghai.personal.cr.aliyuncs.com/openshude/openshude-1:${IMAGE_TAG:-latest}
+
+    container_name: openshude-web
+
+    restart: unless-stopped
+
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 4173
+      DB_PATH: /app/data/app.db
+
+    ports:
+      - "127.0.0.1:4173:4173"
+
+    volumes:
+      - openshude-data:/app/data
+
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:4173/').then(response=>{if(!response.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  openshude-data:
+    name: openshude-data

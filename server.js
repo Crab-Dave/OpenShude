@@ -329,6 +329,11 @@ async function handleApi(req, res, url) {
   const pathname = url.pathname;
   const write = !['GET', 'HEAD', 'OPTIONS'].includes(method);
 
+  if (method === 'GET' && pathname === '/api/health') {
+    db.prepare('SELECT 1').get();
+    return json(res, 200, { status: 'ok' });
+  }
+
   if (method === 'POST' && pathname === '/api/auth/login') {
     const body = await readBody(req);
     const identifier = cleanText(body.loginIdentifier, 100, true);

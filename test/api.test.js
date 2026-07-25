@@ -46,6 +46,12 @@ async function request(session, pathname, options = {}) {
   return { response, data };
 }
 
+test('health endpoint reports application and database readiness', async () => {
+  const response = await fetch(`${baseUrl}/api/health`);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { status: 'ok' });
+});
+
 test('same-gender students form a full dormitory and can leave while selection is open', async () => {
   const initiator = await login('2026002', 'Student123!');
   const members = await Promise.all(['2026004', '2026005', '2026007'].map((id) => login(id, 'Student123!')));
