@@ -144,7 +144,7 @@ jobs:
           compose() {
             local tag="$1"
             shift
-            IMAGE_TAG="$tag" docker compose -f compose.prod.yml "$@"
+            IMAGE_TAG="$tag" docker compose -f compose.prod.yml "$@" </dev/null
           }
 
           restore_previous_compose() {
