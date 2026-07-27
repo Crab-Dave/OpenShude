@@ -11,12 +11,13 @@ RUN npm ci --omit=dev --no-audit --no-fund
 
 COPY db.js server.js ./
 COPY public ./public
+COPY ops ./ops
 
-RUN mkdir -p /app/data && chown -R node:node /app
+RUN mkdir -p /app/data /app/backups && chown -R node:node /app
 
 USER node
 
 EXPOSE 4173
-VOLUME ["/app/data"]
+VOLUME ["/app/data", "/app/backups"]
 
 CMD ["node", "server.js"]

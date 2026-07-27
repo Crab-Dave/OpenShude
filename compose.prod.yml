@@ -1,6 +1,6 @@
 services:
   web:
-    image: crpi-yhz9m3hwh5p9orhs.cn-shanghai.personal.cr.aliyuncs.com/openshude/openshude-1:${IMAGE_TAG:-latest}
+    image: "crpi-yhz9m3hwh5p9orhs.cn-shanghai.personal.cr.aliyuncs.com/openshude/openshude-1:${IMAGE_TAG:?IMAGE_TAG is required}"
 
     container_name: openshude-web
 
@@ -17,6 +17,7 @@ services:
 
     volumes:
       - openshude-data:/app/data
+      - openshude-backups:/app/backups
 
     healthcheck:
       test:
@@ -39,3 +40,6 @@ volumes:
   openshude-data:
     external: true
     name: openshude-data
+  openshude-backups:
+    external: true
+    name: openshude-backups

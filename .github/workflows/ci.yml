@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - master
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify application and deployment configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check JavaScript and shell syntax
+        run: |
+          node --check db.js
+          node --check server.js
+          node --check public/app.js
+          node --check ops/database-maintenance.js
+          bash -n ops/restore-database.sh
+
+      - name: Run tests
+        run: npm test
+
+      - name: Validate production Compose configuration
+        env:
+          IMAGE_TAG: 0000000000000000000000000000000000000000
+        run: docker compose -f compose.prod.yml config --quiet
+
+      - name: Build production image
+        run: docker build --tag openshude:ci .

@@ -1,10 +1,11 @@
-name: CI and Deploy
+name: Production Deploy
 
 on:
-  push:
-    branches:
-      - master
-
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
   workflow_dispatch:
 
 concurrency:
@@ -17,27 +18,25 @@ permissions:
 env:
   ACR_REGISTRY: crpi-yhz9m3hwh5p9orhs.cn-shanghai.personal.cr.aliyuncs.com
   IMAGE_NAME: crpi-yhz9m3hwh5p9orhs.cn-shanghai.personal.cr.aliyuncs.com/openshude/openshude-1
+  DEPLOY_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
 jobs:
   build-and-push:
     name: Build and Push Image
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'master' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
         with:
-          node-version: 24
-          cache: npm
-
-      - name: Run tests
-        run: |
-          npm ci
-          npm test
+          ref: ${{ env.DEPLOY_SHA }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -54,9 +53,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}:${{ github.sha }}
-            ${{ env.IMAGE_NAME }}:latest
+          tags: ${{ env.IMAGE_NAME }}:${{ env.DEPLOY_SHA }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -74,6 +71,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
 
       - name: Configure SSH
         shell: bash
@@ -103,13 +102,21 @@ jobs:
             compose.prod.yml \
             "$SERVER_USER@$SERVER_HOST:/opt/myapp/compose.prod.yml.next"
 
+          scp \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -i ~/.ssh/deploy_key \
+            -P "$SERVER_PORT" \
+            ops/restore-database.sh \
+            "$SERVER_USER@$SERVER_HOST:/opt/myapp/restore-database.sh.next"
+
       - name: Deploy new image
         shell: bash
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
-          IMAGE_TAG: ${{ github.sha }}
+          IMAGE_TAG: ${{ env.DEPLOY_SHA }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
         run: |
           ssh \
@@ -122,13 +129,31 @@ jobs:
           set -Eeuo pipefail
           cd /opt/myapp
 
+          bash -n restore-database.sh.next
           IMAGE_TAG="$IMAGE_TAG" docker compose -f compose.prod.yml.next config --quiet
+          docker volume create openshude-data >/dev/null
+          docker volume create openshude-backups >/dev/null
+
+          had_previous_compose=false
+          if [[ -f compose.prod.yml ]]; then
+            cp compose.prod.yml compose.prod.yml.rollback
+            had_previous_compose=true
+          fi
           mv compose.prod.yml.next compose.prod.yml
 
           compose() {
             local tag="$1"
             shift
             IMAGE_TAG="$tag" docker compose -f compose.prod.yml "$@"
+          }
+
+          restore_previous_compose() {
+            cp compose.prod.yml "compose.prod.yml.failed-${IMAGE_TAG}"
+            if [[ "$had_previous_compose" == true ]]; then
+              cp compose.prod.yml.rollback compose.prod.yml
+            else
+              rm -f compose.prod.yml
+            fi
           }
 
           wait_for_healthy() {
@@ -170,11 +195,12 @@ jobs:
           }
 
           previous_tag=""
-          temporary_rollback_image=""
-          current_container=$(compose "$IMAGE_TAG" ps -q web)
+          current_container=$(docker ps --all --quiet --filter "name=^/openshude-web$")
           current_image_id=""
+          current_was_running=false
           if [[ -n "$current_container" ]]; then
             current_image_id=$(docker inspect --format '{{.Image}}' "$current_container")
+            current_was_running=$(docker inspect --format '{{.State.Running}}' "$current_container")
           fi
 
           if [[ -f .deployed-image-tag ]]; then
@@ -184,15 +210,30 @@ jobs:
             previous_tag=""
             if [[ -n "$current_container" ]]; then
               previous_tag="rollback-${IMAGE_TAG:0:12}"
-              temporary_rollback_image="$IMAGE_NAME:$previous_tag"
-              docker image tag "$current_image_id" "$temporary_rollback_image"
+              docker image tag "$current_image_id" "$IMAGE_NAME:$previous_tag"
             fi
           fi
 
-          docker volume create openshude-data >/dev/null
-          if [[ -n "$current_container" ]] && \
-             ! docker run --rm --user root -v openshude-data:/target "$current_image_id" \
-               sh -c 'test -n "$(ls -A /target)"'; then
+          failed=false
+          backup_created=false
+          backup_path=""
+          if ! compose "$IMAGE_TAG" pull; then
+            failed=true
+          elif ! compose "$IMAGE_TAG" run --rm --no-deps --user root web \
+            chown -R node:node /app/data /app/backups; then
+            failed=true
+          fi
+
+          volume_has_data=""
+          if [[ "$failed" == false && -n "$current_container" ]]; then
+            if ! volume_has_data=$(docker run --rm --user root \
+              -v openshude-data:/target "$current_image_id" \
+              sh -c 'if [ -n "$(ls -A /target)" ]; then echo true; else echo false; fi'); then
+              failed=true
+            fi
+          fi
+
+          if [[ "$failed" == false && -n "$current_container" && "$volume_has_data" == false ]]; then
             echo "Migrating existing application data to the managed volume"
             docker stop "$current_container" >/dev/null
             if ! docker run --rm --user root \
@@ -202,20 +243,35 @@ jobs:
               sh -c 'cp -a /app/data/. /target/ && chown -R node:node /target'; then
               docker run --rm --user root -v openshude-data:/target "$current_image_id" \
                 sh -c 'find /target -mindepth 1 -delete' || true
-              docker start "$current_container" >/dev/null || true
-              echo "Data migration failed; the previous container was restarted"
-              exit 1
+              if [[ "$current_was_running" == true ]]; then
+                docker start "$current_container" >/dev/null || true
+              fi
+              failed=true
             fi
           fi
 
-          failed=false
-          if ! compose "$IMAGE_TAG" pull; then
+          if [[ "$failed" == false && -n "$current_container" ]]; then
+            timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+            backup_path="/app/backups/predeploy-${timestamp}-${previous_tag:-untracked}.db"
+            if compose "$IMAGE_TAG" run --rm --no-deps web \
+                 node ops/database-maintenance.js backup /app/data/app.db "$backup_path" && \
+               compose "$IMAGE_TAG" run --rm --no-deps web \
+                 node ops/database-maintenance.js verify "$backup_path" && \
+               compose "$IMAGE_TAG" run --rm --no-deps web \
+                 node ops/database-maintenance.js prune /app/backups 10; then
+              backup_created=true
+            else
+              failed=true
+            fi
+          fi
+
+          if [[ "$failed" == false ]] && ! compose "$IMAGE_TAG" up -d --remove-orphans; then
             failed=true
-          elif ! compose "$IMAGE_TAG" up -d --remove-orphans; then
+          fi
+          if [[ "$failed" == false ]] && ! wait_for_healthy "$IMAGE_TAG"; then
             failed=true
-          elif ! wait_for_healthy "$IMAGE_TAG"; then
-            failed=true
-          elif ! verify_reverse_proxy "$IMAGE_TAG"; then
+          fi
+          if [[ "$failed" == false ]] && ! verify_reverse_proxy "$IMAGE_TAG"; then
             failed=true
           fi
 
@@ -223,7 +279,21 @@ jobs:
             compose "$IMAGE_TAG" ps || true
             compose "$IMAGE_TAG" logs --tail=200 || true
 
-            if [[ -n "$previous_tag" && "$previous_tag" != "$IMAGE_TAG" ]]; then
+            database_restored=true
+            compose "$IMAGE_TAG" stop web || true
+            if [[ "$backup_created" == true ]] && ! compose "$IMAGE_TAG" run --rm --no-deps web \
+              node ops/database-maintenance.js restore "$backup_path" /app/data/app.db; then
+              database_restored=false
+            fi
+            compose "$IMAGE_TAG" down || true
+            restore_previous_compose
+
+            if [[ "$database_restored" == false ]]; then
+              echo "Deployment failed and the pre-deploy database could not be restored"
+              exit 1
+            fi
+
+            if [[ "$had_previous_compose" == true && -n "$previous_tag" && "$previous_tag" != "$IMAGE_TAG" ]]; then
               echo "Deployment failed; rolling back to $previous_tag"
               rollback_ready=true
               if [[ "$previous_tag" =~ ^[0-9a-f]{40}$ ]] && ! compose "$previous_tag" pull; then
@@ -240,17 +310,29 @@ jobs:
                 compose "$previous_tag" logs --tail=200 || true
               fi
             else
-              echo "Deployment failed and no previous image tag is available; stopping the failed stack"
-              compose "$IMAGE_TAG" down || true
+              echo "Deployment failed and no complete previous release is available"
             fi
             exit 1
           fi
 
+          mv restore-database.sh.next restore-database.sh
+          chmod 700 restore-database.sh
+          if [[ -f compose.prod.yml.rollback ]]; then
+            mv compose.prod.yml.rollback compose.prod.yml.previous
+          fi
           printf '%s\n' "$IMAGE_TAG" > .deployed-image-tag.tmp
           mv .deployed-image-tag.tmp .deployed-image-tag
-          if [[ -n "$temporary_rollback_image" ]]; then
-            docker image rm "$temporary_rollback_image" || true
-          fi
+
+          while IFS= read -r reference; do
+            tag=${reference##*:}
+            if [[ "$tag" != "$IMAGE_TAG" && "$tag" != "$previous_tag" ]]; then
+              docker image rm "$reference" || true
+            fi
+          done < <(
+            docker image ls \
+              --filter "reference=$IMAGE_NAME:*" \
+              --format '{{.Repository}}:{{.Tag}}'
+          )
           docker image prune -f
           REMOTE
 
