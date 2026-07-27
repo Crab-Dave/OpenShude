@@ -11,6 +11,7 @@ services:
       HOST: 0.0.0.0
       PORT: 4173
       DB_PATH: /app/data/app.db
+      APP_VERSION: "${IMAGE_TAG:?IMAGE_TAG is required}"
 
     ports:
       - "127.0.0.1:4173:4173"

@@ -9,6 +9,7 @@ const db = openDatabase();
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PORT = Number(process.env.PORT || 4173);
 const HOST = process.env.HOST || '127.0.0.1';
+const APP_VERSION = process.env.APP_VERSION || '';
 const SESSION_DAYS = 7;
 
 class HttpError extends Error {
@@ -332,7 +333,7 @@ async function handleApi(req, res, url) {
 
   if (method === 'GET' && pathname === '/api/health') {
     db.prepare('SELECT 1').get();
-    return json(res, 200, { status: 'ok' });
+    return json(res, 200, { status: 'ok', ...(APP_VERSION ? { version: APP_VERSION } : {}) });
   }
 
   if (method === 'POST' && pathname === '/api/auth/login') {

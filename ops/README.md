@@ -8,7 +8,7 @@ List the available backups on the server:
 
 ```bash
 cd /opt/myapp
-IMAGE_TAG=$(<.deployed-image-tag) docker compose -f compose.prod.yml run --rm --no-deps web \
+IMAGE_TAG=$(<.deployed-image-tag) docker compose -f compose.prod.yml run -T --rm --no-deps web \
   sh -c 'ls -1 /app/backups/*.db'
 ```
 
@@ -18,7 +18,7 @@ Create a manual backup before a sensitive operation such as data import:
 cd /opt/myapp
 image_tag=$(<.deployed-image-tag)
 backup="/app/backups/manual-$(date -u +%Y%m%dT%H%M%SZ)-${image_tag}.db"
-IMAGE_TAG="$image_tag" docker compose -f compose.prod.yml run --rm --no-deps web \
+IMAGE_TAG="$image_tag" docker compose -f compose.prod.yml run -T --rm --no-deps web \
   node ops/database-maintenance.js backup /app/data/app.db "$backup"
 ```
 

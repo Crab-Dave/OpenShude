@@ -167,9 +167,13 @@ jobs:
               container=$(compose "$tag" ps -q web)
               if [[ -n "$container" ]]; then
                 status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container")
-                if [[ "$status" == "healthy" ]] && \
-                   curl --fail --silent --show-error --max-time 5 "$health_url" >/dev/null; then
-                  return 0
+                image_ref=$(docker inspect --format '{{.Config.Image}}' "$container")
+                if [[ "$status" == "healthy" && "$image_ref" == "$IMAGE_NAME:$tag" ]]; then
+                  if response=$(curl --fail --silent --show-error --max-time 5 "$health_url"); then
+                    if [[ "$tag" != "$IMAGE_TAG" || "$response" == *"\"version\":\"$tag\""* ]]; then
+                      return 0
+                    fi
+                  fi
                 fi
               fi
               sleep 2
@@ -185,9 +189,11 @@ jobs:
             fi
 
             for ((attempt = 1; attempt <= 15; attempt++)); do
-              if curl --fail --silent --show-error --max-time 5 \
-                -H 'Host: 39.96.36.207' "http://127.0.0.1${health_path}" >/dev/null; then
-                return 0
+              if response=$(curl --fail --silent --show-error --max-time 5 \
+                -H 'Host: 39.96.36.207' "http://127.0.0.1${health_path}"); then
+                if [[ "$tag" != "$IMAGE_TAG" || "$response" == *"\"version\":\"$tag\""* ]]; then
+                  return 0
+                fi
               fi
               sleep 2
             done
@@ -219,7 +225,7 @@ jobs:
           backup_path=""
           if ! compose "$IMAGE_TAG" pull; then
             failed=true
-          elif ! compose "$IMAGE_TAG" run --rm --no-deps --user root web \
+          elif ! compose "$IMAGE_TAG" run -T --rm --no-deps --user root web \
             chown -R node:node /app/data /app/backups; then
             failed=true
           fi
@@ -253,11 +259,11 @@ jobs:
           if [[ "$failed" == false && -n "$current_container" ]]; then
             timestamp=$(date -u +%Y%m%dT%H%M%SZ)
             backup_path="/app/backups/predeploy-${timestamp}-${previous_tag:-untracked}.db"
-            if compose "$IMAGE_TAG" run --rm --no-deps web \
+            if compose "$IMAGE_TAG" run -T --rm --no-deps web \
                  node ops/database-maintenance.js backup /app/data/app.db "$backup_path" && \
-               compose "$IMAGE_TAG" run --rm --no-deps web \
+               compose "$IMAGE_TAG" run -T --rm --no-deps web \
                  node ops/database-maintenance.js verify "$backup_path" && \
-               compose "$IMAGE_TAG" run --rm --no-deps web \
+               compose "$IMAGE_TAG" run -T --rm --no-deps web \
                  node ops/database-maintenance.js prune /app/backups 10; then
               backup_created=true
             else
@@ -281,7 +287,7 @@ jobs:
 
             database_restored=true
             compose "$IMAGE_TAG" stop web || true
-            if [[ "$backup_created" == true ]] && ! compose "$IMAGE_TAG" run --rm --no-deps web \
+            if [[ "$backup_created" == true ]] && ! compose "$IMAGE_TAG" run -T --rm --no-deps web \
               node ops/database-maintenance.js restore "$backup_path" /app/data/app.db; then
               database_restored=false
             fi
