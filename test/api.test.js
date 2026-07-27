@@ -191,6 +191,23 @@ test('administrator imports accounts and exclusively updates identity fields', a
   assert.equal(assigned.data.dormitory.building, '北苑 3 号楼');
   assert.equal(assigned.data.dormitory.room_number, '301');
 
+  const exportResponse = await fetch(`${baseUrl}/api/admin/dormitories/export`, {
+    headers: { Cookie: admin.cookie },
+  });
+  assert.equal(exportResponse.status, 200);
+  assert.equal(exportResponse.headers.get('content-type'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  assert.match(exportResponse.headers.get('content-disposition'), /^attachment; filename="dormitories-\d{4}-\d{2}-\d{2}\.xlsx"$/);
+  const workbook = Buffer.from(await exportResponse.arrayBuffer());
+  assert.equal(workbook.readUInt32LE(0), 0x04034b50);
+  assert.ok(workbook.includes(Buffer.from('[Content_Types].xml')));
+  assert.ok(workbook.includes(Buffer.from('宿舍列表')));
+  assert.ok(workbook.includes(Buffer.from('北苑 3 号楼')));
+
+  const studentExport = await fetch(`${baseUrl}/api/admin/dormitories/export`, {
+    headers: { Cookie: student.cookie },
+  });
+  assert.equal(studentExport.status, 403);
+
   const stageClosed = await request(admin, '/api/admin/settings/dormitory-selection', {
     method: 'PATCH', body: JSON.stringify({ open: false, reason: '测试关闭阶段' }),
   });

@@ -267,8 +267,9 @@ async function loadStudentView(view) {
 
 function roommateCard(card) {
   const own = card.is_own || card.user_id === state.user.id;
+  const genderClass = card.gender === 'FEMALE' ? 'gender-female' : card.gender === 'MALE' ? 'gender-male' : '';
   return `
-    <article class="roommate-card" data-card-id="${card.id}" tabindex="0">
+    <article class="roommate-card ${genderClass}" data-card-id="${card.id}" tabindex="0">
       <div class="card-head">
         ${avatar(card.avatar_url, card.name)}
         <div class="card-title"><h3>${escapeHtml(card.name)}</h3><p>${escapeHtml(card.grade)} · ${escapeHtml(card.department || card.campus)}</p></div>
@@ -773,9 +774,36 @@ function showCardAction(cardId, action) {
 
 async function renderAdminGroups() {
   const { dormitories, open } = await api('/api/admin/dormitories');
-  setPage(`<div class="stage-banner ${open ? 'open' : 'closed'}">${icon(open ? 'door-open' : 'lock-keyhole')}<div><strong>自由选宿舍阶段${open ? '进行中' : '已关闭'}</strong><span>阶段开关可在数据概览中调整</span></div></div>${dormitories.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>宿舍</th><th>发起人</th><th>成员</th><th>状态</th><th>创建时间</th><th></th></tr></thead><tbody>${dormitories.map((dormitory) => `<tr><td><strong>${escapeHtml(dormitory.name)}</strong><div class="field-hint">${escapeHtml(dormitory.dormitory_code)} · ${dormitory.building && dormitory.room_number ? `${escapeHtml(dormitory.building)} ${escapeHtml(dormitory.room_number)}` : '待分配房间'}</div></td><td>${escapeHtml(dormitory.initiator_name)}</td><td>${dormitory.members.map((member) => escapeHtml(member.name)).join('、')}<div class="field-hint">${dormitory.member_count}/4 人</div></td><td>${statusBadge(labels.dormitoryStatus[dormitory.status], dormitory.status.toLowerCase())}</td><td>${formatDate(dormitory.created_at)}</td><td><div class="cell-actions"><button class="btn btn-secondary btn-sm" data-assign-dorm="${dormitory.id}">${icon('map-pin')}分配房间</button>${dormitory.status !== 'CLOSED' ? `<button class="btn btn-danger btn-sm" data-close-dorm="${dormitory.id}">${icon('lock-keyhole')}关闭宿舍</button>` : ''}</div></td></tr>`).join('')}</tbody></table></div>` : emptyState('bed-double', '暂无宿舍', '学生创建宿舍后将在这里显示')}`);
+  setPage(`<div class="toolbar"><div class="toolbar-spacer"></div><button class="btn btn-primary" id="export-dormitories">${icon('file-spreadsheet')}导出 Excel</button></div><div class="stage-banner ${open ? 'open' : 'closed'}">${icon(open ? 'door-open' : 'lock-keyhole')}<div><strong>自由选宿舍阶段${open ? '进行中' : '已关闭'}</strong><span>阶段开关可在数据概览中调整</span></div></div>${dormitories.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>宿舍</th><th>发起人</th><th>成员</th><th>状态</th><th>创建时间</th><th></th></tr></thead><tbody>${dormitories.map((dormitory) => `<tr><td><strong>${escapeHtml(dormitory.name)}</strong><div class="field-hint">${escapeHtml(dormitory.dormitory_code)} · ${dormitory.building && dormitory.room_number ? `${escapeHtml(dormitory.building)} ${escapeHtml(dormitory.room_number)}` : '待分配房间'}</div></td><td>${escapeHtml(dormitory.initiator_name)}</td><td>${dormitory.members.map((member) => escapeHtml(member.name)).join('、')}<div class="field-hint">${dormitory.member_count}/4 人</div></td><td>${statusBadge(labels.dormitoryStatus[dormitory.status], dormitory.status.toLowerCase())}</td><td>${formatDate(dormitory.created_at)}</td><td><div class="cell-actions"><button class="btn btn-secondary btn-sm" data-assign-dorm="${dormitory.id}">${icon('map-pin')}分配房间</button>${dormitory.status !== 'CLOSED' ? `<button class="btn btn-danger btn-sm" data-close-dorm="${dormitory.id}">${icon('lock-keyhole')}关闭宿舍</button>` : ''}</div></td></tr>`).join('')}</tbody></table></div>` : emptyState('bed-double', '暂无宿舍', '学生创建宿舍后将在这里显示')}`);
+  document.querySelector('#export-dormitories').addEventListener('click', downloadDormitoryExport);
   document.querySelectorAll('[data-assign-dorm]').forEach((button) => button.addEventListener('click', () => showAssignDormitory(dormitories.find((item) => item.id === Number(button.dataset.assignDorm)))));
   document.querySelectorAll('[data-close-dorm]').forEach((button) => button.addEventListener('click', () => showCloseDormitory(Number(button.dataset.closeDorm))));
+}
+
+async function downloadDormitoryExport(event) {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/admin/dormitories/export', { credentials: 'same-origin' });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error?.message || '导出失败，请稍后重试');
+    }
+    const filename = response.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1] || 'dormitories.xlsx';
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    toast('宿舍列表已导出');
+  } catch (error) {
+    toast(error.message, 'error');
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function showAssignDormitory(dormitory) {

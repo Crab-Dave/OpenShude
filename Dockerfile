@@ -9,7 +9,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
-COPY db.js server.js ./
+COPY db.js server.js xlsx.js ./
 COPY public ./public
 COPY ops ./ops
 

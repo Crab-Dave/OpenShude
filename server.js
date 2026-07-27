@@ -3,6 +3,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { openDatabase, hashPassword } = require('./db');
+const { createDormitoryWorkbook } = require('./xlsx');
 
 const db = openDatabase();
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -969,6 +970,22 @@ async function handleAdminApi(req, res, url, admin) {
     const dormitories = db.prepare('SELECT id FROM dormitories ORDER BY id DESC').all()
       .map((item) => dormitoryDetails(item.id));
     return json(res, 200, { open: dormitorySelectionOpen(), dormitories });
+  }
+
+  if (method === 'GET' && pathname === '/api/admin/dormitories/export') {
+    const dormitories = db.prepare('SELECT id FROM dormitories ORDER BY id DESC').all()
+      .map((item) => dormitoryDetails(item.id));
+    const workbook = createDormitoryWorkbook(dormitories);
+    const filename = `dormitories-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    audit(admin, req, 'EXPORT_DORMITORIES', 'DORMITORY', 'ALL', '', { count: dormitories.length });
+    res.writeHead(200, {
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': workbook.length,
+      'Cache-Control': 'no-store',
+    });
+    res.end(workbook);
+    return;
   }
 
   match = pathname.match(/^\/api\/admin\/dormitories\/(\d+)\/location$/);

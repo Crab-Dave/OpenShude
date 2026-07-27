@@ -30,12 +30,16 @@ async function login(page, identifier, password) {
   assert.equal(await desktop.locator('[data-gender]').count(), 2);
   assert.match(await desktop.locator('[data-gender="FEMALE"]').getAttribute('class'), /active/);
   assert.equal(await desktop.locator('.sidebar-brand strong').textContent(), '合住');
+  assert.equal(await desktop.locator('.roommate-card.gender-female').count(), 6);
+  assert.equal(await desktop.locator('.roommate-card').first().evaluate((element) => getComputedStyle(element).backgroundColor), 'rgb(255, 246, 250)');
   const ownCard = desktop.locator('.roommate-card').filter({ hasText: '我的卡片' });
   assert.equal(await ownCard.count(), 1);
   await desktop.locator('[data-gender="MALE"]').click();
   await desktop.waitForFunction(() => document.querySelector('[data-gender="MALE"]')?.classList.contains('active'));
   await desktop.locator('.roommate-card h3', { hasText: '陈遇' }).waitFor();
   assert.equal(await desktop.locator('.roommate-card').count(), 6);
+  assert.equal(await desktop.locator('.roommate-card.gender-male').count(), 6);
+  assert.equal(await desktop.locator('.roommate-card').first().evaluate((element) => getComputedStyle(element).backgroundColor), 'rgb(245, 249, 255)');
   assert.equal(await desktop.locator('.roommate-card').filter({ hasText: '我的卡片' }).count(), 0);
   await desktop.locator('[data-gender="FEMALE"]').click();
   await desktop.waitForFunction(() => document.querySelector('[data-gender="FEMALE"]')?.classList.contains('active'));
@@ -92,6 +96,12 @@ async function login(page, identifier, password) {
   assert.match(await admin.locator('.panel').textContent(), /自由选宿舍阶段/);
   assert.equal(await admin.locator('#toggle-dorm-stage').count(), 1);
   await admin.screenshot({ path: path.join(outputDir, 'admin-desktop.png'), fullPage: true });
+  await admin.locator('[data-view="groups"]').first().click();
+  await admin.waitForSelector('#export-dormitories');
+  const downloadPromise = admin.waitForEvent('download');
+  await admin.locator('#export-dormitories').click();
+  const download = await downloadPromise;
+  assert.match(download.suggestedFilename(), /^dormitories-\d{4}-\d{2}-\d{2}\.xlsx$/);
 
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   mobile.on('console', (message) => { if (message.type() === 'error' && !message.text().startsWith('Failed to load resource')) errors.push(`mobile console: ${message.text()}`); });
@@ -110,7 +120,7 @@ async function login(page, identifier, password) {
 
   await browser.close();
   assert.deepEqual(errors, []);
-  console.log('Browser checks passed: roommate cards, dormitory selection, admin stage controls, and mobile layouts.');
+  console.log('Browser checks passed: purple theme, gender cards, Excel export, dormitory selection, and mobile layouts.');
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;
