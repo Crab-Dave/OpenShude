@@ -46,6 +46,7 @@ function createSchema(db) {
       name TEXT NOT NULL,
       grade TEXT NOT NULL,
       gender TEXT NOT NULL DEFAULT 'UNSPECIFIED' CHECK (gender IN ('MALE', 'FEMALE', 'UNSPECIFIED')),
+      major TEXT NOT NULL DEFAULT '',
       email TEXT,
       status TEXT NOT NULL DEFAULT 'PENDING_ACTIVATION'
         CHECK (status IN ('PENDING_ACTIVATION', 'ACTIVE', 'SUSPENDED', 'BANNED', 'DEACTIVATED')),
@@ -63,10 +64,28 @@ function createSchema(db) {
       school TEXT NOT NULL DEFAULT '',
       campus TEXT NOT NULL DEFAULT '',
       department TEXT NOT NULL DEFAULT '',
+      origin_province TEXT NOT NULL DEFAULT '',
+      origin_city TEXT NOT NULL DEFAULT '',
+      clothing_size TEXT NOT NULL DEFAULT '',
       summer_temp_min INTEGER,
       summer_temp_max INTEGER,
       winter_temp_min INTEGER,
       winter_temp_max INTEGER,
+      wake_up_time TEXT NOT NULL DEFAULT '',
+      sleep_time TEXT NOT NULL DEFAULT '',
+      nap_habit TEXT NOT NULL DEFAULT '',
+      personal_cleanliness TEXT NOT NULL DEFAULT '',
+      roommate_cleanliness TEXT NOT NULL DEFAULT '',
+      common_space_maintenance TEXT NOT NULL DEFAULT '',
+      unacceptable_hygiene TEXT NOT NULL DEFAULT '',
+      one_sentence_intro TEXT NOT NULL DEFAULT '',
+      personality_text TEXT NOT NULL DEFAULT '',
+      roommate_personality_text TEXT NOT NULL DEFAULT '',
+      interests_text TEXT NOT NULL DEFAULT '',
+      gaming_self TEXT NOT NULL DEFAULT '',
+      gaming_roommate TEXT NOT NULL DEFAULT '',
+      keyboard_noise_text TEXT NOT NULL DEFAULT '',
+      media_noise_text TEXT NOT NULL DEFAULT '',
       sleep_preferences TEXT NOT NULL DEFAULT '[]',
       sleep_schedule_note TEXT NOT NULL DEFAULT '',
       cleanliness_level TEXT NOT NULL DEFAULT '',
@@ -223,6 +242,19 @@ function migrateSchema(db) {
   if (!userColumns.includes('gender')) {
     db.exec("ALTER TABLE users ADD COLUMN gender TEXT NOT NULL DEFAULT 'UNSPECIFIED'");
   }
+  if (!userColumns.includes('major')) {
+    db.exec("ALTER TABLE users ADD COLUMN major TEXT NOT NULL DEFAULT ''");
+  }
+  const cardColumns = db.prepare('PRAGMA table_info(roommate_cards)').all().map((column) => column.name);
+  const newCardColumns = [
+    'origin_province', 'origin_city', 'clothing_size', 'wake_up_time', 'sleep_time', 'nap_habit',
+    'personal_cleanliness', 'roommate_cleanliness', 'common_space_maintenance',
+    'unacceptable_hygiene', 'one_sentence_intro', 'personality_text', 'roommate_personality_text', 'interests_text',
+    'gaming_self', 'gaming_roommate', 'keyboard_noise_text', 'media_noise_text',
+  ];
+  for (const column of newCardColumns) {
+    if (!cardColumns.includes(column)) db.exec(`ALTER TABLE roommate_cards ADD COLUMN ${column} TEXT NOT NULL DEFAULT ''`);
+  }
   const dormitoryColumns = db.prepare('PRAGMA table_info(dormitories)').all().map((column) => column.name);
   if (!dormitoryColumns.includes('gender')) {
     db.exec("ALTER TABLE dormitories ADD COLUMN gender TEXT NOT NULL DEFAULT 'UNSPECIFIED'");
@@ -233,6 +265,18 @@ function migrateSchema(db) {
   `).run(new Date().toISOString());
   db.prepare(`UPDATE roommate_cards SET status = 'PUBLISHED' WHERE status = 'ROOMMATE_CONFIRMED'`).run();
   db.prepare(`UPDATE dormitories SET capacity = 4`).run();
+  db.prepare(`UPDATE roommate_cards SET personal_cleanliness = 'BASIC' WHERE personal_cleanliness = 'REGULAR'`).run();
+  db.prepare(`UPDATE roommate_cards SET roommate_cleanliness = 'BASIC' WHERE roommate_cleanliness = 'REGULAR'`).run();
+  db.prepare(`UPDATE roommate_cards SET common_space_maintenance = 'CLEAN_TOGETHER' WHERE common_space_maintenance = 'ASSIGNED'`).run();
+  db.prepare(`
+    UPDATE roommate_cards SET one_sentence_intro = substr(personality_text, 1, 100)
+    WHERE one_sentence_intro = '' AND personality_text != ''
+  `).run();
+  db.prepare(`
+    UPDATE users SET major = COALESCE(
+      NULLIF((SELECT department FROM roommate_cards WHERE user_id = users.id), ''), major
+    ) WHERE major = ''
+  `).run();
   for (const [login, , , gender] of DEMO_STUDENTS) {
     db.prepare(`UPDATE users SET gender = ? WHERE login_identifier = ? AND gender = 'UNSPECIFIED'`).run(gender, login);
   }
@@ -245,40 +289,77 @@ function seedDatabase(db) {
   const now = new Date().toISOString();
   const insertUser = db.prepare(`
     INSERT INTO users
-      (login_identifier, password_hash, password_salt, role, name, grade, gender, status, imported_by, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (login_identifier, password_hash, password_salt, role, name, grade, gender, major, status, imported_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   let admin = db.prepare(`SELECT id FROM users WHERE login_identifier = 'admin'`).get();
   if (!admin) {
     const adminPassword = hashPassword('Admin123!');
     admin = { id: Number(insertUser.run(
-      'admin', adminPassword.hash, adminPassword.salt, 'ADMIN', '系统管理员', '-', 'UNSPECIFIED', 'ACTIVE', null, now, now,
+      'admin', adminPassword.hash, adminPassword.salt, 'ADMIN', '系统管理员', '-', 'UNSPECIFIED', '', 'ACTIVE', null, now, now,
     ).lastInsertRowid) };
   }
 
   const insertCard = db.prepare(`
     INSERT INTO roommate_cards (
       user_id, avatar_url, school, campus, department,
+      origin_province, origin_city, clothing_size,
       summer_temp_min, summer_temp_max, winter_temp_min, winter_temp_max,
+      wake_up_time, sleep_time, nap_habit,
+      personal_cleanliness, roommate_cleanliness, common_space_maintenance, unacceptable_hygiene,
+      one_sentence_intro, personality_text, roommate_personality_text, interests_text,
+      gaming_self, gaming_roommate, keyboard_noise_text, media_noise_text,
       sleep_preferences, sleep_schedule_note, cleanliness_level, cleanliness_note,
       personality_tags, personality_note, roommate_personality_tags, roommate_personality_note,
       hobbies, sports, hobbies_note, gaming_frequency, gaming_time_note,
       keyboard_noise_tolerance, media_noise_tolerance,
       self_acknowledged_shortcoming, additional_note, status, published_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PUBLISHED', ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PUBLISHED', ?, ?, ?)
   `);
 
   for (let i = 0; i < DEMO_STUDENTS.length; i += 1) {
     const [login, name, grade, gender, avatar, summerMin, summerMax, winterMin, winterMax,
       sleep, clean, personality, expected, hobbies, sports, gaming, keyboard, media, weakness, note] = DEMO_STUDENTS[i];
-    if (db.prepare(`SELECT 1 FROM users WHERE login_identifier = ?`).get(login)) continue;
+    const major = ['计算机科学与技术', '视觉传达设计', '工商管理'][i % 3];
+    const existingUser = db.prepare(`SELECT id FROM users WHERE login_identifier = ?`).get(login);
+    if (existingUser) {
+      db.prepare(`
+        UPDATE users SET major = ? WHERE id = ? AND (major = '' OR major IN ('计算机学院', '设计学院', '商学院'))
+      `).run(major, existingUser.id);
+      db.prepare(`
+        UPDATE roommate_cards SET
+          origin_province = ?, origin_city = ?, clothing_size = ?,
+          wake_up_time = ?, sleep_time = ?, nap_habit = ?,
+          personal_cleanliness = ?, roommate_cleanliness = ?, common_space_maintenance = ?,
+          unacceptable_hygiene = ?, one_sentence_intro = ?, personality_text = ?, roommate_personality_text = ?, interests_text = ?,
+          gaming_self = ?, gaming_roommate = ?, keyboard_noise_text = ?, media_noise_text = ?
+        WHERE user_id = ? AND personality_text = ''
+      `).run(
+        ['浙江', '江苏', '上海', '安徽'][i % 4], ['杭州', '南京', '上海', '合肥'][i % 4], ['M', 'L', 'XL'][i % 3],
+        sleep.includes('早起') ? '7:00 左右' : '8:30 左右', sleep.includes('晚睡') ? '0:30 左右' : '23:30 左右', sleep.includes('午休') ? '有午休习惯，通常 30 分钟' : '一般不午休',
+        clean === 'STRICT' ? 'STRICT' : clean === 'NORMAL' ? 'TIDY' : 'BASIC', clean === 'STRICT' ? 'STRICT' : 'BASIC', 'NEGOTIABLE',
+        '长期不倒垃圾、在宿舍吸烟', `我是一个${personality.join('、')}，喜欢${[...hobbies, ...sports].join('、')}的人。`, personality.join('、'), expected.join('、'), [...hobbies, ...sports].join('、'),
+        `${gaming === 'FREQUENT' ? '经常' : gaming === 'OCCASIONAL' ? '偶尔' : '很少'}打游戏，会注意休息时间`, '可以打游戏，休息时请戴耳机',
+        keyboard === 'MIND' ? '休息时介意连续点击声，其他时间可以接受' : '正常使用可以接受',
+        media === 'MIND' ? '介意外放，请使用耳机' : '短时间可以，休息时请使用耳机', existingUser.id,
+      );
+      continue;
+    }
     const password = hashPassword('Student123!');
     const userId = Number(insertUser.run(
-      login, password.hash, password.salt, 'STUDENT', name, grade, gender, 'ACTIVE', admin.id, now, now,
+      login, password.hash, password.salt, 'STUDENT', name, grade, gender, major, 'ACTIVE', admin.id, now, now,
     ).lastInsertRowid);
     insertCard.run(
-      userId, avatar, '明德大学', i % 2 ? '南校区' : '北校区', ['计算机学院', '设计学院', '商学院'][i % 3],
+      userId, avatar, '明德大学', i % 2 ? '南校区' : '北校区', major,
+      ['浙江', '江苏', '上海', '安徽'][i % 4], ['杭州', '南京', '上海', '合肥'][i % 4], ['M', 'L', 'XL'][i % 3],
       summerMin, summerMax, winterMin, winterMax,
+      sleep.includes('早起') ? '7:00 左右' : '8:30 左右', sleep.includes('晚睡') ? '0:30 左右' : '23:30 左右', sleep.includes('午休') ? '有午休习惯，通常 30 分钟' : '一般不午休',
+      clean === 'STRICT' ? 'STRICT' : clean === 'NORMAL' ? 'TIDY' : 'BASIC',
+      clean === 'STRICT' ? 'STRICT' : 'BASIC', 'NEGOTIABLE', '长期不倒垃圾、在宿舍吸烟',
+      `我是一个${personality.join('、')}，喜欢${[...hobbies, ...sports].join('、')}的人。`, personality.join('、'), expected.join('、'), [...hobbies, ...sports].join('、'),
+      `${gaming === 'FREQUENT' ? '经常' : gaming === 'OCCASIONAL' ? '偶尔' : '很少'}打游戏，会注意休息时间`, '可以打游戏，休息时请戴耳机',
+      keyboard === 'MIND' ? '休息时介意连续点击声，其他时间可以接受' : '正常使用可以接受',
+      media === 'MIND' ? '介意外放，请使用耳机' : '短时间可以，休息时请使用耳机',
       JSON.stringify(sleep), '', clean, '', JSON.stringify(personality), '', JSON.stringify(expected), '',
       JSON.stringify(hobbies), JSON.stringify(sports), '', gaming, '', keyboard, media, weakness, note, now, now, now,
     );

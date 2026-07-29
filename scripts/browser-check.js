@@ -17,8 +17,10 @@ async function login(page, identifier, password) {
   await page.waitForSelector('.app-shell');
 }
 
+let browser;
+
 (async () => {
-  const browser = await chromium.launch({ executablePath: edge, headless: true });
+  browser = await chromium.launch({ executablePath: edge, headless: true });
   const errors = [];
 
   const desktop = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
@@ -32,8 +34,16 @@ async function login(page, identifier, password) {
   assert.equal(await desktop.locator('.sidebar-brand strong').textContent(), '合住');
   assert.equal(await desktop.locator('.roommate-card.gender-female').count(), 6);
   assert.equal(await desktop.locator('.roommate-card').first().evaluate((element) => getComputedStyle(element).backgroundColor), 'rgb(255, 246, 250)');
+  assert.equal(await desktop.locator('#search-form input').getAttribute('placeholder'), '搜索姓名');
+  assert.equal(await desktop.locator('.roommate-card .card-city').count(), 6);
+  assert.equal(await desktop.locator('.roommate-card .card-note').count(), 6);
+  assert.equal(await desktop.locator('.roommate-card .card-team').count(), 6);
+  assert.equal(await desktop.locator('.roommate-card .card-metrics').count(), 0);
   const ownCard = desktop.locator('.roommate-card').filter({ hasText: '我的卡片' });
   assert.equal(await ownCard.count(), 1);
+  assert.match(await ownCard.textContent(), /杭州/);
+  assert.match(await ownCard.textContent(), /一缺三/);
+  assert.match(await ownCard.textContent(), /我是一个开朗、直接/);
   await desktop.locator('[data-gender="MALE"]').click();
   await desktop.waitForFunction(() => document.querySelector('[data-gender="MALE"]')?.classList.contains('active'));
   await desktop.locator('.roommate-card h3', { hasText: '陈遇' }).waitFor();
@@ -49,13 +59,27 @@ async function login(page, identifier, password) {
 
   await ownCard.click();
   await desktop.waitForSelector('.modal');
-  assert.match(await desktop.locator('.modal').textContent(), /生活节奏/);
+  assert.match(await desktop.locator('.modal').textContent(), /个人信息/);
+  assert.match(await desktop.locator('.modal').textContent(), /生活节奏与空调/);
+  assert.match(await desktop.locator('.modal').textContent(), /卫生与公共空间/);
+  assert.match(await desktop.locator('.modal').textContent(), /游戏、声音与相处边界/);
+  assert.match(await desktop.locator('.modal').textContent(), /用一句话介绍自己/);
   assert.equal(await desktop.locator('[data-edit-own]').count(), 1);
   await desktop.screenshot({ path: path.join(outputDir, 'card-detail.png'), fullPage: true });
   await desktop.locator('[data-edit-own]').click();
 
   await desktop.waitForSelector('#profile-form');
-  assert.equal(await desktop.locator('#profile-form input:disabled').count(), 3);
+  assert.equal(await desktop.locator('#profile-form input:disabled').count(), 4);
+  assert.equal(await desktop.locator('.size-guide').count(), 1);
+  await desktop.locator('.size-guide summary').click();
+  assert.equal(await desktop.locator('.size-table tbody tr').count(), 7);
+  assert.equal(await desktop.locator('[name="clothing_size"] option').count(), 8);
+  assert.equal(await desktop.locator('[name="personal_cleanliness"] option').count(), 4);
+  assert.equal(await desktop.locator('[name="common_space_maintenance"] option').count(), 5);
+  assert.equal(await desktop.locator('[name="one_sentence_intro"]').count(), 1);
+  assert.equal(await desktop.locator('[data-unpublish]').count(), 0);
+  assert.equal(await desktop.locator('#profile-form button[type="submit"]').textContent(), '更新卡片');
+  assert.equal(await desktop.locator('[data-publish]').count(), 0);
   assert.equal(await desktop.locator('#profile-form').getAttribute('data-overflow'), null);
 
   await desktop.locator('[data-view="dorm"]').first().click();
@@ -119,9 +143,11 @@ async function login(page, identifier, password) {
   await mobile.screenshot({ path: path.join(outputDir, 'dormitory-mobile.png'), fullPage: true });
 
   await browser.close();
+  browser = null;
   assert.deepEqual(errors, []);
-  console.log('Browser checks passed: purple theme, gender cards, Excel export, dormitory selection, and mobile layouts.');
-})().catch((error) => {
+  console.log('Browser checks passed: documented card fields, purple theme, gender cards, Excel export, dormitory selection, and mobile layouts.');
+})().catch(async (error) => {
+  if (browser) await browser.close();
   console.error(error);
   process.exitCode = 1;
 });

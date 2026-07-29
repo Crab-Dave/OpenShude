@@ -78,7 +78,7 @@ function authenticate(req, requireCsrf = false) {
   if (!token) throw new HttpError(401, 'UNAUTHORIZED', '请先登录');
   const session = db.prepare(`
     SELECT s.token_hash, s.csrf_token, s.expires_at,
-           u.id, u.login_identifier, u.role, u.name, u.grade, u.gender, u.status
+           u.id, u.login_identifier, u.role, u.name, u.grade, u.gender, u.major, u.status
     FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ?
   `).get(tokenHash(token));
@@ -122,29 +122,27 @@ function transaction(callback) {
   }
 }
 
-function parseList(value) {
-  try {
-    const parsed = JSON.parse(value || '[]');
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
 function cardFromRow(row) {
-  if (!row) return null;
-  return {
-    ...row,
-    sleep_preferences: parseList(row.sleep_preferences),
-    personality_tags: parseList(row.personality_tags),
-    roommate_personality_tags: parseList(row.roommate_personality_tags),
-    hobbies: parseList(row.hobbies),
-    sports: parseList(row.sports),
-  };
+  return row || null;
 }
 
 const CARD_SELECT = `
-  SELECT c.*, u.name, u.grade, u.gender, u.status AS user_status
+  SELECT c.id, c.user_id, c.avatar_url,
+    c.origin_province, c.origin_city, c.clothing_size,
+    c.summer_temp_min, c.summer_temp_max, c.winter_temp_min, c.winter_temp_max,
+    c.wake_up_time, c.sleep_time, c.nap_habit,
+    c.personal_cleanliness, c.roommate_cleanliness, c.common_space_maintenance, c.unacceptable_hygiene,
+    c.one_sentence_intro, c.personality_text, c.roommate_personality_text, c.interests_text,
+    c.gaming_self, c.gaming_roommate, c.keyboard_noise_text, c.media_noise_text,
+    c.self_acknowledged_shortcoming, c.additional_note,
+    c.status, c.hidden_reason, c.published_at, c.created_at, c.updated_at,
+    u.name, u.grade, u.gender, u.major, u.status AS user_status,
+    MAX(1, (
+      SELECT COUNT(*) FROM dormitory_members peers
+      WHERE peers.dormitory_id = (
+        SELECT own.dormitory_id FROM dormitory_members own WHERE own.user_id = c.user_id LIMIT 1
+      )
+    )) AS team_member_count
   FROM roommate_cards c JOIN users u ON u.id = c.user_id
 `;
 
@@ -264,44 +262,54 @@ function cleanText(value, maxLength, required = false) {
   return text;
 }
 
-function cleanStringList(value, maxItems = 10) {
-  if (!Array.isArray(value)) return [];
-  return [...new Set(value.map((item) => cleanText(item, 30)).filter(Boolean))].slice(0, maxItems);
-}
-
 function cardInput(body) {
-  if (Object.hasOwn(body, 'name') || Object.hasOwn(body, 'grade')) {
-    throw new HttpError(403, 'IDENTITY_FIELDS_READ_ONLY', '姓名和年级只能由管理员修改');
+  if (['name', 'grade', 'gender', 'major'].some((field) => Object.hasOwn(body, field))) {
+    throw new HttpError(403, 'IDENTITY_FIELDS_READ_ONLY', '姓名、年级、性别和专业只能由管理员修改');
   }
-  const number = (value) => (Number.isFinite(Number(value)) ? Number(value) : null);
+  const number = (value) => (value !== '' && value != null && Number.isFinite(Number(value)) ? Number(value) : null);
   const avatar = cleanText(body.avatar_url, 3_000_000);
   if (avatar && !avatar.startsWith('/assets/') && !/^data:image\/(png|jpeg|webp);base64,/i.test(avatar)) {
     throw new HttpError(400, 'INVALID_AVATAR', '头像格式不受支持');
   }
+  const clothingSize = cleanText(body.clothing_size, 8);
+  if (clothingSize && !['S', 'M', 'L', 'XL', 'XXL', 'XXXL', 'XXXXL'].includes(clothingSize)) {
+    throw new HttpError(400, 'INVALID_CLOTHING_SIZE', '院服尺码无效');
+  }
+  const cleanlinessValues = ['BASIC', 'TIDY', 'STRICT'];
+  const personalCleanliness = cleanText(body.personal_cleanliness, 20);
+  const roommateCleanliness = cleanText(body.roommate_cleanliness, 20);
+  if ((personalCleanliness && !cleanlinessValues.includes(personalCleanliness)) ||
+      (roommateCleanliness && !cleanlinessValues.includes(roommateCleanliness))) {
+    throw new HttpError(400, 'INVALID_CLEANLINESS', '宿舍整洁选项无效');
+  }
+  const commonSpace = cleanText(body.common_space_maintenance, 20);
+  if (commonSpace && !['USABLE', 'RESTORE', 'CLEAN_TOGETHER', 'NEGOTIABLE'].includes(commonSpace)) {
+    throw new HttpError(400, 'INVALID_COMMON_SPACE_MAINTENANCE', '公共空间维护选项无效');
+  }
   return {
     avatar_url: avatar,
-    school: cleanText(body.school, 80),
-    campus: cleanText(body.campus, 80),
-    department: cleanText(body.department, 80),
+    origin_province: cleanText(body.origin_province, 30),
+    origin_city: cleanText(body.origin_city, 30),
+    clothing_size: clothingSize,
     summer_temp_min: number(body.summer_temp_min),
     summer_temp_max: number(body.summer_temp_max),
     winter_temp_min: number(body.winter_temp_min),
     winter_temp_max: number(body.winter_temp_max),
-    sleep_preferences: JSON.stringify(cleanStringList(body.sleep_preferences, 3)),
-    sleep_schedule_note: cleanText(body.sleep_schedule_note, 120),
-    cleanliness_level: cleanText(body.cleanliness_level, 20),
-    cleanliness_note: cleanText(body.cleanliness_note, 160),
-    personality_tags: JSON.stringify(cleanStringList(body.personality_tags, 8)),
-    personality_note: cleanText(body.personality_note, 200),
-    roommate_personality_tags: JSON.stringify(cleanStringList(body.roommate_personality_tags, 8)),
-    roommate_personality_note: cleanText(body.roommate_personality_note, 200),
-    hobbies: JSON.stringify(cleanStringList(body.hobbies, 10)),
-    sports: JSON.stringify(cleanStringList(body.sports, 10)),
-    hobbies_note: cleanText(body.hobbies_note, 200),
-    gaming_frequency: cleanText(body.gaming_frequency, 20),
-    gaming_time_note: cleanText(body.gaming_time_note, 120),
-    keyboard_noise_tolerance: cleanText(body.keyboard_noise_tolerance, 20),
-    media_noise_tolerance: cleanText(body.media_noise_tolerance, 20),
+    wake_up_time: cleanText(body.wake_up_time, 120),
+    sleep_time: cleanText(body.sleep_time, 120),
+    nap_habit: cleanText(body.nap_habit, 120),
+    personal_cleanliness: personalCleanliness,
+    roommate_cleanliness: roommateCleanliness,
+    common_space_maintenance: commonSpace,
+    unacceptable_hygiene: cleanText(body.unacceptable_hygiene, 300),
+    one_sentence_intro: cleanText(body.one_sentence_intro, 100),
+    personality_text: cleanText(body.personality_text, 300),
+    roommate_personality_text: cleanText(body.roommate_personality_text, 300),
+    interests_text: cleanText(body.interests_text, 400),
+    gaming_self: cleanText(body.gaming_self, 300),
+    gaming_roommate: cleanText(body.gaming_roommate, 300),
+    keyboard_noise_text: cleanText(body.keyboard_noise_text, 300),
+    media_noise_text: cleanText(body.media_noise_text, 300),
     self_acknowledged_shortcoming: cleanText(body.self_acknowledged_shortcoming, 200),
     additional_note: cleanText(body.additional_note, 500),
   };
@@ -317,10 +325,11 @@ function validatePublish(card) {
   if (card.summer_temp_min > card.summer_temp_max || card.winter_temp_min > card.winter_temp_max) {
     throw new HttpError(400, 'INVALID_TEMPERATURE_RANGE', '温度下限不能高于上限');
   }
-  if (!card.avatar_url || !card.school || !parseList(card.sleep_preferences).length ||
-      !card.cleanliness_level || !parseList(card.personality_tags).length ||
-      !parseList(card.roommate_personality_tags).length || !card.gaming_frequency ||
-      !card.keyboard_noise_tolerance || !card.media_noise_tolerance ||
+  if (!card.major || !card.avatar_url || !card.origin_province || !card.origin_city || !card.clothing_size ||
+      !card.wake_up_time || !card.sleep_time || !card.nap_habit ||
+      !card.personal_cleanliness || !card.roommate_cleanliness || !card.common_space_maintenance ||
+      !card.one_sentence_intro || !card.personality_text || !card.roommate_personality_text || !card.interests_text ||
+      !card.gaming_self || !card.gaming_roommate || !card.keyboard_noise_text || !card.media_noise_text ||
       !card.self_acknowledged_shortcoming) {
     throw new HttpError(400, 'CARD_INCOMPLETE', '请完整填写所有必填字段后再发布');
   }
@@ -361,7 +370,7 @@ async function handleApi(req, res, url) {
       UPDATE users SET status = 'ACTIVE', last_login_at = ?, updated_at = ? WHERE id = ?
     `).run(timestamp, timestamp, user.id);
     return json(res, 200, {
-      user: { id: user.id, role: user.role, name: user.name, grade: user.grade, gender: user.gender, status: 'ACTIVE' },
+      user: { id: user.id, role: user.role, name: user.name, grade: user.grade, gender: user.gender, major: user.major, status: 'ACTIVE' },
       csrfToken: csrf,
     }, { 'Set-Cookie': `session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 86400}` });
   }
@@ -381,7 +390,7 @@ async function handleApi(req, res, url) {
     return json(res, 200, {
       user: {
         id: user.id, loginIdentifier: user.login_identifier, role: user.role,
-        name: user.name, grade: user.grade, gender: user.gender, status: user.status,
+        name: user.name, grade: user.grade, gender: user.gender, major: user.major, status: user.status,
       },
       csrfToken: user.csrf_token,
     });
@@ -432,6 +441,7 @@ async function handleApi(req, res, url) {
     const body = await readBody(req);
     const input = cardInput(body);
     const existing = db.prepare('SELECT * FROM roommate_cards WHERE user_id = ?').get(user.id);
+    if (existing?.status === 'PUBLISHED') validatePublish({ ...input, major: user.major });
     const timestamp = now();
     const fields = Object.keys(input);
     if (existing) {
@@ -457,9 +467,7 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'POST' && pathname === '/api/me/roommate-card/unpublish') {
-    db.prepare(`UPDATE roommate_cards SET status = 'DRAFT', updated_at = ? WHERE user_id = ? AND status != 'HIDDEN'`)
-      .run(now(), user.id);
-    return json(res, 200, { card: getCardByUser(user.id) });
+    throw new HttpError(409, 'CARD_PUBLICATION_PERMANENT', '卡片首次发布后不能取消发布，只能继续修改');
   }
 
   if (method === 'GET' && pathname === '/api/roommate-cards') {
@@ -477,10 +485,9 @@ async function handleApi(req, res, url) {
         )
       ORDER BY c.updated_at DESC
     `).all(gender, user.id, user.id).map(cardFromRow).map((card) => ({ ...card, is_own: card.user_id === user.id }));
-    if (search) cards = cards.filter((card) => [card.name, card.department, ...card.hobbies, ...card.personality_tags]
-      .join(' ').toLowerCase().includes(search));
+    if (search) cards = cards.filter((card) => card.name.toLowerCase().includes(search));
     if (grade) cards = cards.filter((card) => card.grade === grade);
-    if (availability === 'AVAILABLE') cards = cards.filter((card) => card.status === 'PUBLISHED');
+    if (availability === 'AVAILABLE') cards = cards.filter((card) => card.team_member_count < 4);
     return json(res, 200, { cards, total: cards.length });
   }
 
@@ -825,7 +832,7 @@ async function handleAdminApi(req, res, url, admin) {
 
   if (method === 'GET' && pathname === '/api/admin/users') {
     const users = db.prepare(`
-      SELECT u.id, u.login_identifier, u.name, u.grade, u.gender, u.email, u.status, u.last_login_at, u.created_at,
+      SELECT u.id, u.login_identifier, u.name, u.grade, u.gender, u.major, u.email, u.status, u.last_login_at, u.created_at,
              c.status AS card_status
       FROM users u LEFT JOIN roommate_cards c ON c.user_id = u.id
       WHERE u.role = 'STUDENT' ORDER BY u.id DESC
@@ -845,6 +852,7 @@ async function handleAdminApi(req, res, url, admin) {
         const login = cleanText(item.loginIdentifier, 100, true);
         const name = cleanText(item.name, 40, true);
         const grade = cleanText(item.grade, 20, true);
+        const major = cleanText(item.major, 80, true);
         const gender = item.gender;
         if (!['MALE', 'FEMALE'].includes(gender)) {
           throw new HttpError(400, 'INVALID_GENDER', '性别必须为男或女');
@@ -857,10 +865,10 @@ async function handleAdminApi(req, res, url, admin) {
         const timestamp = now();
         const id = Number(db.prepare(`
           INSERT INTO users
-            (login_identifier, password_hash, password_salt, role, name, grade, gender, status, imported_by, created_at, updated_at)
-          VALUES (?, ?, ?, 'STUDENT', ?, ?, ?, 'PENDING_ACTIVATION', ?, ?, ?)
-        `).run(login, password.hash, password.salt, name, grade, gender, admin.id, timestamp, timestamp).lastInsertRowid);
-        created.push({ id, loginIdentifier: login, name, grade, gender, initialPassword });
+            (login_identifier, password_hash, password_salt, role, name, grade, gender, major, status, imported_by, created_at, updated_at)
+          VALUES (?, ?, ?, 'STUDENT', ?, ?, ?, ?, 'PENDING_ACTIVATION', ?, ?, ?)
+        `).run(login, password.hash, password.salt, name, grade, gender, major, admin.id, timestamp, timestamp).lastInsertRowid);
+        created.push({ id, loginIdentifier: login, name, grade, gender, major, initialPassword });
       } catch (error) {
         failed.push({ row: index + 1, loginIdentifier: item.loginIdentifier || '', reason: error.message });
       }
@@ -875,6 +883,7 @@ async function handleAdminApi(req, res, url, admin) {
     const userId = Number(match[1]);
     const name = cleanText(body.name, 40, true);
     const grade = cleanText(body.grade, 20, true);
+    const major = cleanText(body.major, 80, true);
     const gender = body.gender;
     if (!['MALE', 'FEMALE'].includes(gender)) {
       throw new HttpError(400, 'INVALID_GENDER', '性别必须为男或女');
@@ -884,9 +893,9 @@ async function handleAdminApi(req, res, url, admin) {
     if (account.gender !== gender && currentDormitoryForUser(userId)) {
       throw new HttpError(409, 'USER_IN_DORMITORY', '该学生已加入宿舍，请退出后再修改性别');
     }
-    db.prepare(`UPDATE users SET name = ?, grade = ?, gender = ?, updated_at = ? WHERE id = ?`)
-      .run(name, grade, gender, now(), userId);
-    audit(admin, req, 'UPDATE_IDENTITY', 'USER', userId, cleanText(body.reason, 200), { name, grade, gender });
+    db.prepare(`UPDATE users SET name = ?, grade = ?, gender = ?, major = ?, updated_at = ? WHERE id = ?`)
+      .run(name, grade, gender, major, now(), userId);
+    audit(admin, req, 'UPDATE_IDENTITY', 'USER', userId, cleanText(body.reason, 200), { name, grade, gender, major });
     return json(res, 200, { ok: true });
   }
 

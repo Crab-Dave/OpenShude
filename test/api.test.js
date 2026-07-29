@@ -52,6 +52,78 @@ test('health endpoint reports application and database readiness', async () => {
   assert.deepEqual(await response.json(), { status: 'ok' });
 });
 
+test('students maintain cards using the documented fields while identity stays read-only', async () => {
+  const student = await login('2026001', 'Student123!');
+  assert.equal(student.user.major, '计算机科学与技术');
+
+  const immutable = await request(student, '/api/me/roommate-card', {
+    method: 'PUT', body: JSON.stringify({ major: '不可修改' }),
+  });
+  assert.equal(immutable.response.status, 403);
+  assert.equal(immutable.data.error.code, 'IDENTITY_FIELDS_READ_ONLY');
+
+  const invalidSize = await request(student, '/api/me/roommate-card', {
+    method: 'PUT', body: JSON.stringify({ clothing_size: 'XS' }),
+  });
+  assert.equal(invalidSize.response.status, 400);
+  assert.equal(invalidSize.data.error.code, 'INVALID_CLOTHING_SIZE');
+
+  const input = {
+    avatar_url: '/assets/avatar-1.png',
+    origin_province: '浙江', origin_city: '杭州', clothing_size: 'L',
+    summer_temp_min: 24, summer_temp_max: 26, winter_temp_min: 20, winter_temp_max: 23,
+    wake_up_time: '工作日 7:00', sleep_time: '23:30 左右', nap_habit: '午休 30 分钟',
+    personal_cleanliness: 'TIDY', roommate_cleanliness: 'BASIC', common_space_maintenance: 'CLEAN_TOGETHER',
+    unacceptable_hygiene: '长期不倒垃圾',
+    one_sentence_intro: '爱摄影也爱运动，期待认识真诚的室友。',
+    personality_text: '开朗，愿意主动沟通', roommate_personality_text: '尊重边界，好沟通',
+    interests_text: '摄影、羽毛球', gaming_self: '偶尔玩，休息时间戴耳机', gaming_roommate: '可以玩，休息时保持安静',
+    keyboard_noise_text: '白天不介意，睡觉时介意', media_noise_text: '介意外放，请使用耳机',
+    self_acknowledged_shortcoming: '整理东西时有些慢', additional_note: '希望提前沟通值日安排',
+  };
+  const invalidCleanliness = await request(student, '/api/me/roommate-card', {
+    method: 'PUT', body: JSON.stringify({ ...input, personal_cleanliness: 'UNKNOWN' }),
+  });
+  assert.equal(invalidCleanliness.response.status, 400);
+  assert.equal(invalidCleanliness.data.error.code, 'INVALID_CLEANLINESS');
+
+  const invalidTemperature = await request(student, '/api/me/roommate-card', {
+    method: 'PUT', body: JSON.stringify({ ...input, summer_temp_min: 36 }),
+  });
+  assert.equal(invalidTemperature.response.status, 400);
+  assert.equal(invalidTemperature.data.error.code, 'INVALID_TEMPERATURE');
+
+  const saved = await request(student, '/api/me/roommate-card', {
+    method: 'PUT', body: JSON.stringify(input),
+  });
+  assert.equal(saved.response.status, 200);
+  assert.equal(saved.data.card.clothing_size, 'L');
+  assert.equal(saved.data.card.common_space_maintenance, 'CLEAN_TOGETHER');
+  assert.equal(saved.data.card.one_sentence_intro, '爱摄影也爱运动，期待认识真诚的室友。');
+  assert.equal(saved.data.card.major, '计算机科学与技术');
+
+  const published = await request(student, '/api/me/roommate-card/publish', { method: 'POST', body: '{}' });
+  assert.equal(published.response.status, 200);
+  assert.equal(published.data.card.status, 'PUBLISHED');
+
+  const unpublish = await request(student, '/api/me/roommate-card/unpublish', { method: 'POST', body: '{}' });
+  assert.equal(unpublish.response.status, 409);
+  assert.equal(unpublish.data.error.code, 'CARD_PUBLICATION_PERMANENT');
+
+  const nameSearch = await request(student, '/api/roommate-cards?gender=FEMALE&search=林夏');
+  assert.equal(nameSearch.data.cards.length, 1);
+  assert.equal(nameSearch.data.cards[0].name, '林夏');
+  const nonNameSearch = await request(student, '/api/roommate-cards?gender=FEMALE&search=摄影');
+  assert.equal(nonNameSearch.data.cards.length, 0);
+
+  const incompletePublishedEdit = await request(student, '/api/me/roommate-card', {
+    method: 'PUT', body: JSON.stringify({ clothing_size: 'M' }),
+  });
+  assert.equal(incompletePublishedEdit.response.status, 400);
+  const unchanged = await request(student, '/api/me/roommate-card');
+  assert.equal(unchanged.data.card.clothing_size, 'L');
+});
+
 test('same-gender students form a full dormitory and can leave while selection is open', async () => {
   const initiator = await login('2026002', 'Student123!');
   const members = await Promise.all(['2026004', '2026005', '2026007'].map((id) => login(id, 'Student123!')));
@@ -124,6 +196,9 @@ test('same-gender students form a full dormitory and can leave while selection i
 
   const extraCards = await request(extra, '/api/roommate-cards?gender=MALE');
   const extraInitiatorCard = extraCards.data.cards.find((card) => card.user_id === initiator.user.id);
+  assert.equal(extraInitiatorCard.team_member_count, 4);
+  const availableCards = await request(extra, '/api/roommate-cards?gender=MALE&availability=AVAILABLE');
+  assert.equal(availableCards.data.cards.some((card) => card.user_id === initiator.user.id), false);
   const extraConversation = await request(extra, `/api/roommate-cards/${extraInitiatorCard.id}/conversations`, {
     method: 'POST', body: '{}',
   });
@@ -157,7 +232,7 @@ test('administrator imports accounts and exclusively updates identity fields', a
   const admin = await login('admin', 'Admin123!');
   const imported = await request(admin, '/api/admin/users/import', {
     method: 'POST',
-    body: JSON.stringify({ accounts: [{ loginIdentifier: '2026999', name: '测试学生', grade: '2026级', gender: 'FEMALE' }] }),
+    body: JSON.stringify({ accounts: [{ loginIdentifier: '2026999', name: '测试学生', grade: '2026级', gender: 'FEMALE', major: '数据科学' }] }),
   });
   assert.equal(imported.response.status, 200);
   assert.equal(imported.data.created.length, 1);
@@ -165,7 +240,7 @@ test('administrator imports accounts and exclusively updates identity fields', a
 
   const userId = imported.data.created[0].id;
   const updated = await request(admin, `/api/admin/users/${userId}/identity`, {
-    method: 'PATCH', body: JSON.stringify({ name: '更正姓名', grade: '2027级', gender: 'MALE', reason: '测试身份更正' }),
+    method: 'PATCH', body: JSON.stringify({ name: '更正姓名', grade: '2027级', gender: 'MALE', major: '人工智能', reason: '测试身份更正' }),
   });
   assert.equal(updated.response.status, 200);
 
@@ -174,6 +249,7 @@ test('administrator imports accounts and exclusively updates identity fields', a
   assert.equal(user.name, '更正姓名');
   assert.equal(user.grade, '2027级');
   assert.equal(user.gender, 'MALE');
+  assert.equal(user.major, '人工智能');
   assert.equal(user.status, 'PENDING_ACTIVATION');
 
   const student = await login('2026002', 'Student123!');

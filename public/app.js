@@ -30,9 +30,17 @@ const state = {
 };
 
 const labels = {
-  cleanliness: { RELAXED: '宽松', NORMAL: '一般', STRICT: '严格' },
-  gaming: { FREQUENT: '经常游戏', OCCASIONAL: '偶尔游戏', RARELY: '基本不玩' },
-  tolerance: { TOLERATE: '不介意', CONDITIONAL: '分时段', MIND: '介意' },
+  cleanliness: {
+    BASIC: '乱中有序自由整理，不产生异味或虫害即可',
+    TIDY: '大部分时间整齐，物品不过度堆积',
+    STRICT: '长期保持整洁，物品及时归位',
+  },
+  commonSpace: {
+    USABLE: '不影响正常使用即可，不需要固定规则',
+    RESTORE: '使用后基本恢复原状，保持公共区域基本整洁',
+    CLEAN_TOGETHER: '共同制定定期打扫计划，保持较高整洁度',
+    NEGOTIABLE: '都可以，愿意与室友具体协商',
+  },
   cardStatus: { DRAFT: '草稿', PUBLISHED: '已发布', HIDDEN: '已隐藏' },
   userStatus: { PENDING_ACTIVATION: '待激活', ACTIVE: '正常', SUSPENDED: '已停用', BANNED: '已封禁', DEACTIVATED: '已注销' },
   dormitoryStatus: { OPEN: '可申请', FULL: '已满员', CLOSED: '已关闭' },
@@ -268,22 +276,61 @@ async function loadStudentView(view) {
 function roommateCard(card) {
   const own = card.is_own || card.user_id === state.user.id;
   const genderClass = card.gender === 'FEMALE' ? 'gender-female' : card.gender === 'MALE' ? 'gender-male' : '';
+  const teamLabel = card.team_member_count >= 4 ? '室友组队已完成'
+    : card.team_member_count === 3 ? '三缺一' : card.team_member_count === 2 ? '二缺二' : '一缺三';
   return `
     <article class="roommate-card ${genderClass}" data-card-id="${card.id}" tabindex="0">
       <div class="card-head">
         ${avatar(card.avatar_url, card.name)}
-        <div class="card-title"><h3>${escapeHtml(card.name)}</h3><p>${escapeHtml(card.grade)} · ${escapeHtml(card.department || card.campus)}</p></div>
+        <div class="card-title"><h3>${escapeHtml(card.name)}</h3><p>${escapeHtml(card.grade)} · ${escapeHtml(card.major || '-')}</p></div>
         ${own ? statusBadge('我的卡片', 'open', 'user-round') : ''}
       </div>
-      <div class="card-metrics">
-        <div class="metric"><span>作息</span><strong>${escapeHtml(card.sleep_preferences.join(' · ') || '-')}</strong></div>
-        <div class="metric"><span>整洁要求</span><strong>${escapeHtml(labels.cleanliness[card.cleanliness_level] || '-')}</strong></div>
-        <div class="metric"><span>夏季空调</span><strong>${card.summer_temp_min ?? '-'}–${card.summer_temp_max ?? '-'}°C</strong></div>
-        <div class="metric"><span>游戏习惯</span><strong>${escapeHtml(labels.gaming[card.gaming_frequency] || '-')}</strong></div>
-      </div>
-      <div class="tag-row">${[...card.personality_tags, ...card.hobbies].slice(0, 5).map((tag, index) => `<span class="tag ${index > 2 ? 'accent' : ''}">${escapeHtml(tag)}</span>`).join('')}</div>
-      <p class="card-note">${escapeHtml(card.additional_note || card.self_acknowledged_shortcoming)}</p>
+      <p class="card-city">${icon('map-pin')}${escapeHtml(card.origin_city || '城市未填写')}</p>
+      <p class="card-note">${escapeHtml(card.one_sentence_intro || '-')}</p>
+      <div class="card-team">${statusBadge(teamLabel, card.team_member_count >= 4 ? 'published' : 'open', 'users')}</div>
     </article>`;
+}
+
+function cardDetailMarkup(card, actions = '') {
+  return `
+    <div class="section">
+      <div class="detail-header">${avatar(card.avatar_url, card.name, 'avatar-lg')}<div><h2>${escapeHtml(card.name)}</h2><p>${escapeHtml(card.grade)} · ${escapeHtml(card.major || '-')} · ${escapeHtml([card.origin_province, card.origin_city].filter(Boolean).join(' ') || '-')}</p></div>${actions}</div>
+    </div>
+    <div class="section"><div class="section-heading"><h2>个人信息</h2></div><dl class="detail-grid">
+      <div class="detail-item"><dt>姓名</dt><dd>${escapeHtml(card.name)}</dd></div>
+      <div class="detail-item"><dt>年级 / 性别</dt><dd>${escapeHtml(card.grade)} / ${card.gender === 'MALE' ? '男' : '女'}</dd></div>
+      <div class="detail-item"><dt>专业</dt><dd>${escapeHtml(card.major || '-')}</dd></div>
+      <div class="detail-item"><dt>来自地区</dt><dd>${escapeHtml([card.origin_province, card.origin_city].filter(Boolean).join(' ') || '-')}</dd></div>
+      <div class="detail-item"><dt>院服尺码</dt><dd>${escapeHtml(card.clothing_size || '-')}</dd></div>
+    </dl></div>
+    <div class="section"><div class="section-heading"><h2>生活节奏与空调</h2></div><dl class="detail-grid">
+      <div class="detail-item"><dt>夏季 / 冬季空调</dt><dd>${card.summer_temp_min ?? '-'}–${card.summer_temp_max ?? '-'}°C / ${card.winter_temp_min ?? '-'}–${card.winter_temp_max ?? '-'}°C</dd></div>
+      <div class="detail-item"><dt>早上起床</dt><dd>${escapeHtml(card.wake_up_time || '-')}</dd></div>
+      <div class="detail-item"><dt>晚上睡觉</dt><dd>${escapeHtml(card.sleep_time || '-')}</dd></div>
+      <div class="detail-item"><dt>午休习惯</dt><dd>${escapeHtml(card.nap_habit || '-')}</dd></div>
+    </dl></div>
+    <div class="section"><div class="section-heading"><h2>卫生与公共空间</h2></div><dl class="detail-grid">
+      <div class="detail-item"><dt>本人宿舍整理习惯</dt><dd>${escapeHtml(labels.cleanliness[card.personal_cleanliness] || '-')}</dd></div>
+      <div class="detail-item"><dt>对室友卫生的最低要求</dt><dd>${escapeHtml(labels.cleanliness[card.roommate_cleanliness] || '-')}</dd></div>
+      <div class="detail-item"><dt>公共空间维护方式</dt><dd>${escapeHtml(labels.commonSpace[card.common_space_maintenance] || '-')}</dd></div>
+      <div class="detail-item"><dt>不太能接受的卫生情况</dt><dd>${escapeHtml(card.unacceptable_hygiene || '-')}</dd></div>
+    </dl></div>
+    <div class="section"><div class="section-heading"><h2>性格与兴趣</h2></div><dl class="detail-grid">
+      <div class="detail-item"><dt>用一句话介绍自己</dt><dd>${escapeHtml(card.one_sentence_intro || '-')}</dd></div>
+      <div class="detail-item"><dt>个人性格</dt><dd>${escapeHtml(card.personality_text || '-')}</dd></div>
+      <div class="detail-item"><dt>期望室友的性格</dt><dd>${escapeHtml(card.roommate_personality_text || '-')}</dd></div>
+      <div class="detail-item"><dt>兴趣爱好、喜欢的运动等</dt><dd>${escapeHtml(card.interests_text || '-')}</dd></div>
+    </dl></div>
+    <div class="section"><div class="section-heading"><h2>游戏、声音与相处边界</h2></div><dl class="detail-grid">
+      <div class="detail-item"><dt>对自己打游戏的要求</dt><dd>${escapeHtml(card.gaming_self || '-')}</dd></div>
+      <div class="detail-item"><dt>对室友打游戏的要求</dt><dd>${escapeHtml(card.gaming_roommate || '-')}</dd></div>
+      <div class="detail-item"><dt>鼠标键盘等声音</dt><dd>${escapeHtml(card.keyboard_noise_text || '-')}</dd></div>
+      <div class="detail-item"><dt>游戏 / 视频声音外放</dt><dd>${escapeHtml(card.media_noise_text || '-')}</dd></div>
+    </dl></div>
+    <div class="section"><div class="section-heading"><h2>缺点与备注</h2></div><dl class="detail-grid">
+      <div class="detail-item"><dt>自认为的一个缺点</dt><dd>${escapeHtml(card.self_acknowledged_shortcoming || '-')}</dd></div>
+      <div class="detail-item"><dt>还想要对大家说</dt><dd>${escapeHtml(card.additional_note || '-')}</dd></div>
+    </dl></div>`;
 }
 
 async function renderDiscover() {
@@ -297,7 +344,7 @@ async function renderDiscover() {
   setPage(`
     <div class="toolbar">
       <div class="segmented" aria-label="性别分页"><button data-gender="FEMALE" class="${state.gender === 'FEMALE' ? 'active' : ''}">女生</button><button data-gender="MALE" class="${state.gender === 'MALE' ? 'active' : ''}">男生</button></div>
-      <form class="search-field" id="search-form">${icon('search')}<input name="search" value="${escapeHtml(state.search)}" placeholder="搜索姓名、性格或兴趣"></form>
+      <form class="search-field" id="search-form">${icon('search')}<input name="search" value="${escapeHtml(state.search)}" placeholder="搜索姓名"></form>
       <select id="grade-filter" aria-label="年级筛选"><option value="">全部年级</option>${grades.map((grade) => `<option ${state.grade === grade ? 'selected' : ''}>${escapeHtml(grade)}</option>`).join('')}</select>
       <div class="segmented"><button data-availability="AVAILABLE" class="${state.availability === 'AVAILABLE' ? 'active' : ''}">可组队</button><button data-availability="ALL" class="${state.availability === 'ALL' ? 'active' : ''}">全部</button></div>
     </div>
@@ -321,26 +368,8 @@ async function showCardDetail(cardId) {
   try {
     const { card } = await api(`/api/roommate-cards/${cardId}`);
     const own = card.user_id === state.user.id;
-    const modal = openModal(`${card.name}的室友卡片`, `
-      <div class="section">
-        <div class="detail-header">${avatar(card.avatar_url, card.name, 'avatar-lg')}<div><h2>${escapeHtml(card.name)}</h2><p>${escapeHtml(card.grade)} · ${escapeHtml(card.school)} ${escapeHtml(card.campus)}</p></div>
-          <div class="detail-actions">${own ? `<button class="btn btn-primary" data-edit-own>${icon('pencil')}编辑</button>` : `<button class="btn btn-primary" data-message>${icon('message-circle')}发私信</button><button class="btn btn-secondary" data-report>${icon('flag')}举报</button><button class="btn btn-quiet" data-block title="拉黑用户">${icon('user-x')}</button>`}</div>
-        </div>
-      </div>
-      <div class="section"><div class="section-heading"><h2>生活节奏</h2></div><dl class="detail-grid">
-        <div class="detail-item"><dt>夏季 / 冬季空调</dt><dd>${card.summer_temp_min}–${card.summer_temp_max}°C / ${card.winter_temp_min}–${card.winter_temp_max}°C</dd></div>
-        <div class="detail-item"><dt>作息偏好</dt><dd>${escapeHtml(card.sleep_preferences.join('、'))}${card.sleep_schedule_note ? ` · ${escapeHtml(card.sleep_schedule_note)}` : ''}</dd></div>
-        <div class="detail-item"><dt>整洁要求</dt><dd>${escapeHtml(labels.cleanliness[card.cleanliness_level])}${card.cleanliness_note ? ` · ${escapeHtml(card.cleanliness_note)}` : ''}</dd></div>
-        <div class="detail-item"><dt>鼠标键盘 / 外放</dt><dd>${escapeHtml(labels.tolerance[card.keyboard_noise_tolerance])} / ${escapeHtml(labels.tolerance[card.media_noise_tolerance])}</dd></div>
-        <div class="detail-item"><dt>游戏习惯</dt><dd>${escapeHtml(labels.gaming[card.gaming_frequency])}${card.gaming_time_note ? ` · ${escapeHtml(card.gaming_time_note)}` : ''}</dd></div>
-        <div class="detail-item"><dt>兴趣与运动</dt><dd>${escapeHtml([...card.hobbies, ...card.sports].join('、') || '-')}</dd></div>
-      </dl></div>
-      <div class="section"><div class="section-heading"><h2>相处方式</h2></div><dl class="detail-grid">
-        <div class="detail-item"><dt>个人性格</dt><dd>${escapeHtml(card.personality_tags.join('、'))}${card.personality_note ? ` · ${escapeHtml(card.personality_note)}` : ''}</dd></div>
-        <div class="detail-item"><dt>期望室友</dt><dd>${escapeHtml(card.roommate_personality_tags.join('、'))}${card.roommate_personality_note ? ` · ${escapeHtml(card.roommate_personality_note)}` : ''}</dd></div>
-        <div class="detail-item"><dt>自认为的缺点</dt><dd>${escapeHtml(card.self_acknowledged_shortcoming)}</dd></div>
-        <div class="detail-item"><dt>还想说的话</dt><dd>${escapeHtml(card.additional_note || '-')}</dd></div>
-      </dl></div>`, { wide: true });
+    const actions = `<div class="detail-actions">${own ? `<button class="btn btn-primary" data-edit-own>${icon('pencil')}编辑</button>` : `<button class="btn btn-primary" data-message>${icon('message-circle')}发私信</button><button class="btn btn-secondary" data-report>${icon('flag')}举报</button><button class="btn btn-quiet" data-block title="拉黑用户">${icon('user-x')}</button>`}</div>`;
+    const modal = openModal(`${card.name}的室友卡片`, cardDetailMarkup(card, actions), { wide: true });
     modal.querySelector('[data-edit-own]')?.addEventListener('click', async () => { closeModal(); await navigate('profile'); });
     modal.querySelector('[data-message]')?.addEventListener('click', async () => {
       try {
@@ -380,10 +409,6 @@ function showBlockModal(userId, name) {
   });
 }
 
-function choice(name, value, label, selected, type = 'checkbox') {
-  return `<label class="choice"><input type="${type}" name="${name}" value="${escapeHtml(value)}" ${selected ? 'checked' : ''}><span>${escapeHtml(label)}</span></label>`;
-}
-
 function value(card, key) { return escapeHtml(card?.[key] ?? ''); }
 
 async function renderProfile() {
@@ -391,48 +416,74 @@ async function renderProfile() {
   const current = card || {};
   setPage(`
     <div class="profile-layout">
-      <form class="profile-form" id="profile-form">
+      <form class="profile-form" id="profile-form" novalidate>
         <div class="section">
-          <div class="section-heading"><div><h2>身份信息</h2><p>姓名和年级由管理员导入，学生不能修改</p></div>${card ? statusBadge(labels.cardStatus[card.status], card.status === 'PUBLISHED' ? 'published' : card.status.toLowerCase()) : statusBadge('未创建', 'draft')}</div>
+          <div class="section-heading"><div><h2>身份信息</h2><p>以下字段由管理员导入和维护，学生不能修改</p></div>${card ? statusBadge(labels.cardStatus[card.status], card.status === 'PUBLISHED' ? 'published' : card.status.toLowerCase()) : statusBadge('未创建', 'draft')}</div>
           <div class="form-grid">
             <div class="form-field"><label>姓名</label><input value="${escapeHtml(state.user.name)}" disabled></div>
             <div class="form-field"><label>年级</label><input value="${escapeHtml(state.user.grade)}" disabled></div>
             <div class="form-field"><label>性别</label><input value="${state.user.gender === 'MALE' ? '男' : '女'}" disabled></div>
-            <div class="form-field"><label class="required">学校</label><input name="school" value="${value(current, 'school')}" required></div>
-            <div class="form-field"><label>校区</label><input name="campus" value="${value(current, 'campus')}"></div>
-            <div class="form-field full"><label>院系 / 专业</label><input name="department" value="${value(current, 'department')}"></div>
-            <div class="form-field full"><label class="required">头像</label><div class="avatar-upload">${avatar(current.avatar_url, state.user.name, 'avatar-lg')}<label class="btn btn-secondary" for="avatar-file">${icon('upload')}上传头像</label><input id="avatar-file" type="file" accept="image/png,image/jpeg,image/webp"><input type="hidden" name="avatar_url" value="${value(current, 'avatar_url')}"></div><span class="field-hint">PNG、JPG 或 WebP，建议使用正方形图片</span></div>
+            <div class="form-field"><label>专业</label><input value="${escapeHtml(state.user.major || '')}" disabled></div>
           </div>
         </div>
         <div class="section">
-          <div class="section-heading"><div><h2>生活节奏</h2><p>这些信息会直接展示在室友卡片上</p></div></div>
+          <div class="section-heading"><div><h2>个人信息</h2><p>填写地区、院服尺码并上传头像</p></div></div>
           <div class="form-grid">
-            <div class="form-field full"><label class="required">适宜的空调温度</label><div class="temperature-grid"><span>夏季</span><input type="number" name="summer_temp_min" min="10" max="35" value="${value(current, 'summer_temp_min')}" placeholder="下限"><b>至</b><input type="number" name="summer_temp_max" min="10" max="35" value="${value(current, 'summer_temp_max')}" placeholder="上限"><span>冬季</span><input type="number" name="winter_temp_min" min="10" max="35" value="${value(current, 'winter_temp_min')}" placeholder="下限"><b>至</b><input type="number" name="winter_temp_max" min="10" max="35" value="${value(current, 'winter_temp_max')}" placeholder="上限"></div></div>
-            <div class="form-field full"><label class="required">作息偏好</label><div class="choice-row">${['早起','晚睡','午休'].map((item) => choice('sleep_preferences', item, item, current.sleep_preferences?.includes(item))).join('')}</div><input name="sleep_schedule_note" value="${value(current, 'sleep_schedule_note')}" placeholder="补充具体时间，例如 23:30 前休息"></div>
-            <div class="form-field"><label class="required">整洁程度要求</label><select name="cleanliness_level"><option value="">请选择</option>${Object.entries(labels.cleanliness).map(([key, label]) => `<option value="${key}" ${current.cleanliness_level === key ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
-            <div class="form-field"><label>整洁要求补充</label><input name="cleanliness_note" value="${value(current, 'cleanliness_note')}" placeholder="例如每周共同打扫一次"></div>
-            <div class="form-field"><label class="required">打游戏情况</label><select name="gaming_frequency"><option value="">请选择</option>${Object.entries(labels.gaming).map(([key, label]) => `<option value="${key}" ${current.gaming_frequency === key ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
-            <div class="form-field"><label>游戏时段补充</label><input name="gaming_time_note" value="${value(current, 'gaming_time_note')}" placeholder="例如只在周末玩"></div>
-            <div class="form-field"><label class="required">鼠标键盘声音</label><select name="keyboard_noise_tolerance"><option value="">请选择</option>${Object.entries(labels.tolerance).map(([key, label]) => `<option value="${key}" ${current.keyboard_noise_tolerance === key ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
-            <div class="form-field"><label class="required">游戏 / 视频外放</label><select name="media_noise_tolerance"><option value="">请选择</option>${Object.entries(labels.tolerance).map(([key, label]) => `<option value="${key}" ${current.media_noise_tolerance === key ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
+            <div class="form-field"><label class="required">来自省份</label><input name="origin_province" maxlength="30" value="${value(current, 'origin_province')}" placeholder="例如：浙江" required></div>
+            <div class="form-field"><label class="required">来自城市</label><input name="origin_city" maxlength="30" value="${value(current, 'origin_city')}" placeholder="例如：杭州" required></div>
+            <div class="form-field"><label class="required">院服尺码</label><select name="clothing_size" required><option value="">请选择</option>${['S', 'M', 'L', 'XL', 'XXL', 'XXXL', 'XXXXL'].map((size) => `<option value="${size}" ${current.clothing_size === size ? 'selected' : ''}>${size}</option>`).join('')}</select></div>
+            <div class="form-field full"><details class="size-guide"><summary>查看院服尺码表</summary><div class="size-table-wrap"><table class="size-table"><thead><tr><th>尺码</th><th>衣长</th><th>胸围 1/2</th><th>肩宽</th><th>建议身高</th><th>建议体重</th></tr></thead><tbody>${[
+              ['S', 64, 47, 43, '155-160', '80-90'], ['M', 66, 49, 44, '160-165', '90-100'], ['L', 68, 51, 45, '165-170', '100-120'], ['XL', 70, 53, 46, '170-175', '120-140'], ['XXL', 72, 55, 47, '175-180', '140-160'], ['XXXL', 74, 57, 48, '180-185', '160-180'], ['XXXXL', 76, 59, 49, '185-190', '180-200'],
+            ].map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('')}</tbody></table></div></details></div>
+            <div class="form-field full"><label class="required">头像</label><div class="avatar-upload">${avatar(current.avatar_url, state.user.name, 'avatar-lg')}<label class="btn btn-secondary" for="avatar-file">${icon('upload')}上传头像</label><input id="avatar-file" type="file" accept="image/png,image/jpeg,image/webp"><input type="hidden" name="avatar_url" value="${value(current, 'avatar_url')}"></div><span class="field-hint">PNG、JPG 或 WebP，建议使用正方形图片，文件不超过 2.5 MB</span></div>
           </div>
         </div>
         <div class="section">
-          <div class="section-heading"><div><h2>性格与兴趣</h2><p>用简短标签帮助他人快速了解你</p></div></div>
+          <div class="section-heading"><div><h2>生活节奏与空调</h2><p>请用具体时间描述你的日常作息</p></div></div>
           <div class="form-grid">
-            <div class="form-field full"><label class="required">个人性格</label><div class="choice-row">${['开朗','安静','慢热','自律','随和','独立','直接','细腻'].map((item) => choice('personality_tags', item, item, current.personality_tags?.includes(item))).join('')}</div><input name="personality_note" value="${value(current, 'personality_note')}" placeholder="补充说明"></div>
-            <div class="form-field full"><label class="required">期望室友的性格</label><div class="choice-row">${['好沟通','整洁','守时','坦诚','包容','有边界感','尊重隐私','友善'].map((item) => choice('roommate_personality_tags', item, item, current.roommate_personality_tags?.includes(item))).join('')}</div><input name="roommate_personality_note" value="${value(current, 'roommate_personality_note')}" placeholder="补充说明"></div>
-            <div class="form-field"><label>兴趣爱好</label><input name="hobbies" value="${escapeHtml((current.hobbies || []).join('、'))}" placeholder="用顿号分隔"></div>
-            <div class="form-field"><label>喜欢的运动</label><input name="sports" value="${escapeHtml((current.sports || []).join('、'))}" placeholder="用顿号分隔"></div>
-            <div class="form-field full"><label>兴趣补充</label><input name="hobbies_note" value="${value(current, 'hobbies_note')}"></div>
-            <div class="form-field full"><label class="required">自认为的一个缺点</label><textarea name="self_acknowledged_shortcoming" maxlength="200">${value(current, 'self_acknowledged_shortcoming')}</textarea></div>
-            <div class="form-field full"><label>还想要说的话</label><textarea name="additional_note" maxlength="500">${value(current, 'additional_note')}</textarea></div>
+            <div class="form-field full"><label class="required">适宜的空调温度</label><div class="temperature-grid"><span>夏季</span><input type="number" name="summer_temp_min" min="10" max="35" value="${value(current, 'summer_temp_min')}" placeholder="下限" required><b>至</b><input type="number" name="summer_temp_max" min="10" max="35" value="${value(current, 'summer_temp_max')}" placeholder="上限" required><span>冬季</span><input type="number" name="winter_temp_min" min="10" max="35" value="${value(current, 'winter_temp_min')}" placeholder="下限" required><b>至</b><input type="number" name="winter_temp_max" min="10" max="35" value="${value(current, 'winter_temp_max')}" placeholder="上限" required></div></div>
+            <div class="form-field"><label class="required">早上起床</label><input name="wake_up_time" maxlength="120" value="${value(current, 'wake_up_time')}" placeholder="例如：工作日 7:00，周末 8:30" required></div>
+            <div class="form-field"><label class="required">晚上睡觉</label><input name="sleep_time" maxlength="120" value="${value(current, 'sleep_time')}" placeholder="例如：23:30 左右" required></div>
+            <div class="form-field full"><label class="required">午休习惯</label><input name="nap_habit" maxlength="120" value="${value(current, 'nap_habit')}" placeholder="例如：有午休习惯，通常 30 分钟" required></div>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-heading"><div><h2>卫生与公共空间</h2><p>分别说明自己的习惯和对室友的最低要求</p></div></div>
+          <div class="form-grid">
+            <div class="form-field full"><label class="required">平时的宿舍整理习惯</label><select name="personal_cleanliness" required><option value="">请选择</option>${Object.entries(labels.cleanliness).map(([key, label]) => `<option value="${key}" ${current.personal_cleanliness === key ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('')}</select></div>
+            <div class="form-field full"><label class="required">对室友宿舍卫生的最低要求</label><select name="roommate_cleanliness" required><option value="">请选择</option>${Object.entries(labels.cleanliness).map(([key, label]) => `<option value="${key}" ${current.roommate_cleanliness === key ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('')}</select></div>
+            <div class="form-field full"><label class="required">希望如何维护宿舍公共空间</label><select name="common_space_maintenance" required><option value="">请选择</option>${Object.entries(labels.commonSpace).map(([key, label]) => `<option value="${key}" ${current.common_space_maintenance === key ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('')}</select></div>
+            <div class="form-field full"><label>不太能接受的卫生情况</label><textarea name="unacceptable_hygiene" maxlength="300" placeholder="例如：长期不倒垃圾、在宿舍吸烟">${value(current, 'unacceptable_hygiene')}</textarea></div>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-heading"><div><h2>性格与兴趣</h2><p>用自己的语言介绍，不限制为预设标签</p></div></div>
+          <div class="form-grid">
+            <div class="form-field full"><label class="required">用一句话介绍自己</label><input name="one_sentence_intro" maxlength="100" value="${value(current, 'one_sentence_intro')}" placeholder="这句话会展示在卡片预览中" required></div>
+            <div class="form-field full"><label class="required">个人性格</label><textarea name="personality_text" maxlength="300" required>${value(current, 'personality_text')}</textarea></div>
+            <div class="form-field full"><label class="required">期望室友的性格</label><textarea name="roommate_personality_text" maxlength="300" required>${value(current, 'roommate_personality_text')}</textarea></div>
+            <div class="form-field full"><label class="required">兴趣爱好、喜欢的运动等</label><textarea name="interests_text" maxlength="400" required>${value(current, 'interests_text')}</textarea></div>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-heading"><div><h2>游戏、声音与相处边界</h2><p>说明你可以接受的具体情况</p></div></div>
+          <div class="form-grid">
+            <div class="form-field full"><label class="required">对自己打游戏的要求</label><textarea name="gaming_self" maxlength="300" required>${value(current, 'gaming_self')}</textarea></div>
+            <div class="form-field full"><label class="required">对室友打游戏的要求</label><textarea name="gaming_roommate" maxlength="300" required>${value(current, 'gaming_roommate')}</textarea></div>
+            <div class="form-field full"><label class="required">是否介意点击鼠标键盘等声音</label><textarea name="keyboard_noise_text" maxlength="300" required>${value(current, 'keyboard_noise_text')}</textarea></div>
+            <div class="form-field full"><label class="required">是否介意游戏 / 视频声音外放</label><textarea name="media_noise_text" maxlength="300" required>${value(current, 'media_noise_text')}</textarea></div>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-heading"><div><h2>缺点与补充</h2><p>坦诚说明有助于双方提前沟通</p></div></div>
+          <div class="form-grid">
+            <div class="form-field full"><label class="required">自认为的一个缺点</label><textarea name="self_acknowledged_shortcoming" maxlength="200" required>${value(current, 'self_acknowledged_shortcoming')}</textarea></div>
+            <div class="form-field full"><label>还想要对大家说</label><textarea name="additional_note" maxlength="500">${value(current, 'additional_note')}</textarea></div>
           </div>
         </div>
         ${card?.status === 'HIDDEN' ? `<div class="panel" style="background:var(--danger-soft);color:var(--danger)"><strong>卡片已隐藏</strong><p>${escapeHtml(card.hidden_reason)}</p></div>` : ''}
         <div class="form-actions">
-          ${card && ['PUBLISHED'].includes(card.status) ? `<button class="btn btn-secondary" type="button" data-unpublish>${icon('eye-off')}取消发布</button>` : ''}
-          <button class="btn btn-secondary" type="submit">${icon('save')}保存草稿</button>
+          <button class="btn ${card && card.status !== 'DRAFT' ? 'btn-primary' : 'btn-secondary'}" type="submit">${icon('save')}${card && card.status !== 'DRAFT' ? '更新卡片' : '保存草稿'}</button>
           ${!card || ['DRAFT'].includes(card.status) ? `<button class="btn btn-primary" type="button" data-publish>${icon('send')}发布卡片</button>` : ''}
         </div>
       </form>
@@ -449,26 +500,18 @@ async function renderProfile() {
   });
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    try { await saveProfile(form); toast('室友卡片已保存'); await renderProfile(); }
+    try { await saveProfile(form); toast(card && card.status !== 'DRAFT' ? '室友卡片已更新' : '草稿已保存'); await renderProfile(); }
     catch (error) { toast(error.message, 'error'); }
   });
   form.querySelector('[data-publish]')?.addEventListener('click', async () => {
+    if (!form.reportValidity()) return;
     try { await saveProfile(form); await api('/api/me/roommate-card/publish', { method: 'POST', body: '{}' }); toast('卡片已发布'); await renderProfile(); }
-    catch (error) { toast(error.message, 'error'); }
-  });
-  form.querySelector('[data-unpublish]')?.addEventListener('click', async () => {
-    try { await api('/api/me/roommate-card/unpublish', { method: 'POST', body: '{}' }); toast('已取消发布'); await renderProfile(); }
     catch (error) { toast(error.message, 'error'); }
   });
 }
 
 async function saveProfile(form) {
   const data = Object.fromEntries(new FormData(form));
-  data.sleep_preferences = new FormData(form).getAll('sleep_preferences');
-  data.personality_tags = new FormData(form).getAll('personality_tags');
-  data.roommate_personality_tags = new FormData(form).getAll('roommate_personality_tags');
-  data.hobbies = String(data.hobbies || '').split(/[、,，]/).map((item) => item.trim()).filter(Boolean);
-  data.sports = String(data.sports || '').split(/[、,，]/).map((item) => item.trim()).filter(Boolean);
   return api('/api/me/roommate-card', { method: 'PUT', body: JSON.stringify(data) });
 }
 
@@ -627,7 +670,7 @@ function showCreateDormitoryModal() {
 async function renderSettings() {
   const { blocks } = await api('/api/blocks');
   setPage(`<div class="page narrow" style="padding:0">
-    <section class="panel"><div class="section-heading"><div><h2>身份信息</h2><p>如需更正，请联系管理员</p></div></div><div class="form-grid"><div class="form-field"><label>姓名</label><input value="${escapeHtml(state.user.name)}" disabled></div><div class="form-field"><label>年级</label><input value="${escapeHtml(state.user.grade)}" disabled></div><div class="form-field"><label>性别</label><input value="${state.user.gender === 'MALE' ? '男' : '女'}" disabled></div><div class="form-field full"><label>登录标识</label><input value="${escapeHtml(state.user.loginIdentifier)}" disabled></div></div></section>
+    <section class="panel"><div class="section-heading"><div><h2>身份信息</h2><p>如需更正，请联系管理员</p></div></div><div class="form-grid"><div class="form-field"><label>姓名</label><input value="${escapeHtml(state.user.name)}" disabled></div><div class="form-field"><label>年级</label><input value="${escapeHtml(state.user.grade)}" disabled></div><div class="form-field"><label>性别</label><input value="${state.user.gender === 'MALE' ? '男' : '女'}" disabled></div><div class="form-field"><label>专业</label><input value="${escapeHtml(state.user.major || '')}" disabled></div><div class="form-field full"><label>登录标识</label><input value="${escapeHtml(state.user.loginIdentifier)}" disabled></div></div></section>
     <section class="panel"><div class="section-heading"><div><h2>修改密码</h2><p>新密码至少 8 位</p></div></div><form id="password-form" class="form-grid"><div class="form-field"><label>当前密码</label><input name="currentPassword" type="password" required></div><div class="form-field"><label>新密码</label><input name="newPassword" type="password" minlength="8" required></div><div class="full"><button class="btn btn-primary">${icon('key-round')}更新密码</button></div></form></section>
     <section class="panel"><div class="section-heading"><div><h2>拉黑列表</h2><p>解除后可以重新查看对方卡片</p></div></div>${blocks.length ? `<div class="member-list">${blocks.map((item) => `<div class="member-row">${avatar(item.avatar_url, item.name, 'avatar-sm')}<div class="member-copy"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.grade)}</span></div><button class="btn btn-secondary btn-sm" data-unblock="${item.user_id}">解除</button></div>`).join('')}</div>` : `<p class="field-hint">暂无拉黑用户</p>`}</section>
     <section class="panel" style="border-color:#eccaca"><div class="section-heading"><div><h2>注销账号</h2><p>注销后不能登录，卡片停止展示，但历史资源会继续保留</p></div></div><button class="btn btn-danger" id="deactivate-btn">${icon('user-minus')}注销账号</button></section>
@@ -681,12 +724,12 @@ function showDormitoryStageModal(open) {
 
 async function renderAdminUsers() {
   const { users } = await api('/api/admin/users');
-  setPage(`<div class="toolbar"><div class="search-field">${icon('search')}<input id="admin-user-search" placeholder="搜索登录标识、姓名或年级"></div><div class="toolbar-spacer"></div><button class="btn btn-primary" id="import-users">${icon('upload')}导入账号</button></div>
-    <div class="table-wrap"><table class="data-table"><thead><tr><th>学生</th><th>性别</th><th>登录标识</th><th>状态</th><th>卡片</th><th>最近登录</th><th></th></tr></thead><tbody id="user-rows">${users.map(userRow).join('')}</tbody></table></div>`);
+  setPage(`<div class="toolbar"><div class="search-field">${icon('search')}<input id="admin-user-search" placeholder="搜索登录标识、姓名、年级或专业"></div><div class="toolbar-spacer"></div><button class="btn btn-primary" id="import-users">${icon('upload')}导入账号</button></div>
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>学生</th><th>性别</th><th>专业</th><th>登录标识</th><th>状态</th><th>卡片</th><th>最近登录</th><th></th></tr></thead><tbody id="user-rows">${users.map(userRow).join('')}</tbody></table></div>`);
   bindAdminUserRows(users);
   document.querySelector('#admin-user-search').addEventListener('input', (event) => {
     const query = event.target.value.toLowerCase();
-    document.querySelector('#user-rows').innerHTML = users.filter((item) => [item.name, item.grade, item.login_identifier].join(' ').toLowerCase().includes(query)).map(userRow).join('');
+    document.querySelector('#user-rows').innerHTML = users.filter((item) => [item.name, item.grade, item.major, item.login_identifier].join(' ').toLowerCase().includes(query)).map(userRow).join('');
     bindAdminUserRows(users);
     refreshIcons();
   });
@@ -695,7 +738,7 @@ async function renderAdminUsers() {
 
 function userRow(user) {
   const type = user.status === 'ACTIVE' ? 'active' : user.status.toLowerCase();
-  return `<tr><td><strong>${escapeHtml(user.name)}</strong><div class="field-hint">${escapeHtml(user.grade)}</div></td><td>${user.gender === 'MALE' ? '男' : '女'}</td><td>${escapeHtml(user.login_identifier)}</td><td>${statusBadge(labels.userStatus[user.status], type)}</td><td>${user.card_status ? statusBadge(labels.cardStatus[user.card_status], user.card_status === 'PUBLISHED' ? 'published' : user.card_status.toLowerCase()) : '-'}</td><td>${formatDate(user.last_login_at)}</td><td><div class="cell-actions"><button class="btn btn-secondary btn-sm" data-edit-user="${user.id}">${icon('pencil')}身份</button><button class="btn btn-secondary btn-sm" data-status-user="${user.id}">${icon('shield')}状态</button><button class="btn btn-quiet icon-btn btn-sm" data-delete-user="${user.id}" title="永久删除">${icon('trash-2')}</button></div></td></tr>`;
+  return `<tr><td><strong>${escapeHtml(user.name)}</strong><div class="field-hint">${escapeHtml(user.grade)}</div></td><td>${user.gender === 'MALE' ? '男' : '女'}</td><td>${escapeHtml(user.major || '-')}</td><td>${escapeHtml(user.login_identifier)}</td><td>${statusBadge(labels.userStatus[user.status], type)}</td><td>${user.card_status ? statusBadge(labels.cardStatus[user.card_status], user.card_status === 'PUBLISHED' ? 'published' : user.card_status.toLowerCase()) : '-'}</td><td>${formatDate(user.last_login_at)}</td><td><div class="cell-actions"><button class="btn btn-secondary btn-sm" data-edit-user="${user.id}">${icon('pencil')}身份</button><button class="btn btn-secondary btn-sm" data-status-user="${user.id}">${icon('shield')}状态</button><button class="btn btn-quiet icon-btn btn-sm" data-delete-user="${user.id}" title="永久删除">${icon('trash-2')}</button></div></td></tr>`;
 }
 
 function bindAdminUserRows(users) {
@@ -705,25 +748,25 @@ function bindAdminUserRows(users) {
 }
 
 function showImportModal() {
-  const modal = openModal('导入正式账号', `<form id="import-form"><div class="form-field"><label>账号数据</label><textarea name="rows" rows="8" placeholder="每行填写：登录标识,姓名,年级,性别&#10;例如：2026013,张同学,2026级,女" required></textarea><span class="field-hint">性别填写“男”或“女”。姓名、年级和性别导入后仅管理员可修改。</span></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary" type="submit">${icon('upload')}开始导入</button></div></form>`);
+  const modal = openModal('导入正式账号', `<form id="import-form"><div class="form-field"><label>账号数据</label><textarea name="rows" rows="8" placeholder="每行填写：登录标识,姓名,年级,性别,专业&#10;例如：2026013,张同学,2026级,女,计算机科学与技术" required></textarea><span class="field-hint">性别填写“男”或“女”。姓名、年级、性别和专业导入后仅管理员可修改。</span></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary" type="submit">${icon('upload')}开始导入</button></div></form>`);
   modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
   modal.querySelector('#import-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const accounts = event.currentTarget.rows.value.split(/\r?\n/).filter((line) => line.trim()).map((line) => {
-      const [loginIdentifier, name, grade, genderText] = line.split(/[,，\t]/).map((part) => part.trim());
+      const [loginIdentifier, name, grade, genderText, major] = line.split(/[,，\t]/).map((part) => part.trim());
       const gender = genderText === '男' ? 'MALE' : genderText === '女' ? 'FEMALE' : genderText;
-      return { loginIdentifier, name, grade, gender };
+      return { loginIdentifier, name, grade, gender, major };
     });
     try {
       const result = await api('/api/admin/users/import', { method: 'POST', body: JSON.stringify({ accounts }) });
-      modal.querySelector('.modal-body').innerHTML = `<div class="section-heading"><div><h2>导入完成</h2><p>成功 ${result.created.length} 条，失败 ${result.failed.length} 条</p></div></div>${result.created.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>登录标识</th><th>姓名</th><th>年级</th><th>性别</th><th>初始密码</th></tr></thead><tbody>${result.created.map((item) => `<tr><td>${escapeHtml(item.loginIdentifier)}</td><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.grade)}</td><td>${item.gender === 'MALE' ? '男' : '女'}</td><td><code>${escapeHtml(item.initialPassword)}</code></td></tr>`).join('')}</tbody></table></div>` : ''}${result.failed.length ? `<div class="panel" style="margin-top:12px"><strong>失败明细</strong>${result.failed.map((item) => `<p class="field-hint">第 ${item.row} 行：${escapeHtml(item.reason)}</p>`).join('')}</div>` : ''}<div class="modal-actions"><button class="btn btn-primary" data-done>完成</button></div>`;
+      modal.querySelector('.modal-body').innerHTML = `<div class="section-heading"><div><h2>导入完成</h2><p>成功 ${result.created.length} 条，失败 ${result.failed.length} 条</p></div></div>${result.created.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>登录标识</th><th>姓名</th><th>年级</th><th>性别</th><th>专业</th><th>初始密码</th></tr></thead><tbody>${result.created.map((item) => `<tr><td>${escapeHtml(item.loginIdentifier)}</td><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.grade)}</td><td>${item.gender === 'MALE' ? '男' : '女'}</td><td>${escapeHtml(item.major)}</td><td><code>${escapeHtml(item.initialPassword)}</code></td></tr>`).join('')}</tbody></table></div>` : ''}${result.failed.length ? `<div class="panel" style="margin-top:12px"><strong>失败明细</strong>${result.failed.map((item) => `<p class="field-hint">第 ${item.row} 行：${escapeHtml(item.reason)}</p>`).join('')}</div>` : ''}<div class="modal-actions"><button class="btn btn-primary" data-done>完成</button></div>`;
       modal.querySelector('[data-done]').addEventListener('click', async () => { closeModal(); await renderAdminUsers(); });
     } catch (error) { toast(error.message, 'error'); }
   });
 }
 
 function showEditIdentity(user) {
-  const modal = openModal('修改身份字段', `<form id="identity-form" class="form-grid"><div class="form-field"><label>姓名</label><input name="name" value="${escapeHtml(user.name)}" required></div><div class="form-field"><label>年级</label><input name="grade" value="${escapeHtml(user.grade)}" required></div><div class="form-field"><label>性别</label><select name="gender" required><option value="FEMALE" ${user.gender === 'FEMALE' ? 'selected' : ''}>女</option><option value="MALE" ${user.gender === 'MALE' ? 'selected' : ''}>男</option></select></div><div class="form-field full"><label>修改原因</label><input name="reason" required></div><div class="form-actions"><button class="btn btn-secondary" type="button" data-cancel>取消</button><button class="btn btn-primary">${icon('save')}保存</button></div></form>`);
+  const modal = openModal('修改身份字段', `<form id="identity-form" class="form-grid"><div class="form-field"><label>姓名</label><input name="name" value="${escapeHtml(user.name)}" required></div><div class="form-field"><label>年级</label><input name="grade" value="${escapeHtml(user.grade)}" required></div><div class="form-field"><label>性别</label><select name="gender" required><option value="FEMALE" ${user.gender === 'FEMALE' ? 'selected' : ''}>女</option><option value="MALE" ${user.gender === 'MALE' ? 'selected' : ''}>男</option></select></div><div class="form-field"><label>专业</label><input name="major" value="${escapeHtml(user.major || '')}" required></div><div class="form-field full"><label>修改原因</label><input name="reason" required></div><div class="form-actions"><button class="btn btn-secondary" type="button" data-cancel>取消</button><button class="btn btn-primary">${icon('save')}保存</button></div></form>`);
   modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
   modal.querySelector('#identity-form').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -754,13 +797,13 @@ function showDeleteUser(user) {
 
 async function renderAdminCards() {
   const { cards } = await api('/api/admin/roommate-cards');
-  setPage(`<div class="table-wrap"><table class="data-table"><thead><tr><th>学生</th><th>作息</th><th>整洁要求</th><th>状态</th><th>更新时间</th><th></th></tr></thead><tbody>${cards.map((card) => `<tr><td><div class="cell-user">${avatar(card.avatar_url, card.name, 'avatar-sm')}<div><strong>${escapeHtml(card.name)}</strong><div class="field-hint">${escapeHtml(card.grade)} · ${escapeHtml(card.department)}</div></div></div></td><td>${escapeHtml(card.sleep_preferences.join('、'))}</td><td>${escapeHtml(labels.cleanliness[card.cleanliness_level] || '-')}</td><td>${statusBadge(labels.cardStatus[card.status], card.status === 'PUBLISHED' ? 'published' : card.status.toLowerCase())}</td><td>${formatDate(card.updated_at)}</td><td><div class="cell-actions"><button class="btn btn-secondary btn-sm" data-view-card="${card.id}">${icon('eye')}查看</button>${card.status === 'HIDDEN' ? `<button class="btn btn-secondary btn-sm" data-card-action="restore" data-id="${card.id}">${icon('rotate-ccw')}恢复</button>` : `<button class="btn btn-danger btn-sm" data-card-action="hide" data-id="${card.id}">${icon('eye-off')}隐藏</button>`}</div></td></tr>`).join('')}</tbody></table></div>`);
+  setPage(`<div class="table-wrap"><table class="data-table"><thead><tr><th>学生</th><th>地区</th><th>起床 / 睡觉</th><th>本人整理习惯</th><th>状态</th><th>更新时间</th><th></th></tr></thead><tbody>${cards.map((card) => `<tr><td><div class="cell-user">${avatar(card.avatar_url, card.name, 'avatar-sm')}<div><strong>${escapeHtml(card.name)}</strong><div class="field-hint">${escapeHtml(card.grade)} · ${escapeHtml(card.major || '-')}</div></div></div></td><td>${escapeHtml([card.origin_province, card.origin_city].filter(Boolean).join(' ') || '-')}</td><td>${escapeHtml(card.wake_up_time || '-')} / ${escapeHtml(card.sleep_time || '-')}</td><td>${escapeHtml(labels.cleanliness[card.personal_cleanliness] || '-')}</td><td>${statusBadge(labels.cardStatus[card.status], card.status === 'PUBLISHED' ? 'published' : card.status.toLowerCase())}</td><td>${formatDate(card.updated_at)}</td><td><div class="cell-actions"><button class="btn btn-secondary btn-sm" data-view-card="${card.id}">${icon('eye')}查看</button>${card.status === 'HIDDEN' ? `<button class="btn btn-secondary btn-sm" data-card-action="restore" data-id="${card.id}">${icon('rotate-ccw')}恢复</button>` : `<button class="btn btn-danger btn-sm" data-card-action="hide" data-id="${card.id}">${icon('eye-off')}隐藏</button>`}</div></td></tr>`).join('')}</tbody></table></div>`);
   document.querySelectorAll('[data-view-card]').forEach((button) => button.addEventListener('click', () => showAdminCardDetail(cards.find((card) => card.id === Number(button.dataset.viewCard)))));
   document.querySelectorAll('[data-card-action]').forEach((button) => button.addEventListener('click', () => showCardAction(Number(button.dataset.id), button.dataset.cardAction)));
 }
 
 function showAdminCardDetail(card) {
-  openModal(`${card.name}的室友卡片`, `<div class="detail-header">${avatar(card.avatar_url, card.name, 'avatar-lg')}<div><h2>${escapeHtml(card.name)}</h2><p>${escapeHtml(card.grade)} · ${escapeHtml(card.school)} ${escapeHtml(card.campus)}</p></div></div><div class="section"><dl class="detail-grid"><div class="detail-item"><dt>作息偏好</dt><dd>${escapeHtml(card.sleep_preferences.join('、'))}</dd></div><div class="detail-item"><dt>空调温度</dt><dd>夏 ${card.summer_temp_min}–${card.summer_temp_max}°C / 冬 ${card.winter_temp_min}–${card.winter_temp_max}°C</dd></div><div class="detail-item"><dt>个人性格</dt><dd>${escapeHtml(card.personality_tags.join('、'))}</dd></div><div class="detail-item"><dt>期望室友</dt><dd>${escapeHtml(card.roommate_personality_tags.join('、'))}</dd></div><div class="detail-item"><dt>自认为的缺点</dt><dd>${escapeHtml(card.self_acknowledged_shortcoming)}</dd></div><div class="detail-item"><dt>还想说的话</dt><dd>${escapeHtml(card.additional_note || '-')}</dd></div></dl></div>`, { wide: true });
+  openModal(`${card.name}的室友卡片`, cardDetailMarkup(card), { wide: true });
 }
 
 function showCardAction(cardId, action) {
