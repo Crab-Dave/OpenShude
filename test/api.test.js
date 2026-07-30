@@ -128,6 +128,7 @@ test('same-gender students form a full dormitory and can leave while selection i
   const initiator = await login('2026002', 'Student123!');
   const members = await Promise.all(['2026004', '2026005', '2026007'].map((id) => login(id, 'Student123!')));
   const extra = await login('2026009', 'Student123!');
+  const otherInitiator = await login('2026011', 'Student123!');
   const female = await login('2026001', 'Student123!');
 
   const immutable = await request(initiator, '/api/me/roommate-card', {
@@ -188,6 +189,19 @@ test('same-gender students form a full dormitory and can leave while selection i
   const fullResult = await applyAndApprove(members[2]);
   assert.equal(fullResult.approved.data.dormitory.member_count, 4);
   assert.equal(fullResult.approved.data.dormitory.status, 'FULL');
+
+  const otherDormitory = await request(otherInitiator, '/api/dormitories', {
+    method: 'POST', body: JSON.stringify({ name: '另一个测试宿舍' }),
+  });
+  assert.equal(otherDormitory.response.status, 201);
+  const initiatorDormitories = await request(initiator, '/api/dormitories');
+  assert.equal(initiatorDormitories.data.dormitories[0].id, dormitoryId);
+  assert.equal(initiatorDormitories.data.dormitories[0].current_user_role, 'INITIATOR');
+  assert.equal(initiatorDormitories.data.dormitories[0].members.length, 4);
+  assert.ok(initiatorDormitories.data.dormitories.every((item) => Array.isArray(item.members)));
+  const otherDormitories = await request(otherInitiator, '/api/dormitories');
+  assert.equal(otherDormitories.data.dormitories[0].id, otherDormitory.data.dormitory.id);
+  await request(otherInitiator, '/api/me/dormitory/leave', { method: 'POST', body: '{}' });
 
   const listed = await request(extra, '/api/dormitories');
   const listedDormitory = listed.data.dormitories.find((item) => item.id === dormitoryId);

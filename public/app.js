@@ -612,6 +612,28 @@ function showApplicationModal() {
   });
 }
 
+function dormitoryListMarkup(dormitories, currentDormitory, open) {
+  if (!dormitories.length) return emptyState('bed-double', '暂无宿舍', open ? '可以新建一个宿舍并成为发起人' : '当前阶段没有可展示的宿舍');
+  return `<div class="dormitory-grid">${dormitories.map((item) => {
+    const mine = item.id === currentDormitory?.id;
+    const isInitiator = mine && item.current_user_role === 'INITIATOR';
+    const action = mine
+      ? `<button class="btn btn-danger" data-leave-dorm ${open ? '' : 'disabled'}>${icon('log-out')}退出宿舍</button>`
+      : currentDormitory
+        ? `<button class="btn btn-secondary" disabled>${icon('check')}已加入其他宿舍</button>`
+        : item.status === 'FULL'
+          ? `<button class="btn btn-secondary" disabled>${icon('users')}已满员</button>`
+          : `<button class="btn btn-primary" data-apply-dorm="${item.id}" data-initiator-id="${item.initiator_id}" ${open ? '' : 'disabled'}>${icon('message-circle')}联系并申请</button>`;
+    return `<article class="dormitory-card ${mine ? 'current' : ''}" data-dorm-id="${item.id}" data-dorm-status="${item.status}">
+      <div class="dormitory-card-head"><div><span>${escapeHtml(item.dormitory_code)}</span><h2>${escapeHtml(item.name)}</h2></div><div class="dormitory-badges">${mine ? statusBadge('我的宿舍', 'open', 'home') : ''}${statusBadge(`${item.member_count}/4 人`, item.status.toLowerCase(), 'users')}</div></div>
+      <p>${item.building && item.room_number ? `${escapeHtml(item.building)} ${escapeHtml(item.room_number)}` : '等待管理员分配房间'}</p>
+      <div class="dormitory-owner">${icon('crown')}发起人：${escapeHtml(item.initiator_name)}</div>
+      <div class="dormitory-members"><strong>已加入成员</strong>${item.members.map((member) => `<div class="dormitory-member">${avatar(member.avatar_url, member.name, 'avatar-sm')}<div><b>${escapeHtml(member.name)}${member.role === 'INITIATOR' ? ' · 发起人' : ''}</b><span>${escapeHtml(member.grade)}</span></div>${isInitiator && member.user_id !== state.user.id && open ? `<button class="btn btn-danger btn-sm" data-remove-member="${member.user_id}">${icon('user-minus')}移除</button>` : ''}</div>`).join('')}</div>
+      <div class="dormitory-card-action">${action}</div>
+    </article>`;
+  }).join('')}</div>`;
+}
+
 async function renderDorm() {
   const [{ dormitory, applications, open }, { dormitories }] = await Promise.all([
     api('/api/me/dormitory'), api('/api/dormitories'),
@@ -620,12 +642,8 @@ async function renderDorm() {
 
   if (dormitory) {
     const isInitiator = dormitory.current_user_role === 'INITIATOR';
-    setPage(`${stageBanner}<div class="dorm-panel">
-      <div class="dorm-code"><div><span class="field-hint">我的宿舍</span><strong>${escapeHtml(dormitory.name)}</strong><p class="field-hint">${escapeHtml(dormitory.dormitory_code)} · ${dormitory.building && dormitory.room_number ? `${escapeHtml(dormitory.building)} ${escapeHtml(dormitory.room_number)}` : '等待管理员分配房间'}</p></div>${statusBadge(labels.dormitoryStatus[dormitory.status], dormitory.status.toLowerCase(), dormitory.status === 'FULL' ? 'badge-check' : 'door-open')}</div>
-      <div class="section"><div class="section-heading"><div><h2>当前成员</h2><p>${dormitory.member_count} / ${dormitory.capacity} 人</p></div></div><div class="member-list">${dormitory.members.map((member) => `<div class="member-row">${avatar(member.avatar_url, member.name, 'avatar-sm')}<div class="member-copy"><strong>${escapeHtml(member.name)} ${member.role === 'INITIATOR' ? '<span class="tag">发起人</span>' : ''}</strong><span>${escapeHtml(member.grade)} · ${formatDate(member.joined_at)}</span></div>${isInitiator && member.user_id !== state.user.id && open ? `<button class="btn btn-danger btn-sm" data-remove-member="${member.user_id}">${icon('user-minus')}移除</button>` : ''}</div>`).join('')}</div></div>
-      ${isInitiator ? `<div class="section"><div class="section-heading"><div><h2>待审核申请</h2><p>也可以直接在私信申请卡片中处理</p></div></div>${dormitory.pending_applications.length ? `<div class="member-list">${dormitory.pending_applications.map((application) => `<div class="member-row">${avatar(application.applicant_avatar, application.applicant_name, 'avatar-sm')}<div class="member-copy"><strong>${escapeHtml(application.applicant_name)}</strong><span>${escapeHtml(application.note || '未填写申请说明')}</span></div><button class="btn btn-secondary btn-sm" data-review-dorm="${application.id}" data-action="reject">拒绝</button><button class="btn btn-primary btn-sm" data-review-dorm="${application.id}" data-action="approve">通过</button></div>`).join('')}</div>` : '<p class="field-hint">暂无待审核申请</p>'}</div>` : ''}
-      <div class="form-actions"><span class="field-hint">${isInitiator ? '退出后，最早加入的成员将成为新发起人' : '退出后可以重新创建或申请其他宿舍'}</span><button class="btn btn-danger" data-leave-dorm ${open ? '' : 'disabled'}>${icon('log-out')}退出宿舍</button></div>
-    </div>`);
+    const pendingReview = isInitiator ? `<div class="panel dorm-applications"><div class="section-heading"><div><h2>待审核申请</h2><p>也可以直接在私信申请卡片中处理</p></div></div>${dormitory.pending_applications.length ? `<div class="member-list">${dormitory.pending_applications.map((application) => `<div class="member-row">${avatar(application.applicant_avatar, application.applicant_name, 'avatar-sm')}<div class="member-copy"><strong>${escapeHtml(application.applicant_name)}</strong><span>${escapeHtml(application.note || '未填写申请说明')}</span></div><button class="btn btn-secondary btn-sm" data-review-dorm="${application.id}" data-action="reject">拒绝</button><button class="btn btn-primary btn-sm" data-review-dorm="${application.id}" data-action="approve">通过</button></div>`).join('')}</div>` : '<p class="field-hint">暂无待审核申请</p>'}</div>` : '';
+    setPage(`${stageBanner}<div class="toolbar"><div class="segmented"><button class="active">全部同性别宿舍</button></div><div class="toolbar-spacer"></div><span class="field-hint">你的宿舍已置顶展示</span></div>${pendingReview}${dormitoryListMarkup(dormitories, dormitory, open)}`);
     document.querySelectorAll('[data-review-dorm]').forEach((button) => button.addEventListener('click', async () => {
       try { await api(`/api/dormitory-applications/${button.dataset.reviewDorm}/${button.dataset.action}`, { method: 'POST', body: '{}' }); toast(button.dataset.action === 'approve' ? '申请已通过' : '申请已拒绝'); await renderDorm(); }
       catch (error) { toast(error.message, 'error'); }
@@ -641,9 +659,9 @@ async function renderDorm() {
     return;
   }
 
-  setPage(`${stageBanner}<div class="toolbar"><div class="segmented"><button class="active">同性别宿舍</button></div><div class="toolbar-spacer"></div><button class="btn btn-primary" id="create-dorm" ${open ? '' : 'disabled'}>${icon('plus')}新建宿舍并加入</button></div>
+  setPage(`${stageBanner}<div class="toolbar"><div class="segmented"><button class="active">全部同性别宿舍</button></div><div class="toolbar-spacer"></div><button class="btn btn-primary" id="create-dorm" ${open ? '' : 'disabled'}>${icon('plus')}新建宿舍并加入</button></div>
     ${applications.some((item) => item.status === 'PENDING') ? `<div class="panel"><strong>待审核申请</strong>${applications.filter((item) => item.status === 'PENDING').map((item) => `<p class="field-hint">${escapeHtml(item.dormitory_name)} · ${formatDate(item.created_at)}</p>`).join('')}</div>` : ''}
-    ${dormitories.length ? `<div class="dormitory-grid">${dormitories.map((item) => `<article class="dormitory-card" data-dorm-status="${item.status}"><div class="dormitory-card-head"><div><span>${escapeHtml(item.dormitory_code)}</span><h2>${escapeHtml(item.name)}</h2></div>${statusBadge(`${item.member_count}/4 人`, item.status.toLowerCase(), 'users')}</div><p>${item.building && item.room_number ? `${escapeHtml(item.building)} ${escapeHtml(item.room_number)}` : '等待管理员分配房间'}</p><div class="dormitory-owner">${icon('crown')}发起人：${escapeHtml(item.initiator_name)}</div>${item.status === 'FULL' ? `<button class="btn btn-secondary" disabled>${icon('users')}已满员</button>` : `<button class="btn btn-primary" data-apply-dorm="${item.id}" data-initiator-id="${item.initiator_id}" ${open ? '' : 'disabled'}>${icon('message-circle')}联系并申请</button>`}</article>`).join('')}</div>` : emptyState('bed-double', '暂无宿舍', open ? '可以新建一个宿舍并成为发起人' : '自由选宿舍阶段关闭后不能创建宿舍')}`);
+    ${dormitoryListMarkup(dormitories, null, open)}`);
   document.querySelector('#create-dorm')?.addEventListener('click', showCreateDormitoryModal);
   document.querySelectorAll('[data-apply-dorm]').forEach((button) => button.addEventListener('click', async () => {
     try {

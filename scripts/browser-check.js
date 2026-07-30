@@ -98,8 +98,15 @@ let browser;
     assert.equal(await desktop.locator('#create-dorm-form [name="building"]').count(), 0);
     assert.equal(await desktop.locator('#create-dorm-form [name="roomNumber"]').count(), 0);
     assert.equal(await desktop.locator('#create-dorm-form [name="capacity"]').count(), 0);
-    await desktop.locator('[data-close]').click();
+    await desktop.locator('#create-dorm-form [name="name"]').fill('浏览器验收宿舍');
+    await desktop.locator('#create-dorm-form .btn-primary').click();
+    await desktop.waitForSelector('.dormitory-card.current');
   }
+  assert.equal(await desktop.locator('.dormitory-card.current').count(), 1);
+  assert.match(await desktop.locator('.dormitory-card').first().getAttribute('class'), /current/);
+  assert.equal(await desktop.locator('.dormitory-card').count(), await desktop.locator('.dormitory-members').count());
+  assert.match(await desktop.locator('.dormitory-card.current').textContent(), /林夏/);
+  assert.equal(await desktop.locator('.dormitory-card.current [data-leave-dorm]').count(), 1);
   await desktop.screenshot({ path: path.join(outputDir, 'dormitory-desktop.png'), fullPage: true });
 
   await desktop.locator('[data-view="discover"]').first().click();

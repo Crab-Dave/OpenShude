@@ -666,13 +666,12 @@ async function handleApi(req, res, url) {
 
   if (method === 'GET' && pathname === '/api/dormitories') {
     const dormitories = db.prepare(`
-      SELECT d.*, u.name AS initiator_name,
-        (SELECT id FROM roommate_cards WHERE user_id = d.initiator_id) AS initiator_card_id,
-        (SELECT COUNT(*) FROM dormitory_members WHERE dormitory_id = d.id) AS member_count
-      FROM dormitories d JOIN users u ON u.id = d.initiator_id
+      SELECT d.id FROM dormitories d
       WHERE d.gender = ? AND d.status IN ('OPEN', 'FULL')
       ORDER BY d.created_at DESC
-    `).all(user.gender);
+    `).all(user.gender)
+      .map((item) => dormitoryDetails(item.id, user.id))
+      .sort((left, right) => Number(Boolean(right.current_user_role)) - Number(Boolean(left.current_user_role)));
     return json(res, 200, { open: dormitorySelectionOpen(), dormitories });
   }
 

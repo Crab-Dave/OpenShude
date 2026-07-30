@@ -271,7 +271,7 @@ input:disabled { color: #62586d; background: #f0edf4; cursor: not-allowed; }
 .detail-item dd { margin: 0; line-height: 1.65; }
 
 .profile-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 24px; align-items: start; }
-.profile-form, .preview-panel, .panel, .table-wrap, .message-workspace, .dorm-panel {
+.profile-form, .preview-panel, .panel, .table-wrap, .message-workspace {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -321,7 +321,6 @@ input:disabled { color: #62586d; background: #f0edf4; cursor: not-allowed; }
 .chat-compose { padding: 12px; border-top: 1px solid var(--line); display: flex; gap: 8px; }
 .chat-compose textarea { min-height: 44px; max-height: 110px; }
 
-.dorm-panel { padding: 24px; }
 .stage-banner { margin-bottom: 16px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: 7px; }
 .stage-banner.open { color: var(--primary-dark); background: var(--primary-soft); border-color: #d5c2ed; }
 .stage-banner.closed { color: var(--muted); background: #e9edeb; }
@@ -329,16 +328,26 @@ input:disabled { color: #62586d; background: #f0edf4; cursor: not-allowed; }
 .stage-banner strong, .stage-banner span { display: block; }
 .stage-banner span { margin-top: 3px; font-size: 12px; }
 .dormitory-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-.dormitory-card { padding: 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.dormitory-card { min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); display: flex; flex-direction: column; }
+.dormitory-card.current { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(111, 66, 193, 0.1); }
 .dormitory-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .dormitory-card-head span { color: var(--muted); font-size: 11px; }
 .dormitory-card-head h2 { margin: 4px 0 0; font-size: 17px; }
+.dormitory-badges { display: flex; align-items: flex-end; gap: 5px; flex-direction: column; }
 .dormitory-card > p { min-height: 22px; color: var(--muted); font-size: 12px; }
 .dormitory-owner { margin: 14px 0; padding: 10px; display: flex; align-items: center; gap: 7px; color: #5e5369; background: var(--surface-soft); border-radius: 6px; font-size: 12px; }
 .dormitory-owner svg { width: 16px; }
-.dormitory-card > .btn { width: 100%; }
-.dorm-code { display: flex; align-items: center; justify-content: space-between; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
-.dorm-code strong { font-size: 22px; }
+.dormitory-members { flex: 1; padding-top: 12px; border-top: 1px solid var(--line); }
+.dormitory-members > strong { font-size: 12px; }
+.dormitory-member { min-width: 0; padding: 9px 0; display: flex; align-items: center; gap: 9px; border-bottom: 1px solid var(--line); }
+.dormitory-member:last-child { border-bottom: 0; }
+.dormitory-member > div { min-width: 0; flex: 1; }
+.dormitory-member b, .dormitory-member span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dormitory-member b { font-size: 12px; }
+.dormitory-member span { margin-top: 3px; color: var(--muted); font-size: 11px; }
+.dormitory-card-action { margin-top: 14px; }
+.dormitory-card-action .btn { width: 100%; }
+.dorm-applications { margin-bottom: 16px; padding: 18px; }
 .member-list { display: grid; gap: 10px; margin-top: 18px; }
 .member-row { display: flex; align-items: center; gap: 12px; min-height: 58px; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .member-row:last-child { border-bottom: 0; }
