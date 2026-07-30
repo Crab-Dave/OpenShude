@@ -303,6 +303,13 @@ function cardDetailMarkup(card, actions = '') {
       <div class="detail-item"><dt>来自地区</dt><dd>${escapeHtml([card.origin_province, card.origin_city].filter(Boolean).join(' ') || '-')}</dd></div>
       <div class="detail-item"><dt>院服尺码</dt><dd>${escapeHtml(card.clothing_size || '-')}</dd></div>
     </dl></div>
+    <div class="section"><div class="section-heading"><h2>性格与兴趣</h2></div><dl class="detail-grid">
+      <div class="detail-item"><dt>用一句话介绍自己</dt><dd>${escapeHtml(card.one_sentence_intro || '-')}</dd></div>
+      <div class="detail-item"><dt>个人性格</dt><dd>${escapeHtml(card.personality_text || '-')}</dd></div>
+      <div class="detail-item"><dt>期望室友的性格</dt><dd>${escapeHtml(card.roommate_personality_text || '-')}</dd></div>
+      <div class="detail-item"><dt>兴趣爱好、喜欢的运动等</dt><dd>${escapeHtml(card.interests_text || '-')}</dd></div>
+      <div class="detail-item"><dt>自认为的一个缺点</dt><dd>${escapeHtml(card.self_acknowledged_shortcoming || '-')}</dd></div>
+    </dl></div>
     <div class="section"><div class="section-heading"><h2>生活节奏与空调</h2></div><dl class="detail-grid">
       <div class="detail-item"><dt>夏季 / 冬季空调</dt><dd>${card.summer_temp_min ?? '-'}–${card.summer_temp_max ?? '-'}°C / ${card.winter_temp_min ?? '-'}–${card.winter_temp_max ?? '-'}°C</dd></div>
       <div class="detail-item"><dt>早上起床</dt><dd>${escapeHtml(card.wake_up_time || '-')}</dd></div>
@@ -315,22 +322,13 @@ function cardDetailMarkup(card, actions = '') {
       <div class="detail-item"><dt>公共空间维护方式</dt><dd>${escapeHtml(labels.commonSpace[card.common_space_maintenance] || '-')}</dd></div>
       <div class="detail-item"><dt>不太能接受的卫生情况</dt><dd>${escapeHtml(card.unacceptable_hygiene || '-')}</dd></div>
     </dl></div>
-    <div class="section"><div class="section-heading"><h2>性格与兴趣</h2></div><dl class="detail-grid">
-      <div class="detail-item"><dt>用一句话介绍自己</dt><dd>${escapeHtml(card.one_sentence_intro || '-')}</dd></div>
-      <div class="detail-item"><dt>个人性格</dt><dd>${escapeHtml(card.personality_text || '-')}</dd></div>
-      <div class="detail-item"><dt>期望室友的性格</dt><dd>${escapeHtml(card.roommate_personality_text || '-')}</dd></div>
-      <div class="detail-item"><dt>兴趣爱好、喜欢的运动等</dt><dd>${escapeHtml(card.interests_text || '-')}</dd></div>
-    </dl></div>
     <div class="section"><div class="section-heading"><h2>游戏、声音与相处边界</h2></div><dl class="detail-grid">
       <div class="detail-item"><dt>对自己打游戏的要求</dt><dd>${escapeHtml(card.gaming_self || '-')}</dd></div>
       <div class="detail-item"><dt>对室友打游戏的要求</dt><dd>${escapeHtml(card.gaming_roommate || '-')}</dd></div>
       <div class="detail-item"><dt>鼠标键盘等声音</dt><dd>${escapeHtml(card.keyboard_noise_text || '-')}</dd></div>
       <div class="detail-item"><dt>游戏 / 视频声音外放</dt><dd>${escapeHtml(card.media_noise_text || '-')}</dd></div>
     </dl></div>
-    <div class="section"><div class="section-heading"><h2>缺点与备注</h2></div><dl class="detail-grid">
-      <div class="detail-item"><dt>自认为的一个缺点</dt><dd>${escapeHtml(card.self_acknowledged_shortcoming || '-')}</dd></div>
-      <div class="detail-item"><dt>还想要对大家说</dt><dd>${escapeHtml(card.additional_note || '-')}</dd></div>
-    </dl></div>`;
+    <div class="section"><div class="section-heading"><h2>还想要对大家说</h2></div><p class="detail-message">${escapeHtml(card.additional_note || '-')}</p></div>`;
 }
 
 async function renderDiscover() {
@@ -463,6 +461,7 @@ async function renderProfile() {
             <div class="form-field full"><label class="required">个人性格</label><textarea name="personality_text" maxlength="300" required>${value(current, 'personality_text')}</textarea></div>
             <div class="form-field full"><label class="required">期望室友的性格</label><textarea name="roommate_personality_text" maxlength="300" required>${value(current, 'roommate_personality_text')}</textarea></div>
             <div class="form-field full"><label class="required">兴趣爱好、喜欢的运动等</label><textarea name="interests_text" maxlength="400" required>${value(current, 'interests_text')}</textarea></div>
+            <div class="form-field full"><label class="required">自认为的一个缺点</label><textarea name="self_acknowledged_shortcoming" maxlength="200" required>${value(current, 'self_acknowledged_shortcoming')}</textarea></div>
           </div>
         </div>
         <div class="section">
@@ -475,10 +474,9 @@ async function renderProfile() {
           </div>
         </div>
         <div class="section">
-          <div class="section-heading"><div><h2>缺点与补充</h2><p>坦诚说明有助于双方提前沟通</p></div></div>
+          <div class="section-heading"><div><h2>还想要对大家说</h2><p>可以补充任何希望未来室友提前了解的内容</p></div></div>
           <div class="form-grid">
-            <div class="form-field full"><label class="required">自认为的一个缺点</label><textarea name="self_acknowledged_shortcoming" maxlength="200" required>${value(current, 'self_acknowledged_shortcoming')}</textarea></div>
-            <div class="form-field full"><label>还想要对大家说</label><textarea name="additional_note" maxlength="500">${value(current, 'additional_note')}</textarea></div>
+            <div class="form-field full"><textarea name="additional_note" maxlength="500" aria-label="还想要对大家说">${value(current, 'additional_note')}</textarea></div>
           </div>
         </div>
         ${card?.status === 'HIDDEN' ? `<div class="panel" style="background:var(--danger-soft);color:var(--danger)"><strong>卡片已隐藏</strong><p>${escapeHtml(card.hidden_reason)}</p></div>` : ''}
