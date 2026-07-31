@@ -17,7 +17,7 @@ async function login(page, identifier, password) {
   assert.equal(new URL(page.url()).pathname, '/login');
   assert.equal(new URL(page.url()).searchParams.get('next'), '/roommates');
   assert.equal(await page.locator('.modal').count(), 0);
-  assert.equal(await page.locator('[data-demo-id]').count(), 13);
+  assert.equal(await page.locator('[data-demo-id]').count(), 0);
   await page.locator('#login-id').fill(identifier);
   await page.locator('#login-password').fill(password);
   await page.locator('#login-form button[type="submit"]').click();

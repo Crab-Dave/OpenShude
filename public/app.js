@@ -1,21 +1,6 @@
 const app = document.querySelector('#app');
 const modalRoot = document.querySelector('#modal-root');
 const toastRoot = document.querySelector('#toast-root');
-const demoAccounts = [
-  ['admin', '管理员', 'Admin123!'],
-  ['2026001', '林夏', 'Student123!'],
-  ['2026002', '陈遇', 'Student123!'],
-  ['2026003', '苏晴', 'Student123!'],
-  ['2026004', '周屿', 'Student123!'],
-  ['2026005', '沈知行', 'Student123!'],
-  ['2026006', '江晚', 'Student123!'],
-  ['2026007', '许舟', 'Student123!'],
-  ['2026008', '唐宁', 'Student123!'],
-  ['2026009', '顾言', 'Student123!'],
-  ['2026010', '叶澜', 'Student123!'],
-  ['2026011', '陆川', 'Student123!'],
-  ['2026012', '温然', 'Student123!'],
-];
 
 const state = {
   user: null,
@@ -389,15 +374,10 @@ function renderLoginPage() {
           <div class="form-field" style="margin-top:16px"><label for="login-password">密码</label><input id="login-password" name="password" type="password" autocomplete="current-password" required></div>
           <button class="btn btn-primary" style="width:100%;margin-top:20px" type="submit">${icon('log-in')}登录</button>
         </form>
-        <div class="login-accounts"><p>演示账号</p><div class="account-chips">${demoAccounts.map(([identifier, name]) => `<button type="button" class="btn btn-secondary btn-sm" data-demo-id="${identifier}">${escapeHtml(name)} · ${identifier}</button>`).join('')}</div></div>
       </section>
     </main>`;
   const form = document.querySelector('#login-form');
   document.querySelector('#login-home').addEventListener('click', goHome);
-  document.querySelectorAll('[data-demo-id]').forEach((button) => button.addEventListener('click', () => {
-    const account = demoAccounts.find(([identifier]) => identifier === button.dataset.demoId);
-    form.loginIdentifier.value = account[0]; form.password.value = account[2];
-  }));
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const button = form.querySelector('button[type="submit"]');
