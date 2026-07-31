@@ -60,13 +60,9 @@ jobs:
 
       - name: Check JavaScript and shell syntax
         run: |
-          node --check db.js
-          node --check server.js
           node --check public/app.js
+          node --check scripts/browser-check.js
           bash -n ops/restore-database.sh
-
-      - name: Run tests
-        run: npm test
 
       - name: Run FastAPI browser acceptance
         env:
@@ -75,8 +71,8 @@ jobs:
           DB_PATH: ${{ runner.temp }}/browser-check.db
         run: |
           google-chrome --version
-          node -e "const database = require('./db').openDatabase(process.env.DB_PATH); database.close()"
           uv run alembic upgrade head
+          uv run python -m tests.seed_browser_data
           uv run uvicorn app.main:app --host 127.0.0.1 --port 43127 --workers 1 --no-server-header >"$RUNNER_TEMP/browser-server.log" 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT

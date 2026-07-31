@@ -6,7 +6,7 @@
 
 - Python 3.13
 - uv
-- Node.js 24（仅用于前端语法、旧后端合约基线和浏览器验收）
+- Node.js 24（仅用于前端语法和 Playwright 浏览器验收）
 
 ## 启动
 
@@ -58,13 +58,16 @@ uv run pytest
 $env:DB_PATH = "tests/alembic-check.db"
 uv run alembic upgrade head
 uv run alembic check
-npm.cmd test
-node scripts/browser-check.js
+npm.cmd ci
+node --check public/app.js
+node --check scripts/browser-check.js
+npm.cmd run test:browser
 ```
 
-pytest 使用独立临时数据库，覆盖迁移、权限、安全、并发和备份恢复。Node 测试保留为旧后端行为基线。
+pytest 使用独立临时数据库，覆盖迁移、权限、安全、并发和备份恢复。
 浏览器检查默认使用本机 Microsoft Edge，也可通过 `BROWSER_EXECUTABLE` 指定浏览器；运行前需在 `APP_URL`
-指定的地址启动 FastAPI 测试服务。
+指定的地址启动 FastAPI 测试服务。浏览器验收数据库通过 `uv run alembic upgrade head` 和
+`uv run python -m tests.seed_browser_data` 显式创建。
 
 ## 配置
 

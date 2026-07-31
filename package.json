@@ -4,16 +4,10 @@
   "private": true,
   "description": "Internal roommate matching and dormitory grouping application",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
-    "test": "node --test",
-    "assets": "node scripts/generate-assets.js"
+    "test:browser": "node scripts/browser-check.js"
   },
   "engines": {
     "node": ">=24"
-  },
-  "dependencies": {
-    "lucide": "^0.468.0"
   },
   "devDependencies": {
     "playwright-core": "^1.55.0"
