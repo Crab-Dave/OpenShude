@@ -3,7 +3,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { chromium } = require('playwright-core');
 
-const edge = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
+const browserExecutable = process.env.BROWSER_EXECUTABLE
+  || (process.platform === 'win32'
+    ? 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
+    : '/usr/bin/google-chrome');
 const baseUrl = process.env.APP_URL || 'http://127.0.0.1:4173';
 const outputDir = path.join(__dirname, '..', 'artifacts');
 fs.mkdirSync(outputDir, { recursive: true });
@@ -20,7 +23,7 @@ async function login(page, identifier, password) {
 let browser;
 
 (async () => {
-  browser = await chromium.launch({ executablePath: edge, headless: true });
+  browser = await chromium.launch({ executablePath: browserExecutable, headless: true });
   const errors = [];
 
   const desktop = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
@@ -162,6 +165,7 @@ let browser;
   await admin.locator('#round-form .modal-actions .btn-primary').click();
   await admin.waitForSelector('.modal', { state: 'detached' });
   const browserRound = admin.locator('.round-admin-card', { hasText: '浏览器验收轮次' });
+  await browserRound.waitFor();
   assert.equal(await browserRound.count(), 1);
   assert.equal(await browserRound.locator('[data-edit-round]').count(), 1);
   assert.equal(await browserRound.locator('[data-round-action="open"]').count(), 1);
@@ -190,6 +194,7 @@ let browser;
   await admin.locator('#configure-group-form .btn-primary').click();
   await admin.waitForSelector('.modal', { state: 'detached' });
   const configuredGroup = admin.locator('.access-card', { hasText: '浏览器验收管理员组' });
+  await configuredGroup.filter({ hasText: '沈知行' }).waitFor();
   assert.match(await configuredGroup.textContent(), /沈知行/);
   assert.match(await configuredGroup.textContent(), /2026级/);
   assert.match(await configuredGroup.textContent(), /查看用户/);
