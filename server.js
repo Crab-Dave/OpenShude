@@ -11,6 +11,21 @@ const PORT = Number(process.env.PORT || 4173);
 const HOST = process.env.HOST || '127.0.0.1';
 const APP_VERSION = process.env.APP_VERSION || '';
 const SESSION_DAYS = 7;
+const PERMISSIONS = Object.freeze({
+  USER_READ: '查看用户',
+  USER_IMPORT: '导入普通用户',
+  USER_IDENTITY_UPDATE: '修改用户身份信息',
+  USER_STATUS_UPDATE: '修改用户状态',
+  CARD_READ: '查看卡片',
+  CARD_MODERATE: '隐藏或恢复卡片',
+  DORMITORY_READ: '查看宿舍',
+  DORMITORY_LOCATION_ASSIGN: '分配宿舍位置',
+  DORMITORY_CLOSE: '关闭宿舍',
+  DORMITORY_EXPORT: '导出宿舍列表',
+  REPORT_READ: '查看举报',
+  REPORT_RESOLVE: '处理举报',
+  AUDIT_READ_SCOPED: '查看范围内审计日志',
+});
 
 class HttpError extends Error {
   constructor(status, code, message) {
@@ -78,7 +93,8 @@ function authenticate(req, requireCsrf = false) {
   if (!token) throw new HttpError(401, 'UNAUTHORIZED', '请先登录');
   const session = db.prepare(`
     SELECT s.token_hash, s.csrf_token, s.expires_at,
-           u.id, u.login_identifier, u.role, u.name, u.grade, u.gender, u.major, u.status
+           u.id, u.login_identifier, u.account_type, u.authorization_version,
+           u.must_change_password, u.name, u.grade, u.grade_id, u.gender, u.major, u.status
     FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ?
   `).get(tokenHash(token));
@@ -92,21 +108,102 @@ function authenticate(req, requireCsrf = false) {
   return session;
 }
 
-function requireStudent(user) {
-  if (user.role !== 'STUDENT') throw new HttpError(403, 'STUDENT_ONLY', '仅学生账号可执行此操作');
+function requireUser(user) {
+  if (user.account_type !== 'USER') throw new HttpError(403, 'USER_ONLY', '仅普通用户可执行此操作');
 }
 
-function requireAdmin(user) {
-  if (user.role !== 'ADMIN') throw new HttpError(403, 'ADMIN_ONLY', '仅管理员可执行此操作');
+function activeAdminGroups(userId) {
+  const rows = db.prepare(`
+    SELECT g.id, g.code, g.name, g.description
+    FROM admin_groups g JOIN admin_group_members m ON m.group_id = g.id
+    WHERE m.user_id = ? AND g.status = 'ACTIVE' ORDER BY g.id
+  `).all(userId);
+  return rows.map((group) => ({
+    ...group,
+    permissions: db.prepare('SELECT permission_code FROM admin_group_permissions WHERE group_id = ? ORDER BY permission_code')
+      .all(group.id).map((item) => item.permission_code),
+    gradeIds: db.prepare("SELECT scope_value FROM admin_group_scopes WHERE group_id = ? AND scope_type = 'GRADE' ORDER BY scope_value")
+      .all(group.id).map((item) => Number(item.scope_value)),
+  }));
 }
 
-function audit(admin, req, action, targetType, targetId, reason = '', metadata = {}) {
+function managementProfile(user) {
+  const superAdmin = user.account_type === 'SUPER_ADMIN';
+  const groups = superAdmin ? [] : activeAdminGroups(user.id);
+  return {
+    isSuperAdmin: superAdmin,
+    canManage: superAdmin || groups.length > 0,
+    permissions: superAdmin ? Object.keys(PERMISSIONS) : [...new Set(groups.flatMap((group) => group.permissions))],
+    groups,
+  };
+}
+
+function requireManagement(user) {
+  if (!managementProfile(user).canManage) throw new HttpError(403, 'MANAGEMENT_FORBIDDEN', '当前账号没有管理权限');
+}
+
+function requireSuperAdmin(user) {
+  if (user.account_type !== 'SUPER_ADMIN') {
+    throw new HttpError(403, 'SUPER_ADMIN_ONLY', '仅超级管理员可执行此操作');
+  }
+  return { permissionCode: 'SUPER_ADMIN', groupId: null, scopeType: '', scopeValue: '' };
+}
+
+function authorize(user, permissionCode, gradeIds) {
+  if (!Object.hasOwn(PERMISSIONS, permissionCode)) throw new Error(`Unknown permission: ${permissionCode}`);
+  const targetGradeIds = [...new Set((Array.isArray(gradeIds) ? gradeIds : [gradeIds]).map(Number).filter(Number.isInteger))];
+  if (user.account_type === 'SUPER_ADMIN') {
+    return {
+      permissionCode, groupId: null,
+      scopeType: targetGradeIds.length ? 'GRADE' : '', scopeValue: targetGradeIds.join(','),
+    };
+  }
+  const groups = activeAdminGroups(user.id);
+  const candidates = groups.filter((group) => group.permissions.includes(permissionCode));
+  if (!candidates.length) throw new HttpError(403, 'PERMISSION_DENIED', '当前账号缺少所需管理权限');
+  const group = candidates.find((item) => targetGradeIds.length > 0 && targetGradeIds.every((gradeId) => item.gradeIds.includes(gradeId)));
+  if (!group) throw new HttpError(404, 'RESOURCE_NOT_FOUND', '资源不存在');
+  return { permissionCode, groupId: group.id, scopeType: 'GRADE', scopeValue: targetGradeIds.join(',') };
+}
+
+function authorizedGradeIds(user, permissionCode) {
+  if (user.account_type === 'SUPER_ADMIN') return null;
+  return [...new Set(activeAdminGroups(user.id)
+    .filter((group) => group.permissions.includes(permissionCode))
+    .flatMap((group) => group.gradeIds))];
+}
+
+function isEffectiveGroupAdmin(userId) {
+  return Boolean(db.prepare(`
+    SELECT 1 FROM admin_group_members m JOIN admin_groups g ON g.id = m.group_id
+    WHERE m.user_id = ? AND g.status = 'ACTIVE' LIMIT 1
+  `).get(userId));
+}
+
+function gradeByText(value, create = false) {
+  const text = cleanText(value, 20, true);
+  let grade = db.prepare('SELECT * FROM grades WHERE code = ? OR name = ?').get(text, text);
+  if (!grade && create) {
+    const timestamp = now();
+    const id = Number(db.prepare(`INSERT INTO grades (code, name, created_at, updated_at) VALUES (?, ?, ?, ?)`)
+      .run(text, text, timestamp, timestamp).lastInsertRowid);
+    grade = db.prepare('SELECT * FROM grades WHERE id = ?').get(id);
+  }
+  return grade;
+}
+
+function audit(admin, req, action, targetType, targetId, reason = '', metadata = {}, grant = {}, snapshots = {}) {
   db.prepare(`
-    INSERT INTO audit_logs (admin_id, action, target_type, target_id, reason, metadata, ip_address, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO audit_logs (
+      admin_id, admin_name_snapshot, action, target_type, target_id, reason, metadata, ip_address, user_agent,
+      request_id, permission_code, grant_group_id, scope_type, scope_value, result,
+      before_snapshot, after_snapshot, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    admin.id, action, targetType, String(targetId), reason, JSON.stringify(metadata),
-    req.socket.remoteAddress || '', now(),
+    admin.id, admin.name || '', action, targetType, String(targetId), reason, JSON.stringify(metadata),
+    req.socket.remoteAddress || '', req.headers['user-agent'] || '', req.headers['x-request-id'] || crypto.randomUUID(),
+    grant.permissionCode || '', grant.groupId || null, grant.scopeType || '', grant.scopeValue || '',
+    snapshots.result || 'SUCCESS', JSON.stringify(snapshots.before || {}), JSON.stringify(snapshots.after || {}), now(),
   );
 }
 
@@ -136,11 +233,14 @@ const CARD_SELECT = `
     c.gaming_self, c.gaming_roommate, c.keyboard_noise_text, c.media_noise_text,
     c.self_acknowledged_shortcoming, c.additional_note,
     c.status, c.hidden_reason, c.published_at, c.created_at, c.updated_at,
-    u.name, u.grade, u.gender, u.major, u.status AS user_status,
+    u.name, u.grade, u.grade_id, u.gender, u.major, u.status AS user_status,
     MAX(1, (
       SELECT COUNT(*) FROM dormitory_members peers
       WHERE peers.dormitory_id = (
-        SELECT own.dormitory_id FROM dormitory_members own WHERE own.user_id = c.user_id LIMIT 1
+        SELECT own.dormitory_id FROM dormitory_members own
+        WHERE own.user_id = c.user_id AND own.selection_round_id = (
+          SELECT id FROM dormitory_selection_rounds WHERE status = 'OPEN' ORDER BY id DESC LIMIT 1
+        ) LIMIT 1
       )
     )) AS team_member_count
   FROM roommate_cards c JOIN users u ON u.id = c.user_id
@@ -170,23 +270,49 @@ function getConversation(conversationId, userId) {
   return conversation;
 }
 
-function dormitorySelectionOpen() {
-  return db.prepare(`SELECT value FROM system_settings WHERE key = 'dormitory_selection_open'`).get()?.value === 'true';
+function activeDormitoryRound() {
+  return db.prepare(`
+    SELECT r.*, (SELECT COUNT(*) FROM dormitory_round_participants WHERE round_id = r.id) AS participant_count
+    FROM dormitory_selection_rounds r WHERE r.status = 'OPEN' ORDER BY r.id DESC LIMIT 1
+  `).get() || null;
 }
 
-function requireDormitorySelectionOpen() {
-  if (!dormitorySelectionOpen()) {
+function requireDormitorySelectionOpen(userId = null) {
+  const round = activeDormitoryRound();
+  if (!round) {
     throw new HttpError(403, 'DORMITORY_SELECTION_CLOSED', '自由选宿舍阶段已关闭');
   }
+  if (userId && !db.prepare('SELECT 1 FROM dormitory_round_participants WHERE round_id = ? AND user_id = ?').get(round.id, userId)) {
+    throw new HttpError(403, 'ROUND_PARTICIPATION_REQUIRED', '你不在当前选宿舍轮次的参与名单中');
+  }
+  return round;
 }
 
-function currentDormitoryForUser(userId) {
+function studentDormitoryRound(userId, requestedRoundId = null, required = true) {
+  const round = requestedRoundId
+    ? db.prepare(`
+        SELECT r.* FROM dormitory_selection_rounds r
+        JOIN dormitory_round_participants p ON p.round_id = r.id
+        WHERE r.id = ? AND p.user_id = ? AND r.status != 'DRAFT'
+      `).get(requestedRoundId, userId)
+    : db.prepare(`
+        SELECT r.* FROM dormitory_selection_rounds r
+        JOIN dormitory_round_participants p ON p.round_id = r.id
+        WHERE p.user_id = ? AND r.status != 'DRAFT'
+        ORDER BY CASE r.status WHEN 'OPEN' THEN 0 WHEN 'CLOSED' THEN 1 ELSE 2 END, r.id DESC LIMIT 1
+      `).get(userId);
+  if (!round && required) throw new HttpError(404, 'DORMITORY_ROUND_NOT_FOUND', '选宿舍轮次不存在');
+  return round;
+}
+
+function currentDormitoryForUser(userId, roundId = activeDormitoryRound()?.id) {
+  if (!roundId) return null;
   return db.prepare(`
     SELECT d.*, dm.role AS current_user_role, dm.joined_at
     FROM dormitories d JOIN dormitory_members dm ON dm.dormitory_id = d.id
-    WHERE dm.user_id = ?
+    WHERE dm.user_id = ? AND dm.selection_round_id = ?
     LIMIT 1
-  `).get(userId);
+  `).get(userId, roundId);
 }
 
 function dormitoryDetails(dormitoryId, viewerId = null) {
@@ -215,6 +341,66 @@ function dormitoryDetails(dormitoryId, viewerId = null) {
   return dormitory;
 }
 
+function archivedDormitoryResults(roundId) {
+  return db.prepare(`
+    SELECT s.*, s.id AS snapshot_id, s.source_dormitory_id AS id,
+      s.dormitory_name AS name, s.dormitory_status AS status,
+      s.initiator_name_snapshot AS initiator_name,
+      (SELECT COUNT(*) FROM dormitory_result_members WHERE snapshot_id = s.id) AS member_count
+    FROM dormitory_result_snapshots s WHERE s.selection_round_id = ? ORDER BY s.id
+  `).all(roundId).map((dormitory) => ({
+    ...dormitory,
+    members: db.prepare(`
+      SELECT source_user_id AS user_id, login_identifier_snapshot AS login_identifier,
+        name_snapshot AS name, grade_snapshot AS grade, gender_snapshot AS gender,
+        major_snapshot AS major, member_role AS role, joined_at
+      FROM dormitory_result_members WHERE snapshot_id = ? ORDER BY joined_at, login_identifier_snapshot
+    `).all(dormitory.snapshot_id),
+  }));
+}
+
+function generateDormitoryRoundSnapshot(roundId) {
+  const generatedAt = now();
+  db.prepare('DELETE FROM dormitory_result_snapshots WHERE selection_round_id = ?').run(roundId);
+  const dormitories = db.prepare(`
+    SELECT d.*, u.name AS initiator_name FROM dormitories d
+    JOIN users u ON u.id = d.initiator_id WHERE d.selection_round_id = ? ORDER BY d.id
+  `).all(roundId);
+  const insertSnapshot = db.prepare(`
+    INSERT INTO dormitory_result_snapshots (
+      selection_round_id, source_dormitory_id, dormitory_code, dormitory_name,
+      building, room_number, capacity, dormitory_status, management_grade_id,
+      gender, initiator_user_id, initiator_name_snapshot, generated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const insertMember = db.prepare(`
+    INSERT INTO dormitory_result_members (
+      snapshot_id, source_user_id, login_identifier_snapshot, name_snapshot,
+      grade_snapshot, gender_snapshot, major_snapshot, member_role, joined_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  for (const dormitory of dormitories) {
+    const snapshotId = Number(insertSnapshot.run(
+      roundId, dormitory.id, dormitory.dormitory_code, dormitory.name,
+      dormitory.building, dormitory.room_number, dormitory.capacity, dormitory.status,
+      dormitory.management_grade_id, dormitory.gender, dormitory.initiator_id,
+      dormitory.initiator_name, generatedAt,
+    ).lastInsertRowid);
+    const members = db.prepare(`
+      SELECT dm.user_id, dm.role, dm.joined_at, u.login_identifier, u.name, u.grade, u.gender, u.major
+      FROM dormitory_members dm JOIN users u ON u.id = dm.user_id
+      WHERE dm.dormitory_id = ? ORDER BY dm.joined_at, dm.user_id
+    `).all(dormitory.id);
+    for (const member of members) {
+      insertMember.run(
+        snapshotId, member.user_id, member.login_identifier, member.name, member.grade,
+        member.gender, member.major, member.role, member.joined_at,
+      );
+    }
+  }
+  return dormitories.length;
+}
+
 function refreshDormitoryStatus(dormitoryId) {
   const dormitory = db.prepare(`
     SELECT d.capacity, d.status, (SELECT COUNT(*) FROM dormitory_members WHERE dormitory_id = d.id) AS member_count
@@ -225,8 +411,8 @@ function refreshDormitoryStatus(dormitoryId) {
     .run(dormitory.member_count >= dormitory.capacity ? 'FULL' : 'OPEN', now(), dormitoryId);
 }
 
-function leaveDormitory(userId, reason = '成员退出宿舍') {
-  const dormitory = currentDormitoryForUser(userId);
+function leaveDormitory(userId, roundId = activeDormitoryRound()?.id, reason = '成员退出宿舍') {
+  const dormitory = currentDormitoryForUser(userId, roundId);
   if (!dormitory) return null;
   const membership = db.prepare(`SELECT role FROM dormitory_members WHERE dormitory_id = ? AND user_id = ?`).get(dormitory.id, userId);
   db.prepare(`DELETE FROM dormitory_members WHERE dormitory_id = ? AND user_id = ?`).run(dormitory.id, userId);
@@ -370,7 +556,11 @@ async function handleApi(req, res, url) {
       UPDATE users SET status = 'ACTIVE', last_login_at = ?, updated_at = ? WHERE id = ?
     `).run(timestamp, timestamp, user.id);
     return json(res, 200, {
-      user: { id: user.id, role: user.role, name: user.name, grade: user.grade, gender: user.gender, major: user.major, status: 'ACTIVE' },
+      user: {
+        id: user.id, accountType: user.account_type, name: user.name, grade: user.grade,
+        gradeId: user.grade_id, gender: user.gender, major: user.major, status: 'ACTIVE',
+        mustChangePassword: Boolean(user.must_change_password), ...managementProfile(user),
+      },
       csrfToken: csrf,
     }, { 'Set-Cookie': `session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 86400}` });
   }
@@ -389,8 +579,10 @@ async function handleApi(req, res, url) {
   if (method === 'GET' && pathname === '/api/me') {
     return json(res, 200, {
       user: {
-        id: user.id, loginIdentifier: user.login_identifier, role: user.role,
-        name: user.name, grade: user.grade, gender: user.gender, major: user.major, status: user.status,
+        id: user.id, loginIdentifier: user.login_identifier, accountType: user.account_type,
+        name: user.name, grade: user.grade, gradeId: user.grade_id,
+        gender: user.gender, major: user.major, status: user.status,
+        mustChangePassword: Boolean(user.must_change_password), ...managementProfile(user),
       },
       csrfToken: user.csrf_token,
     });
@@ -406,17 +598,21 @@ async function handleApi(req, res, url) {
       throw new HttpError(400, 'INVALID_CURRENT_PASSWORD', '当前密码不正确');
     }
     const password = hashPassword(next);
-    db.prepare('UPDATE users SET password_hash = ?, password_salt = ?, updated_at = ? WHERE id = ?')
+    db.prepare('UPDATE users SET password_hash = ?, password_salt = ?, must_change_password = 0, updated_at = ? WHERE id = ?')
       .run(password.hash, password.salt, now(), user.id);
     return json(res, 200, { ok: true });
   }
 
+  if (user.must_change_password) {
+    throw new HttpError(403, 'PASSWORD_CHANGE_REQUIRED', '首次登录后必须先修改初始密码');
+  }
+
   if (method === 'POST' && pathname === '/api/me/deactivate') {
-    requireStudent(user);
+    requireUser(user);
     const body = await readBody(req);
     if (body.confirmation !== '注销账号') throw new HttpError(400, 'CONFIRMATION_REQUIRED', '请输入“注销账号”确认');
     transaction(() => {
-      leaveDormitory(user.id, '成员注销账号');
+      leaveDormitory(user.id, undefined, '成员注销账号');
       db.prepare(`UPDATE users SET status = 'DEACTIVATED', deactivated_at = ?, updated_at = ? WHERE id = ?`)
         .run(now(), now(), user.id);
       db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id);
@@ -427,11 +623,11 @@ async function handleApi(req, res, url) {
   }
 
   if (pathname.startsWith('/api/admin/')) {
-    requireAdmin(user);
+    requireManagement(user);
     return handleAdminApi(req, res, url, user);
   }
 
-  requireStudent(user);
+  requireUser(user);
 
   if (method === 'GET' && pathname === '/api/me/roommate-card') {
     return json(res, 200, { card: getCardByUser(user.id) });
@@ -521,8 +717,8 @@ async function handleApi(req, res, url) {
 
   match = pathname.match(/^\/api\/users\/(\d+)\/conversations$/);
   if (method === 'POST' && match) {
-    const other = db.prepare(`SELECT id, status, role FROM users WHERE id = ?`).get(Number(match[1]));
-    if (!other || other.role !== 'STUDENT' || other.status !== 'ACTIVE' || other.id === user.id) {
+    const other = db.prepare(`SELECT id, status, account_type FROM users WHERE id = ?`).get(Number(match[1]));
+    if (!other || other.account_type !== 'USER' || other.status !== 'ACTIVE' || other.id === user.id) {
       throw new HttpError(404, 'USER_NOT_FOUND', '学生账号不存在');
     }
     if (hasBlock(user.id, other.id)) throw new HttpError(403, 'USER_BLOCKED', '无法与该用户联系');
@@ -563,11 +759,12 @@ async function handleApi(req, res, url) {
       SELECT m.*, u.name AS sender_name,
              a.status AS application_status, a.note AS application_note,
              d.id AS dormitory_id, d.name AS dormitory_name, d.dormitory_code,
-             d.capacity AS dormitory_capacity,
+             d.capacity AS dormitory_capacity, r.name AS selection_round_name, r.status AS selection_round_status,
              (SELECT COUNT(*) FROM dormitory_members WHERE dormitory_id = d.id) AS dormitory_member_count
       FROM messages m JOIN users u ON u.id = m.sender_id
       LEFT JOIN dormitory_applications a ON a.id = m.application_id
       LEFT JOIN dormitories d ON d.id = a.dormitory_id
+      LEFT JOIN dormitory_selection_rounds r ON r.id = a.selection_round_id
       WHERE m.conversation_id = ? ORDER BY m.id ASC LIMIT 200
     `).all(conversation.id);
     return json(res, 200, { conversation, messages });
@@ -661,37 +858,68 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'GET' && pathname === '/api/dormitory-selection') {
-    return json(res, 200, { open: dormitorySelectionOpen() });
+    const round = activeDormitoryRound();
+    const participating = Boolean(round && db.prepare(`
+      SELECT 1 FROM dormitory_round_participants WHERE round_id = ? AND user_id = ?
+    `).get(round.id, user.id));
+    return json(res, 200, { open: participating, round, participating });
+  }
+
+  if (method === 'GET' && pathname === '/api/dormitory-rounds') {
+    const rounds = db.prepare(`
+      SELECT r.*,
+        (SELECT COUNT(*) FROM dormitory_result_snapshots WHERE selection_round_id = r.id) AS result_count
+      FROM dormitory_selection_rounds r
+      JOIN dormitory_round_participants p ON p.round_id = r.id
+      WHERE p.user_id = ? AND r.status != 'DRAFT'
+      ORDER BY r.id DESC
+    `).all(user.id);
+    return json(res, 200, { rounds });
+  }
+
+  let roundMatch = pathname.match(/^\/api\/dormitory-rounds\/(\d+)\/results$/);
+  if (roundMatch && method === 'GET') {
+    const round = studentDormitoryRound(user.id, Number(roundMatch[1]));
+    const dormitories = round.status === 'ARCHIVED'
+      ? archivedDormitoryResults(round.id)
+      : db.prepare('SELECT id FROM dormitories WHERE selection_round_id = ? ORDER BY id').all(round.id)
+          .map((item) => dormitoryDetails(item.id, user.id));
+    return json(res, 200, { round, dormitories });
   }
 
   if (method === 'GET' && pathname === '/api/dormitories') {
+    const round = studentDormitoryRound(user.id, url.searchParams.get('roundId') ? Number(url.searchParams.get('roundId')) : null, false);
+    if (!round) return json(res, 200, { open: false, round: null, dormitories: [] });
     const dormitories = db.prepare(`
       SELECT d.id FROM dormitories d
-      WHERE d.gender = ? AND d.status IN ('OPEN', 'FULL')
+      WHERE d.selection_round_id = ? AND d.gender = ? AND d.status IN ('OPEN', 'FULL', 'CLOSED')
       ORDER BY d.created_at DESC
-    `).all(user.gender)
+    `).all(round.id, user.gender)
       .map((item) => dormitoryDetails(item.id, user.id))
       .sort((left, right) => Number(Boolean(right.current_user_role)) - Number(Boolean(left.current_user_role)));
-    return json(res, 200, { open: dormitorySelectionOpen(), dormitories });
+    return json(res, 200, { open: round.status === 'OPEN', round, dormitories });
   }
 
   if (method === 'GET' && pathname === '/api/me/dormitory') {
-    const dormitory = currentDormitoryForUser(user.id);
+    const round = studentDormitoryRound(user.id, url.searchParams.get('roundId') ? Number(url.searchParams.get('roundId')) : null, false);
+    if (!round) return json(res, 200, { open: false, round: null, dormitory: null, applications: [] });
+    const dormitory = currentDormitoryForUser(user.id, round.id);
     const applications = db.prepare(`
-      SELECT a.*, d.name AS dormitory_name, d.dormitory_code
+      SELECT a.*, d.name AS dormitory_name, d.dormitory_code, r.name AS selection_round_name
       FROM dormitory_applications a JOIN dormitories d ON d.id = a.dormitory_id
-      WHERE a.applicant_id = ? ORDER BY a.created_at DESC
-    `).all(user.id);
+      JOIN dormitory_selection_rounds r ON r.id = a.selection_round_id
+      WHERE a.applicant_id = ? AND a.selection_round_id = ? ORDER BY a.created_at DESC
+    `).all(user.id, round.id);
     return json(res, 200, {
-      open: dormitorySelectionOpen(),
+      open: round.status === 'OPEN', round,
       dormitory: dormitory ? dormitoryDetails(dormitory.id, user.id) : null,
       applications,
     });
   }
 
   if (method === 'POST' && pathname === '/api/dormitories') {
-    requireDormitorySelectionOpen();
-    if (currentDormitoryForUser(user.id)) throw new HttpError(409, 'ALREADY_IN_DORMITORY', '你已经加入一个宿舍');
+    const round = requireDormitorySelectionOpen(user.id);
+    if (currentDormitoryForUser(user.id, round.id)) throw new HttpError(409, 'ALREADY_IN_DORMITORY', '你在本轮已经加入一个宿舍');
     const body = await readBody(req);
     const name = cleanText(body.name, 40, true);
     if (!['MALE', 'FEMALE'].includes(user.gender)) throw new HttpError(409, 'GENDER_REQUIRED', '请联系管理员补充性别信息');
@@ -699,11 +927,15 @@ async function handleApi(req, res, url) {
       const timestamp = now();
       const code = `R${new Date().getFullYear()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
       const id = Number(db.prepare(`
-        INSERT INTO dormitories (dormitory_code, name, building, room_number, capacity, initiator_id, gender, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(code, name, '', '', 4, user.id, user.gender, timestamp, timestamp).lastInsertRowid);
-      db.prepare(`INSERT INTO dormitory_members (dormitory_id, user_id, role, joined_at) VALUES (?, ?, 'INITIATOR', ?)`)
-        .run(id, user.id, timestamp);
+        INSERT INTO dormitories (
+          selection_round_id, dormitory_code, name, building, room_number, capacity, initiator_id,
+          management_grade_id, gender, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(round.id, code, name, '', '', 4, user.id, user.grade_id, user.gender, timestamp, timestamp).lastInsertRowid);
+      db.prepare(`
+        INSERT INTO dormitory_members (selection_round_id, dormitory_id, user_id, role, joined_at)
+        VALUES (?, ?, ?, 'INITIATOR', ?)
+      `).run(round.id, id, user.id, timestamp);
       return id;
     });
     return json(res, 201, { dormitory: dormitoryDetails(dormitoryId, user.id) });
@@ -713,17 +945,18 @@ async function handleApi(req, res, url) {
   if (dormMatch && method === 'GET') {
     const dormitory = dormitoryDetails(Number(dormMatch[1]), user.id);
     if (!dormitory) throw new HttpError(404, 'DORMITORY_NOT_FOUND', '宿舍不存在');
-    return json(res, 200, { open: dormitorySelectionOpen(), dormitory });
+    const round = studentDormitoryRound(user.id, dormitory.selection_round_id);
+    return json(res, 200, { open: round.status === 'OPEN', round, dormitory });
   }
 
   dormMatch = pathname.match(/^\/api\/conversations\/(\d+)\/dormitory-applications$/);
   if (dormMatch && method === 'POST') {
-    requireDormitorySelectionOpen();
-    if (currentDormitoryForUser(user.id)) throw new HttpError(409, 'ALREADY_IN_DORMITORY', '你已经加入一个宿舍');
+    const round = requireDormitorySelectionOpen(user.id);
+    if (currentDormitoryForUser(user.id, round.id)) throw new HttpError(409, 'ALREADY_IN_DORMITORY', '你在本轮已经加入一个宿舍');
     const conversation = getConversation(Number(dormMatch[1]), user.id);
     const body = await readBody(req);
     const dormitory = dormitoryDetails(Number(body.dormitoryId), user.id);
-    if (!dormitory || dormitory.status !== 'OPEN' || dormitory.member_count >= dormitory.capacity) {
+    if (!dormitory || dormitory.selection_round_id !== round.id || dormitory.status !== 'OPEN' || dormitory.member_count >= dormitory.capacity) {
       throw new HttpError(409, 'DORMITORY_UNAVAILABLE', '宿舍当前不可申请');
     }
     if (dormitory.gender !== user.gender) throw new HttpError(403, 'SAME_GENDER_REQUIRED', '只能申请加入同性别宿舍');
@@ -740,9 +973,9 @@ async function handleApi(req, res, url) {
       const timestamp = now();
       const id = Number(db.prepare(`
         INSERT INTO dormitory_applications
-          (dormitory_id, applicant_id, conversation_id, note, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 'PENDING', ?, ?)
-      `).run(dormitory.id, user.id, conversation.id, note, timestamp, timestamp).lastInsertRowid);
+          (selection_round_id, dormitory_id, applicant_id, conversation_id, note, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?)
+      `).run(round.id, dormitory.id, user.id, conversation.id, note, timestamp, timestamp).lastInsertRowid);
       const messageId = Number(db.prepare(`
         INSERT INTO messages (conversation_id, sender_id, body, message_type, application_id, created_at)
         VALUES (?, ?, ?, 'DORMITORY_APPLICATION', ?, ?)
@@ -756,7 +989,7 @@ async function handleApi(req, res, url) {
 
   dormMatch = pathname.match(/^\/api\/dormitory-applications\/(\d+)\/(approve|reject)$/);
   if (dormMatch && method === 'POST') {
-    requireDormitorySelectionOpen();
+    const round = requireDormitorySelectionOpen(user.id);
     const applicationId = Number(dormMatch[1]);
     const action = dormMatch[2];
     const application = db.prepare(`
@@ -767,18 +1000,24 @@ async function handleApi(req, res, url) {
       JOIN users applicant ON applicant.id = a.applicant_id WHERE a.id = ?
     `).get(applicationId);
     if (!application || application.initiator_id !== user.id) throw new HttpError(403, 'INITIATOR_ONLY', '仅宿舍发起人可以审核申请');
+    if (application.selection_round_id !== round.id) throw new HttpError(409, 'ROUND_NOT_OPEN', '该申请所属轮次已经结束');
     if (application.status !== 'PENDING') throw new HttpError(409, 'APPLICATION_REVIEWED', '申请已处理');
     transaction(() => {
       if (action === 'approve') {
         if (application.dormitory_status !== 'OPEN' || application.member_count >= application.capacity) throw new HttpError(409, 'DORMITORY_FULL', '宿舍已满员');
-        if (currentDormitoryForUser(application.applicant_id)) throw new HttpError(409, 'APPLICANT_JOINED_OTHER', '申请人已加入其他宿舍');
+        if (!db.prepare('SELECT 1 FROM dormitory_round_participants WHERE round_id = ? AND user_id = ?').get(round.id, application.applicant_id)) {
+          throw new HttpError(409, 'APPLICANT_NOT_PARTICIPATING', '申请人不在本轮参与名单中');
+        }
+        if (currentDormitoryForUser(application.applicant_id, round.id)) throw new HttpError(409, 'APPLICANT_JOINED_OTHER', '申请人已加入其他宿舍');
         if (application.applicant_gender !== application.dormitory_gender) throw new HttpError(409, 'SAME_GENDER_REQUIRED', '申请人与宿舍性别不一致');
-        db.prepare(`INSERT INTO dormitory_members (dormitory_id, user_id, role, joined_at) VALUES (?, ?, 'MEMBER', ?)`)
-          .run(application.dormitory_id, application.applicant_id, now());
+        db.prepare(`
+          INSERT INTO dormitory_members (selection_round_id, dormitory_id, user_id, role, joined_at)
+          VALUES (?, ?, ?, 'MEMBER', ?)
+        `).run(round.id, application.dormitory_id, application.applicant_id, now());
         db.prepare(`
           UPDATE dormitory_applications SET status = 'CANCELLED', updated_at = ?
-          WHERE applicant_id = ? AND status = 'PENDING' AND id != ?
-        `).run(now(), application.applicant_id, applicationId);
+          WHERE selection_round_id = ? AND applicant_id = ? AND status = 'PENDING' AND id != ?
+        `).run(now(), round.id, application.applicant_id, applicationId);
       }
       db.prepare(`
         UPDATE dormitory_applications SET status = ?, reviewed_by = ?, reviewed_at = ?, updated_at = ? WHERE id = ?
@@ -790,11 +1029,12 @@ async function handleApi(req, res, url) {
 
   dormMatch = pathname.match(/^\/api\/dormitories\/(\d+)\/members\/(\d+)$/);
   if (dormMatch && method === 'DELETE') {
-    requireDormitorySelectionOpen();
+    const round = requireDormitorySelectionOpen(user.id);
     const dormitoryId = Number(dormMatch[1]);
     const memberId = Number(dormMatch[2]);
     const dormitory = dormitoryDetails(dormitoryId, user.id);
     if (!dormitory || dormitory.initiator_id !== user.id) throw new HttpError(403, 'INITIATOR_ONLY', '仅宿舍发起人可以移除成员');
+    if (dormitory.selection_round_id !== round.id) throw new HttpError(409, 'ROUND_NOT_OPEN', '该宿舍所属轮次已经结束');
     if (memberId === user.id) throw new HttpError(400, 'USE_LEAVE_ENDPOINT', '发起人请使用退出宿舍');
     const result = db.prepare(`DELETE FROM dormitory_members WHERE dormitory_id = ? AND user_id = ?`).run(dormitoryId, memberId);
     if (!result.changes) throw new HttpError(404, 'MEMBER_NOT_FOUND', '宿舍成员不存在');
@@ -803,8 +1043,8 @@ async function handleApi(req, res, url) {
   }
 
   if (method === 'POST' && pathname === '/api/me/dormitory/leave') {
-    requireDormitorySelectionOpen();
-    const result = transaction(() => leaveDormitory(user.id));
+    const round = requireDormitorySelectionOpen(user.id);
+    const result = transaction(() => leaveDormitory(user.id, round.id));
     if (!result) throw new HttpError(404, 'DORMITORY_NOT_FOUND', '你尚未加入宿舍');
     return json(res, 200, { ok: true });
   }
@@ -815,28 +1055,205 @@ async function handleApi(req, res, url) {
 async function handleAdminApi(req, res, url, admin) {
   const { method } = req;
   const pathname = url.pathname;
+  const superGrant = () => requireSuperAdmin(admin);
+  const gradeFilter = (rows, permission, field = 'grade_id') => {
+    const gradeIds = authorizedGradeIds(admin, permission);
+    if (gradeIds === null) return rows;
+    if (!gradeIds.length) throw new HttpError(403, 'PERMISSION_DENIED', '当前账号缺少所需管理权限');
+    return rows.filter((row) => gradeIds.includes(Number(row[field])));
+  };
+  const reportRows = () => db.prepare(`
+    SELECT r.*, reporter.name AS reporter_name, handler.name AS handler_name,
+      CASE r.target_type
+        WHEN 'ROOMMATE_CARD' THEN (
+          SELECT u.grade_id FROM roommate_cards c JOIN users u ON u.id = c.user_id WHERE c.id = r.target_id
+        )
+        WHEN 'MESSAGE' THEN (
+          SELECT u.grade_id FROM messages m JOIN users u ON u.id = m.sender_id WHERE m.id = r.target_id
+        )
+      END AS target_grade_id
+    FROM reports r JOIN users reporter ON reporter.id = r.reporter_id
+    LEFT JOIN users handler ON handler.id = r.handled_by
+    ORDER BY CASE r.status WHEN 'PENDING' THEN 0 ELSE 1 END, r.id DESC
+  `).all();
+  const groupDetails = (group) => ({
+    ...group,
+    permissions: db.prepare('SELECT permission_code FROM admin_group_permissions WHERE group_id = ? ORDER BY permission_code')
+      .all(group.id).map((item) => item.permission_code),
+    scopes: db.prepare(`
+      SELECT s.scope_type, s.scope_value, g.name AS grade_name
+      FROM admin_group_scopes s LEFT JOIN grades g ON s.scope_type = 'GRADE' AND g.id = CAST(s.scope_value AS INTEGER)
+      WHERE s.group_id = ? ORDER BY s.scope_type, s.scope_value
+    `).all(group.id),
+    members: db.prepare(`
+      SELECT u.id, u.login_identifier, u.name, u.grade, u.status
+      FROM admin_group_members m JOIN users u ON u.id = m.user_id
+      WHERE m.group_id = ? ORDER BY u.name, u.id
+    `).all(group.id),
+  });
+  const selectionGroupDetails = (group) => ({
+    ...group,
+    members: db.prepare(`
+      SELECT u.id, u.login_identifier, u.name, u.grade, u.status
+      FROM student_selection_group_members m JOIN users u ON u.id = m.user_id
+      WHERE m.group_id = ? ORDER BY u.name, u.id
+    `).all(group.id),
+  });
 
   if (method === 'GET' && pathname === '/api/admin/overview') {
+    const overviewFilter = (rows, permission, field = 'grade_id') => {
+      const gradeIds = authorizedGradeIds(admin, permission);
+      if (gradeIds === null) return rows;
+      return rows.filter((row) => gradeIds.includes(Number(row[field])));
+    };
+    const scopedCount = (permission, query, field = 'grade_id') => overviewFilter(db.prepare(query).all(), permission, field).length;
+    const currentRound = activeDormitoryRound() || db.prepare(`
+      SELECT * FROM dormitory_selection_rounds WHERE status != 'DRAFT' ORDER BY id DESC LIMIT 1
+    `).get() || null;
+    const roundId = currentRound?.id || -1;
     const counts = {
-      students: db.prepare(`SELECT COUNT(*) AS count FROM users WHERE role = 'STUDENT'`).get().count,
-      activeStudents: db.prepare(`SELECT COUNT(*) AS count FROM users WHERE role = 'STUDENT' AND status = 'ACTIVE'`).get().count,
-      publishedCards: db.prepare(`SELECT COUNT(*) AS count FROM roommate_cards WHERE status = 'PUBLISHED'`).get().count,
-      pendingReports: db.prepare(`SELECT COUNT(*) AS count FROM reports WHERE status = 'PENDING'`).get().count,
-      dormitories: db.prepare(`SELECT COUNT(*) AS count FROM dormitories WHERE status IN ('OPEN', 'FULL')`).get().count,
-      dormitoryMembers: db.prepare(`SELECT COUNT(*) AS count FROM dormitory_members`).get().count,
-      dormitorySelectionOpen: dormitorySelectionOpen(),
+      students: scopedCount('USER_READ', "SELECT grade_id FROM users WHERE account_type = 'USER'"),
+      activeStudents: scopedCount('USER_READ', "SELECT grade_id FROM users WHERE account_type = 'USER' AND status = 'ACTIVE'"),
+      publishedCards: scopedCount('CARD_READ', "SELECT u.grade_id FROM roommate_cards c JOIN users u ON u.id = c.user_id WHERE c.status = 'PUBLISHED'"),
+      pendingReports: overviewFilter(reportRows().filter((item) => item.status === 'PENDING'), 'REPORT_READ', 'target_grade_id').length,
+      dormitories: scopedCount('DORMITORY_READ', `SELECT management_grade_id FROM dormitories WHERE selection_round_id = ${roundId} AND status IN ('OPEN', 'FULL')`, 'management_grade_id'),
+      dormitoryMembers: overviewFilter(db.prepare(`
+        SELECT d.management_grade_id FROM dormitory_members m JOIN dormitories d ON d.id = m.dormitory_id
+        WHERE d.selection_round_id = ?
+      `).all(roundId), 'DORMITORY_READ', 'management_grade_id').length,
+      dormitorySelectionOpen: currentRound?.status === 'OPEN',
+      currentRound,
     };
     return json(res, 200, { counts });
   }
 
+  if (method === 'GET' && pathname === '/api/admin/permissions') {
+    superGrant();
+    return json(res, 200, { permissions: Object.entries(PERMISSIONS).map(([code, name]) => ({ code, name })) });
+  }
+
+  if (method === 'GET' && pathname === '/api/admin/grades') {
+    const grades = db.prepare("SELECT id, code, name, status FROM grades WHERE status = 'ACTIVE' ORDER BY code").all();
+    if (admin.account_type === 'SUPER_ADMIN') return json(res, 200, { grades });
+    const allowed = new Set(activeAdminGroups(admin.id).flatMap((group) => group.gradeIds));
+    return json(res, 200, { grades: grades.filter((grade) => allowed.has(grade.id)) });
+  }
+
+  if (method === 'GET' && pathname === '/api/admin/admin-groups') {
+    superGrant();
+    const groups = db.prepare(`
+      SELECT g.*, creator.name AS created_by_name FROM admin_groups g
+      LEFT JOIN users creator ON creator.id = g.created_by ORDER BY g.id DESC
+    `).all().map(groupDetails);
+    return json(res, 200, { groups });
+  }
+
+  if (method === 'POST' && pathname === '/api/admin/admin-groups') {
+    const grant = superGrant();
+    const body = await readBody(req);
+    const code = cleanText(body.code, 40, true).toUpperCase();
+    const name = cleanText(body.name, 80, true);
+    const description = cleanText(body.description, 500);
+    if (!/^[A-Z][A-Z0-9_]{1,39}$/.test(code)) throw new HttpError(400, 'INVALID_GROUP_CODE', '组编码只能使用大写字母、数字和下划线');
+    if (db.prepare('SELECT 1 FROM admin_groups WHERE code = ?').get(code)) throw new HttpError(409, 'DUPLICATE_GROUP_CODE', '管理员组编码已存在');
+    const timestamp = now();
+    const id = Number(db.prepare(`
+      INSERT INTO admin_groups (code, name, description, status, created_by, created_at, updated_at)
+      VALUES (?, ?, ?, 'ACTIVE', ?, ?, ?)
+    `).run(code, name, description, admin.id, timestamp, timestamp).lastInsertRowid);
+    audit(admin, req, 'CREATE_ADMIN_GROUP', 'ADMIN_GROUP', id, '', {}, grant, { after: { code, name, description, status: 'ACTIVE' } });
+    return json(res, 201, { group: groupDetails(db.prepare('SELECT * FROM admin_groups WHERE id = ?').get(id)) });
+  }
+
+  let match = pathname.match(/^\/api\/admin\/admin-groups\/(\d+)$/);
+  if (match && method === 'PATCH') {
+    const grant = superGrant();
+    const groupId = Number(match[1]);
+    const before = db.prepare('SELECT * FROM admin_groups WHERE id = ?').get(groupId);
+    if (!before) throw new HttpError(404, 'ADMIN_GROUP_NOT_FOUND', '管理员组不存在');
+    const body = await readBody(req);
+    const name = cleanText(body.name, 80, true);
+    const description = cleanText(body.description, 500);
+    const status = body.status;
+    if (!['ACTIVE', 'DISABLED'].includes(status)) throw new HttpError(400, 'INVALID_GROUP_STATUS', '管理员组状态无效');
+    db.prepare('UPDATE admin_groups SET name = ?, description = ?, status = ?, updated_at = ? WHERE id = ?')
+      .run(name, description, status, now(), groupId);
+    db.prepare(`
+      UPDATE users SET authorization_version = authorization_version + 1
+      WHERE id IN (SELECT user_id FROM admin_group_members WHERE group_id = ?)
+    `).run(groupId);
+    const after = db.prepare('SELECT * FROM admin_groups WHERE id = ?').get(groupId);
+    audit(admin, req, 'UPDATE_ADMIN_GROUP', 'ADMIN_GROUP', groupId, cleanText(body.reason, 200), {}, grant, { before, after });
+    return json(res, 200, { group: groupDetails(after) });
+  }
+
+  match = pathname.match(/^\/api\/admin\/admin-groups\/(\d+)\/(permissions|scopes|members)$/);
+  if (match && method === 'PUT') {
+    const grant = superGrant();
+    const groupId = Number(match[1]);
+    const section = match[2];
+    const group = db.prepare('SELECT * FROM admin_groups WHERE id = ?').get(groupId);
+    if (!group) throw new HttpError(404, 'ADMIN_GROUP_NOT_FOUND', '管理员组不存在');
+    const body = await readBody(req);
+    let before;
+    let after;
+    transaction(() => {
+      if (section === 'permissions') {
+        const values = [...new Set(Array.isArray(body.permissions) ? body.permissions : [])];
+        if (values.some((value) => !Object.hasOwn(PERMISSIONS, value))) throw new HttpError(400, 'INVALID_PERMISSION', '包含不受支持的权限编码');
+        before = db.prepare('SELECT permission_code FROM admin_group_permissions WHERE group_id = ? ORDER BY permission_code').all(groupId).map((item) => item.permission_code);
+        db.prepare('DELETE FROM admin_group_permissions WHERE group_id = ?').run(groupId);
+        const insert = db.prepare('INSERT INTO admin_group_permissions (group_id, permission_code, created_by, created_at) VALUES (?, ?, ?, ?)');
+        for (const value of values) insert.run(groupId, value, admin.id, now());
+        after = values;
+      } else if (section === 'scopes') {
+        const values = [...new Set((Array.isArray(body.gradeIds) ? body.gradeIds : []).map(Number))];
+        if (values.some((value) => !Number.isInteger(value) || !db.prepare("SELECT 1 FROM grades WHERE id = ? AND status = 'ACTIVE'").get(value))) {
+          throw new HttpError(400, 'INVALID_GRADE_SCOPE', '包含无效的年级范围');
+        }
+        before = db.prepare("SELECT scope_value FROM admin_group_scopes WHERE group_id = ? AND scope_type = 'GRADE' ORDER BY scope_value").all(groupId).map((item) => Number(item.scope_value));
+        db.prepare('DELETE FROM admin_group_scopes WHERE group_id = ?').run(groupId);
+        const insert = db.prepare("INSERT INTO admin_group_scopes (group_id, scope_type, scope_value, created_by, created_at) VALUES (?, 'GRADE', ?, ?, ?)");
+        for (const value of values) insert.run(groupId, String(value), admin.id, now());
+        after = values;
+      } else {
+        const values = [...new Set((Array.isArray(body.userIds) ? body.userIds : []).map(Number))];
+        if (values.some((value) => !Number.isInteger(value) || !db.prepare("SELECT 1 FROM users WHERE id = ? AND account_type = 'USER'").get(value))) {
+          throw new HttpError(400, 'INVALID_GROUP_MEMBER', '管理员组成员必须是普通用户');
+        }
+        before = db.prepare('SELECT user_id FROM admin_group_members WHERE group_id = ? ORDER BY user_id').all(groupId).map((item) => item.user_id);
+        db.prepare('DELETE FROM admin_group_members WHERE group_id = ?').run(groupId);
+        const insert = db.prepare('INSERT INTO admin_group_members (group_id, user_id, created_by, created_at) VALUES (?, ?, ?, ?)');
+        for (const value of values) insert.run(groupId, value, admin.id, now());
+        const affected = [...new Set([...before, ...values])];
+        for (const value of affected) db.prepare('UPDATE users SET authorization_version = authorization_version + 1 WHERE id = ?').run(value);
+        after = values;
+      }
+      if (section !== 'members') {
+        db.prepare(`
+          UPDATE users SET authorization_version = authorization_version + 1
+          WHERE id IN (SELECT user_id FROM admin_group_members WHERE group_id = ?)
+        `).run(groupId);
+      }
+    });
+    audit(admin, req, `UPDATE_ADMIN_GROUP_${section.toUpperCase()}`, 'ADMIN_GROUP', groupId, cleanText(body.reason, 200), {}, grant, { before, after });
+    return json(res, 200, { group: groupDetails(db.prepare('SELECT * FROM admin_groups WHERE id = ?').get(groupId)) });
+  }
+
   if (method === 'GET' && pathname === '/api/admin/users') {
-    const users = db.prepare(`
-      SELECT u.id, u.login_identifier, u.name, u.grade, u.gender, u.major, u.email, u.status, u.last_login_at, u.created_at,
-             c.status AS card_status
+    let users = db.prepare(`
+      SELECT u.id, u.login_identifier, u.account_type, u.name, u.grade, u.grade_id, u.gender, u.major,
+             u.email, u.status, u.last_login_at, u.created_at, c.status AS card_status
       FROM users u LEFT JOIN roommate_cards c ON c.user_id = u.id
-      WHERE u.role = 'STUDENT' ORDER BY u.id DESC
+      ORDER BY u.id DESC
     `).all();
-    return json(res, 200, { users });
+    if (admin.account_type !== 'SUPER_ADMIN') {
+      users = gradeFilter(users.filter((item) => item.account_type === 'USER'), 'USER_READ');
+    }
+    return json(res, 200, { users: users.map((item) => ({
+      ...item,
+      is_group_admin: item.account_type === 'USER' && isEffectiveGroupAdmin(item.id),
+    })) });
   }
 
   if (method === 'POST' && pathname === '/api/admin/users/import') {
@@ -850,7 +1267,10 @@ async function handleAdminApi(req, res, url, admin) {
       try {
         const login = cleanText(item.loginIdentifier, 100, true);
         const name = cleanText(item.name, 40, true);
-        const grade = cleanText(item.grade, 20, true);
+        const gradeText = cleanText(item.grade, 20, true);
+        const grade = gradeByText(gradeText, admin.account_type === 'SUPER_ADMIN');
+        if (!grade) throw new HttpError(404, 'GRADE_NOT_FOUND', '年级不在授权范围内');
+        const grant = authorize(admin, 'USER_IMPORT', grade.id);
         const major = cleanText(item.major, 80, true);
         const gender = item.gender;
         if (!['MALE', 'FEMALE'].includes(gender)) {
@@ -864,37 +1284,49 @@ async function handleAdminApi(req, res, url, admin) {
         const timestamp = now();
         const id = Number(db.prepare(`
           INSERT INTO users
-            (login_identifier, password_hash, password_salt, role, name, grade, gender, major, status, imported_by, created_at, updated_at)
-          VALUES (?, ?, ?, 'STUDENT', ?, ?, ?, ?, 'PENDING_ACTIVATION', ?, ?, ?)
-        `).run(login, password.hash, password.salt, name, grade, gender, major, admin.id, timestamp, timestamp).lastInsertRowid);
-        created.push({ id, loginIdentifier: login, name, grade, gender, major, initialPassword });
+            (login_identifier, password_hash, password_salt, role, account_type, name, grade, grade_id,
+             gender, major, status, imported_by, created_at, updated_at)
+          VALUES (?, ?, ?, 'STUDENT', 'USER', ?, ?, ?, ?, ?, 'PENDING_ACTIVATION', ?, ?, ?)
+        `).run(login, password.hash, password.salt, name, grade.name, grade.id, gender, major, admin.id, timestamp, timestamp).lastInsertRowid);
+        created.push({ id, loginIdentifier: login, name, grade: grade.name, gender, major, initialPassword });
+        audit(admin, req, 'IMPORT_USER', 'USER', id, '', {}, grant, { after: { loginIdentifier: login, name, grade: grade.name, gender, major } });
       } catch (error) {
         failed.push({ row: index + 1, loginIdentifier: item.loginIdentifier || '', reason: error.message });
       }
     }
-    audit(admin, req, 'IMPORT_USERS', 'USER_BATCH', created.map((item) => item.id).join(','), '', { created: created.length, failed: failed.length });
     return json(res, 200, { created, failed });
   }
 
-  let match = pathname.match(/^\/api\/admin\/users\/(\d+)\/identity$/);
+  match = pathname.match(/^\/api\/admin\/users\/(\d+)\/identity$/);
   if (match && method === 'PATCH') {
     const body = await readBody(req);
     const userId = Number(match[1]);
     const name = cleanText(body.name, 40, true);
-    const grade = cleanText(body.grade, 20, true);
+    const targetGrade = gradeByText(body.grade, admin.account_type === 'SUPER_ADMIN');
+    if (!targetGrade) throw new HttpError(404, 'GRADE_NOT_FOUND', '年级不在授权范围内');
     const major = cleanText(body.major, 80, true);
     const gender = body.gender;
     if (!['MALE', 'FEMALE'].includes(gender)) {
       throw new HttpError(400, 'INVALID_GENDER', '性别必须为男或女');
     }
-    const account = db.prepare(`SELECT * FROM users WHERE id = ? AND role = 'STUDENT'`).get(userId);
-    if (!account) throw new HttpError(404, 'USER_NOT_FOUND', '学生账号不存在');
+    const account = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+    if (!account) throw new HttpError(404, 'USER_NOT_FOUND', '用户账号不存在');
+    if (admin.account_type !== 'SUPER_ADMIN' && (userId === admin.id || account.account_type !== 'USER' || isEffectiveGroupAdmin(userId))) {
+      throw new HttpError(403, 'PROTECTED_ADMIN_ACCOUNT', '组管理员不能修改自己或其他管理员账号');
+    }
+    const grant = admin.account_type === 'SUPER_ADMIN'
+      ? superGrant()
+      : authorize(admin, 'USER_IDENTITY_UPDATE', [account.grade_id, targetGrade.id]);
     if (account.gender !== gender && currentDormitoryForUser(userId)) {
       throw new HttpError(409, 'USER_IN_DORMITORY', '该学生已加入宿舍，请退出后再修改性别');
     }
-    db.prepare(`UPDATE users SET name = ?, grade = ?, gender = ?, major = ?, updated_at = ? WHERE id = ?`)
-      .run(name, grade, gender, major, now(), userId);
-    audit(admin, req, 'UPDATE_IDENTITY', 'USER', userId, cleanText(body.reason, 200), { name, grade, gender, major });
+    db.prepare(`UPDATE users SET name = ?, grade = ?, grade_id = ?, gender = ?, major = ?, updated_at = ? WHERE id = ?`)
+      .run(name, targetGrade.name, targetGrade.id, gender, major, now(), userId);
+    const after = { name, grade: targetGrade.name, grade_id: targetGrade.id, gender, major };
+    audit(admin, req, 'UPDATE_IDENTITY', 'USER', userId, cleanText(body.reason, 200), {}, grant, {
+      before: { name: account.name, grade: account.grade, grade_id: account.grade_id, gender: account.gender, major: account.major },
+      after,
+    });
     return json(res, 200, { ok: true });
   }
 
@@ -906,34 +1338,90 @@ async function handleAdminApi(req, res, url, admin) {
     if (!['ACTIVE', 'SUSPENDED', 'BANNED'].includes(status)) {
       throw new HttpError(400, 'INVALID_STATUS', '账号状态无效');
     }
-    const account = db.prepare(`SELECT * FROM users WHERE id = ? AND role = 'STUDENT'`).get(userId);
-    if (!account) throw new HttpError(404, 'USER_NOT_FOUND', '学生账号不存在');
+    const account = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+    if (!account) throw new HttpError(404, 'USER_NOT_FOUND', '用户账号不存在');
+    if (admin.account_type !== 'SUPER_ADMIN' && (userId === admin.id || account.account_type !== 'USER' || isEffectiveGroupAdmin(userId))) {
+      throw new HttpError(403, 'PROTECTED_ADMIN_ACCOUNT', '组管理员不能修改自己或其他管理员账号');
+    }
+    const grant = admin.account_type === 'SUPER_ADMIN' ? superGrant() : authorize(admin, 'USER_STATUS_UPDATE', account.grade_id);
+    if (account.account_type === 'SUPER_ADMIN' && ['ACTIVE', 'PENDING_ACTIVATION'].includes(account.status) && status !== 'ACTIVE') {
+      const effectiveSuperAdmins = db.prepare(`
+        SELECT COUNT(*) AS count FROM users WHERE account_type = 'SUPER_ADMIN' AND status IN ('ACTIVE', 'PENDING_ACTIVATION')
+      `).get().count;
+      if (effectiveSuperAdmins <= 1) throw new HttpError(409, 'LAST_SUPER_ADMIN', '不能停用最后一个有效超级管理员');
+    }
     transaction(() => {
-      if (status !== 'ACTIVE') leaveDormitory(userId, `账号状态变更为 ${status}`);
+      if (status !== 'ACTIVE') leaveDormitory(userId, undefined, `账号状态变更为 ${status}`);
       db.prepare('UPDATE users SET status = ?, updated_at = ? WHERE id = ?').run(status, now(), userId);
+      if (status !== 'ACTIVE') db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
     });
-    audit(admin, req, 'UPDATE_USER_STATUS', 'USER', userId, cleanText(body.reason, 200, true), { from: account.status, to: status });
+    audit(admin, req, 'UPDATE_USER_STATUS', 'USER', userId, cleanText(body.reason, 200, true), {}, grant, { before: { status: account.status }, after: { status } });
+    return json(res, 200, { ok: true });
+  }
+
+  match = pathname.match(/^\/api\/admin\/users\/(\d+)\/account-type$/);
+  if (match && method === 'PATCH') {
+    const grant = superGrant();
+    const body = await readBody(req);
+    const userId = Number(match[1]);
+    const accountType = body.accountType;
+    if (!['USER', 'SUPER_ADMIN'].includes(accountType)) throw new HttpError(400, 'INVALID_ACCOUNT_TYPE', '账号类型无效');
+    const account = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+    if (!account) throw new HttpError(404, 'USER_NOT_FOUND', '用户账号不存在');
+    if (account.account_type === 'SUPER_ADMIN' && accountType === 'USER') {
+      const count = db.prepare("SELECT COUNT(*) AS count FROM users WHERE account_type = 'SUPER_ADMIN' AND status IN ('ACTIVE', 'PENDING_ACTIVATION')").get().count;
+      if (count <= 1 && ['ACTIVE', 'PENDING_ACTIVATION'].includes(account.status)) throw new HttpError(409, 'LAST_SUPER_ADMIN', '不能降级最后一个有效超级管理员');
+      if (!account.grade_id) throw new HttpError(409, 'GRADE_REQUIRED', '降级前必须为账号设置年级');
+    }
+    transaction(() => {
+      db.prepare('UPDATE users SET account_type = ?, authorization_version = authorization_version + 1, updated_at = ? WHERE id = ?')
+        .run(accountType, now(), userId);
+      if (accountType === 'SUPER_ADMIN') db.prepare('DELETE FROM admin_group_members WHERE user_id = ?').run(userId);
+    });
+    audit(admin, req, 'UPDATE_ACCOUNT_TYPE', 'USER', userId, cleanText(body.reason, 200, true), {}, grant, { before: { accountType: account.account_type }, after: { accountType } });
     return json(res, 200, { ok: true });
   }
 
   match = pathname.match(/^\/api\/admin\/users\/(\d+)$/);
   if (match && method === 'DELETE') {
+    const grant = superGrant();
     const body = await readBody(req);
     const userId = Number(match[1]);
-    const account = db.prepare(`SELECT * FROM users WHERE id = ? AND role = 'STUDENT'`).get(userId);
-    if (!account) throw new HttpError(404, 'USER_NOT_FOUND', '学生账号不存在');
+    const account = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+    if (!account) throw new HttpError(404, 'USER_NOT_FOUND', '用户账号不存在');
+    if (account.account_type === 'SUPER_ADMIN') {
+      const count = db.prepare("SELECT COUNT(*) AS count FROM users WHERE account_type = 'SUPER_ADMIN' AND status IN ('ACTIVE', 'PENDING_ACTIVATION')").get().count;
+      if (count <= 1 && ['ACTIVE', 'PENDING_ACTIVATION'].includes(account.status)) throw new HttpError(409, 'LAST_SUPER_ADMIN', '不能删除最后一个有效超级管理员');
+    }
     if (body.confirmation !== account.login_identifier) {
       throw new HttpError(400, 'CONFIRMATION_REQUIRED', '请输入该账号的登录标识确认删除');
     }
+    if (db.prepare(`
+      SELECT 1 FROM dormitory_members m JOIN dormitory_selection_rounds r ON r.id = m.selection_round_id
+      WHERE m.user_id = ? AND r.status = 'CLOSED' LIMIT 1
+    `).get(userId)) {
+      throw new HttpError(409, 'UNARCHIVED_DORMITORY_RESULT', '该用户存在尚未归档的宿舍结果，请先归档对应轮次');
+    }
     const reason = cleanText(body.reason, 200, true);
-    audit(admin, req, 'DELETE_USER_PERMANENTLY', 'USER', userId, reason, { loginIdentifier: account.login_identifier, name: account.name });
-    leaveDormitory(userId, '管理员永久删除账号');
-    db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    transaction(() => {
+      audit(admin, req, 'DELETE_USER_PERMANENTLY', 'USER', userId, reason, {}, grant, { before: { loginIdentifier: account.login_identifier, name: account.name, accountType: account.account_type } });
+      leaveDormitory(userId, undefined, '管理员永久删除账号');
+      for (const [table, column] of [
+        ['users', 'imported_by'], ['system_settings', 'updated_by'], ['admin_groups', 'created_by'],
+        ['admin_group_members', 'created_by'], ['admin_group_permissions', 'created_by'],
+        ['admin_group_scopes', 'created_by'], ['reports', 'handled_by'], ['dormitory_applications', 'reviewed_by'],
+        ['dormitory_selection_rounds', 'created_by'], ['dormitory_round_participants', 'added_by'],
+        ['audit_logs', 'admin_id'],
+      ]) {
+        db.prepare(`UPDATE ${table} SET ${column} = NULL WHERE ${column} = ?`).run(userId);
+      }
+      db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    });
     return json(res, 200, { ok: true });
   }
 
   if (method === 'GET' && pathname === '/api/admin/roommate-cards') {
-    const cards = db.prepare(`${CARD_SELECT} ORDER BY c.updated_at DESC`).all().map(cardFromRow);
+    const cards = gradeFilter(db.prepare(`${CARD_SELECT} ORDER BY c.updated_at DESC`).all(), 'CARD_READ').map(cardFromRow);
     return json(res, 200, { cards });
   }
 
@@ -944,6 +1432,7 @@ async function handleAdminApi(req, res, url, admin) {
     const body = await readBody(req);
     const card = getCard(cardId);
     if (!card) throw new HttpError(404, 'CARD_NOT_FOUND', '室友卡片不存在');
+    const grant = authorize(admin, 'CARD_MODERATE', card.grade_id);
     const reason = action === 'hide' ? cleanText(body.reason, 200, true) : cleanText(body.reason, 200);
     transaction(() => {
       if (action === 'hide') {
@@ -954,39 +1443,237 @@ async function handleAdminApi(req, res, url, admin) {
           .run(now(), cardId);
       }
     });
-    audit(admin, req, action === 'hide' ? 'HIDE_CARD' : 'RESTORE_CARD', 'ROOMMATE_CARD', cardId, reason);
+    audit(admin, req, action === 'hide' ? 'HIDE_CARD' : 'RESTORE_CARD', 'ROOMMATE_CARD', cardId, reason, {}, grant, { before: { status: card.status }, after: { status: action === 'hide' ? 'HIDDEN' : 'PUBLISHED' } });
     return json(res, 200, { card: getCard(cardId) });
   }
 
-  if (method === 'GET' && pathname === '/api/admin/settings/dormitory-selection') {
-    return json(res, 200, { open: dormitorySelectionOpen() });
+  if (method === 'GET' && pathname === '/api/admin/student-selection-groups') {
+    superGrant();
+    const groups = db.prepare('SELECT * FROM student_selection_groups ORDER BY name, id').all().map(selectionGroupDetails);
+    return json(res, 200, { groups });
   }
 
-  if (method === 'PATCH' && pathname === '/api/admin/settings/dormitory-selection') {
+  if (method === 'POST' && pathname === '/api/admin/student-selection-groups') {
+    const grant = superGrant();
+    const body = await readBody(req);
+    const name = cleanText(body.name, 80, true);
+    const description = cleanText(body.description, 500);
+    const memberIds = [...new Set((Array.isArray(body.memberIds) ? body.memberIds : []).map(Number))];
+    if (!memberIds.length) throw new HttpError(400, 'SELECTION_GROUP_MEMBERS_REQUIRED', '请至少选择一名学生');
+    if (memberIds.some((id) => !Number.isInteger(id) || !db.prepare("SELECT 1 FROM users WHERE id = ? AND account_type = 'USER' AND status IN ('ACTIVE', 'PENDING_ACTIVATION')").get(id))) {
+      throw new HttpError(400, 'INVALID_SELECTION_GROUP_MEMBER', '群组成员包含无效学生');
+    }
+    if (db.prepare('SELECT 1 FROM student_selection_groups WHERE name = ?').get(name)) {
+      throw new HttpError(409, 'DUPLICATE_SELECTION_GROUP_NAME', '预设群组名称已存在');
+    }
+    const timestamp = now();
+    const groupId = transaction(() => {
+      const id = Number(db.prepare(`
+        INSERT INTO student_selection_groups (name, description, created_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(name, description, admin.id, timestamp, timestamp).lastInsertRowid);
+      const insert = db.prepare(`
+        INSERT INTO student_selection_group_members (group_id, user_id, created_at) VALUES (?, ?, ?)
+      `);
+      for (const userId of memberIds) insert.run(id, userId, timestamp);
+      return id;
+    });
+    audit(admin, req, 'CREATE_STUDENT_SELECTION_GROUP', 'STUDENT_SELECTION_GROUP', groupId, cleanText(body.reason, 200), { memberCount: memberIds.length }, grant, { after: { name, description } });
+    return json(res, 201, { group: selectionGroupDetails(db.prepare('SELECT * FROM student_selection_groups WHERE id = ?').get(groupId)) });
+  }
+
+  match = pathname.match(/^\/api\/admin\/student-selection-groups\/(\d+)$/);
+  if (match && method === 'PATCH') {
+    const grant = superGrant();
+    const groupId = Number(match[1]);
+    const before = db.prepare('SELECT * FROM student_selection_groups WHERE id = ?').get(groupId);
+    if (!before) throw new HttpError(404, 'SELECTION_GROUP_NOT_FOUND', '预设群组不存在');
+    const body = await readBody(req);
+    const name = cleanText(body.name, 80, true);
+    const description = cleanText(body.description, 500);
+    const reason = cleanText(body.reason, 200, true);
+    const memberIds = [...new Set((Array.isArray(body.memberIds) ? body.memberIds : []).map(Number))];
+    if (!memberIds.length) throw new HttpError(400, 'SELECTION_GROUP_MEMBERS_REQUIRED', '请至少选择一名学生');
+    if (memberIds.some((id) => !Number.isInteger(id) || !db.prepare("SELECT 1 FROM users WHERE id = ? AND account_type = 'USER' AND status IN ('ACTIVE', 'PENDING_ACTIVATION')").get(id))) {
+      throw new HttpError(400, 'INVALID_SELECTION_GROUP_MEMBER', '群组成员包含无效学生');
+    }
+    if (db.prepare('SELECT 1 FROM student_selection_groups WHERE name = ? AND id != ?').get(name, groupId)) {
+      throw new HttpError(409, 'DUPLICATE_SELECTION_GROUP_NAME', '预设群组名称已存在');
+    }
+    transaction(() => {
+      db.prepare('UPDATE student_selection_groups SET name = ?, description = ?, updated_at = ? WHERE id = ?')
+        .run(name, description, now(), groupId);
+      db.prepare('DELETE FROM student_selection_group_members WHERE group_id = ?').run(groupId);
+      const insert = db.prepare('INSERT INTO student_selection_group_members (group_id, user_id, created_at) VALUES (?, ?, ?)');
+      for (const userId of memberIds) insert.run(groupId, userId, now());
+    });
+    audit(admin, req, 'UPDATE_STUDENT_SELECTION_GROUP', 'STUDENT_SELECTION_GROUP', groupId, reason, { memberCount: memberIds.length }, grant, { before, after: { name, description } });
+    return json(res, 200, { group: selectionGroupDetails(db.prepare('SELECT * FROM student_selection_groups WHERE id = ?').get(groupId)) });
+  }
+
+  if (match && method === 'DELETE') {
+    const grant = superGrant();
+    const groupId = Number(match[1]);
+    const group = db.prepare('SELECT * FROM student_selection_groups WHERE id = ?').get(groupId);
+    if (!group) throw new HttpError(404, 'SELECTION_GROUP_NOT_FOUND', '预设群组不存在');
     const body = await readBody(req);
     const reason = cleanText(body.reason, 200, true);
-    const open = Boolean(body.open);
-    db.prepare(`
-      INSERT INTO system_settings (key, value, updated_by, updated_at)
-      VALUES ('dormitory_selection_open', ?, ?, ?)
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at
-    `).run(String(open), admin.id, now());
-    audit(admin, req, open ? 'OPEN_DORMITORY_SELECTION' : 'CLOSE_DORMITORY_SELECTION', 'SYSTEM_SETTING', 'dormitory_selection_open', reason);
-    return json(res, 200, { open });
+    audit(admin, req, 'DELETE_STUDENT_SELECTION_GROUP', 'STUDENT_SELECTION_GROUP', groupId, reason, {}, grant, { before: group });
+    db.prepare('DELETE FROM student_selection_groups WHERE id = ?').run(groupId);
+    return json(res, 200, { ok: true });
+  }
+
+  if (method === 'GET' && pathname === '/api/admin/dormitory-rounds') {
+    if (admin.account_type !== 'SUPER_ADMIN' && !authorizedGradeIds(admin, 'DORMITORY_READ')?.length) {
+      throw new HttpError(403, 'PERMISSION_DENIED', '当前账号缺少查看宿舍的权限');
+    }
+    const rounds = db.prepare(`
+      SELECT r.*,
+        (SELECT COUNT(*) FROM dormitory_round_participants WHERE round_id = r.id) AS participant_count,
+        (SELECT COUNT(*) FROM dormitories WHERE selection_round_id = r.id) AS dormitory_count,
+        (SELECT COUNT(*) FROM dormitory_result_snapshots WHERE selection_round_id = r.id) AS result_count
+      FROM dormitory_selection_rounds r
+      ${admin.account_type === 'SUPER_ADMIN' ? '' : "WHERE r.status != 'DRAFT'"}
+      ORDER BY r.id DESC
+    `).all().map((round) => ({
+      ...round,
+      participantIds: admin.account_type === 'SUPER_ADMIN'
+        ? db.prepare('SELECT user_id FROM dormitory_round_participants WHERE round_id = ? ORDER BY user_id').all(round.id).map((item) => item.user_id)
+        : undefined,
+    }));
+    return json(res, 200, { rounds });
+  }
+
+  if (method === 'POST' && pathname === '/api/admin/dormitory-rounds') {
+    const grant = superGrant();
+    const body = await readBody(req);
+    const code = cleanText(body.code, 40, true).toUpperCase();
+    const name = cleanText(body.name, 80, true);
+    const description = cleanText(body.description, 500);
+    const startsAt = cleanText(body.startsAt, 40);
+    const endsAt = cleanText(body.endsAt, 40);
+    const participantIds = [...new Set((Array.isArray(body.participantIds) ? body.participantIds : []).map(Number))];
+    if (!/^[A-Z0-9][A-Z0-9_-]{1,39}$/.test(code)) throw new HttpError(400, 'INVALID_ROUND_CODE', '轮次编码只能使用大写字母、数字、下划线和连字符');
+    if (!participantIds.length) throw new HttpError(400, 'ROUND_PARTICIPANTS_REQUIRED', '请至少选择一名参与学生');
+    if (participantIds.some((id) => !Number.isInteger(id) || !db.prepare("SELECT 1 FROM users WHERE id = ? AND account_type = 'USER'").get(id))) {
+      throw new HttpError(400, 'INVALID_ROUND_PARTICIPANT', '参与名单包含无效学生');
+    }
+    if (db.prepare('SELECT 1 FROM dormitory_selection_rounds WHERE code = ?').get(code)) throw new HttpError(409, 'DUPLICATE_ROUND_CODE', '轮次编码已存在');
+    const timestamp = now();
+    const roundId = transaction(() => {
+      const id = Number(db.prepare(`
+        INSERT INTO dormitory_selection_rounds (
+          code, name, description, status, starts_at, ends_at, created_by, created_at, updated_at
+        ) VALUES (?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?)
+      `).run(code, name, description, startsAt || null, endsAt || null, admin.id, timestamp, timestamp).lastInsertRowid);
+      const insert = db.prepare(`
+        INSERT INTO dormitory_round_participants (round_id, user_id, added_by, created_at) VALUES (?, ?, ?, ?)
+      `);
+      for (const userId of participantIds) insert.run(id, userId, admin.id, timestamp);
+      return id;
+    });
+    audit(admin, req, 'CREATE_DORMITORY_ROUND', 'DORMITORY_ROUND', roundId, cleanText(body.reason, 200), { participantCount: participantIds.length }, grant, { after: { code, name, status: 'DRAFT' } });
+    return json(res, 201, { round: db.prepare('SELECT * FROM dormitory_selection_rounds WHERE id = ?').get(roundId) });
+  }
+
+  match = pathname.match(/^\/api\/admin\/dormitory-rounds\/(\d+)$/);
+  if (match && method === 'PATCH') {
+    const grant = superGrant();
+    const roundId = Number(match[1]);
+    const before = db.prepare('SELECT * FROM dormitory_selection_rounds WHERE id = ?').get(roundId);
+    if (!before) throw new HttpError(404, 'DORMITORY_ROUND_NOT_FOUND', '选宿舍轮次不存在');
+    if (before.status !== 'DRAFT') throw new HttpError(409, 'ROUND_NOT_EDITABLE', '只有草稿轮次可以修改配置');
+    const body = await readBody(req);
+    const name = cleanText(body.name, 80, true);
+    const description = cleanText(body.description, 500);
+    const startsAt = cleanText(body.startsAt, 40);
+    const endsAt = cleanText(body.endsAt, 40);
+    const participantIds = [...new Set((Array.isArray(body.participantIds) ? body.participantIds : []).map(Number))];
+    if (!participantIds.length) throw new HttpError(400, 'ROUND_PARTICIPANTS_REQUIRED', '请至少选择一名参与学生');
+    if (participantIds.some((id) => !Number.isInteger(id) || !db.prepare("SELECT 1 FROM users WHERE id = ? AND account_type = 'USER'").get(id))) {
+      throw new HttpError(400, 'INVALID_ROUND_PARTICIPANT', '参与名单包含无效学生');
+    }
+    transaction(() => {
+      db.prepare(`UPDATE dormitory_selection_rounds SET name = ?, description = ?, starts_at = ?, ends_at = ?, updated_at = ? WHERE id = ?`)
+        .run(name, description, startsAt || null, endsAt || null, now(), roundId);
+      db.prepare('DELETE FROM dormitory_round_participants WHERE round_id = ?').run(roundId);
+      const insert = db.prepare('INSERT INTO dormitory_round_participants (round_id, user_id, added_by, created_at) VALUES (?, ?, ?, ?)');
+      for (const userId of participantIds) insert.run(roundId, userId, admin.id, now());
+    });
+    audit(admin, req, 'UPDATE_DORMITORY_ROUND', 'DORMITORY_ROUND', roundId, cleanText(body.reason, 200, true), { participantCount: participantIds.length }, grant, { before, after: { name, description, startsAt, endsAt } });
+    return json(res, 200, { round: db.prepare('SELECT * FROM dormitory_selection_rounds WHERE id = ?').get(roundId) });
+  }
+
+  match = pathname.match(/^\/api\/admin\/dormitory-rounds\/(\d+)\/(open|close|archive)$/);
+  if (match && method === 'POST') {
+    const grant = superGrant();
+    const roundId = Number(match[1]);
+    const action = match[2];
+    const body = await readBody(req);
+    const reason = cleanText(body.reason, 200, true);
+    const round = db.prepare('SELECT * FROM dormitory_selection_rounds WHERE id = ?').get(roundId);
+    if (!round) throw new HttpError(404, 'DORMITORY_ROUND_NOT_FOUND', '选宿舍轮次不存在');
+    const requiredStatus = { open: 'DRAFT', close: 'OPEN', archive: 'CLOSED' }[action];
+    if (round.status !== requiredStatus) throw new HttpError(409, 'INVALID_ROUND_TRANSITION', '当前轮次状态不能执行该操作');
+    let snapshotCount = 0;
+    transaction(() => {
+      const timestamp = now();
+      if (action === 'open') {
+        if (activeDormitoryRound()) throw new HttpError(409, 'ROUND_ALREADY_OPEN', '已有正在进行的选宿舍轮次');
+        db.prepare("UPDATE dormitory_selection_rounds SET status = 'OPEN', opened_at = ?, updated_at = ? WHERE id = ?")
+          .run(timestamp, timestamp, roundId);
+      } else if (action === 'close') {
+        db.prepare("UPDATE dormitory_selection_rounds SET status = 'CLOSED', closed_at = ?, updated_at = ? WHERE id = ?")
+          .run(timestamp, timestamp, roundId);
+        db.prepare("UPDATE dormitory_applications SET status = 'CANCELLED', reviewed_at = ?, updated_at = ? WHERE selection_round_id = ? AND status = 'PENDING'")
+          .run(timestamp, timestamp, roundId);
+      } else {
+        snapshotCount = generateDormitoryRoundSnapshot(roundId);
+        db.prepare("UPDATE dormitory_selection_rounds SET status = 'ARCHIVED', archived_at = ?, updated_at = ? WHERE id = ?")
+          .run(timestamp, timestamp, roundId);
+      }
+    });
+    const status = { open: 'OPEN', close: 'CLOSED', archive: 'ARCHIVED' }[action];
+    audit(admin, req, `${action.toUpperCase()}_DORMITORY_ROUND`, 'DORMITORY_ROUND', roundId, reason, { snapshotCount }, grant, { before: { status: round.status }, after: { status } });
+    return json(res, 200, { round: db.prepare('SELECT * FROM dormitory_selection_rounds WHERE id = ?').get(roundId), snapshotCount });
   }
 
   if (method === 'GET' && pathname === '/api/admin/dormitories') {
-    const dormitories = db.prepare('SELECT id FROM dormitories ORDER BY id DESC').all()
-      .map((item) => dormitoryDetails(item.id));
-    return json(res, 200, { open: dormitorySelectionOpen(), dormitories });
+    const round = url.searchParams.get('roundId')
+      ? db.prepare('SELECT * FROM dormitory_selection_rounds WHERE id = ?').get(Number(url.searchParams.get('roundId')))
+      : activeDormitoryRound() || db.prepare("SELECT * FROM dormitory_selection_rounds WHERE status != 'DRAFT' ORDER BY id DESC LIMIT 1").get();
+    if (!round) throw new HttpError(404, 'DORMITORY_ROUND_NOT_FOUND', '选宿舍轮次不存在');
+    const dormitories = round.status === 'ARCHIVED'
+      ? gradeFilter(archivedDormitoryResults(round.id), 'DORMITORY_READ', 'management_grade_id')
+      : gradeFilter(db.prepare('SELECT id, management_grade_id FROM dormitories WHERE selection_round_id = ? ORDER BY id DESC').all(round.id), 'DORMITORY_READ', 'management_grade_id')
+          .map((item) => dormitoryDetails(item.id));
+    return json(res, 200, { open: round.status === 'OPEN', round, dormitories });
   }
 
   if (method === 'GET' && pathname === '/api/admin/dormitories/export') {
-    const dormitories = db.prepare('SELECT id FROM dormitories ORDER BY id DESC').all()
-      .map((item) => dormitoryDetails(item.id));
+    const round = url.searchParams.get('roundId')
+      ? db.prepare('SELECT * FROM dormitory_selection_rounds WHERE id = ?').get(Number(url.searchParams.get('roundId')))
+      : activeDormitoryRound() || db.prepare("SELECT * FROM dormitory_selection_rounds WHERE status != 'DRAFT' ORDER BY id DESC LIMIT 1").get();
+    if (!round) throw new HttpError(404, 'DORMITORY_ROUND_NOT_FOUND', '选宿舍轮次不存在');
+    const gradeIds = authorizedGradeIds(admin, 'DORMITORY_EXPORT');
+    if (gradeIds !== null && !gradeIds.length) throw new HttpError(403, 'PERMISSION_DENIED', '当前账号缺少所需管理权限');
+    const dormitories = (round.status === 'ARCHIVED'
+      ? archivedDormitoryResults(round.id)
+      : db.prepare('SELECT id, management_grade_id FROM dormitories WHERE selection_round_id = ? ORDER BY id DESC').all(round.id)
+          .map((item) => dormitoryDetails(item.id)))
+      .filter((item) => gradeIds === null || gradeIds.includes(Number(item.management_grade_id)));
+    const grant = admin.account_type === 'SUPER_ADMIN'
+      ? {
+          permissionCode: 'DORMITORY_EXPORT', groupId: null, scopeType: 'GRADE',
+          scopeValue: [...new Set(dormitories.map((item) => item.management_grade_id).filter(Boolean))].join(','),
+        }
+      : (() => {
+          const group = activeAdminGroups(admin.id).find((item) => item.permissions.includes('DORMITORY_EXPORT'));
+          return { permissionCode: 'DORMITORY_EXPORT', groupId: group.id, scopeType: 'GRADE', scopeValue: group.gradeIds.join(',') };
+        })();
     const workbook = createDormitoryWorkbook(dormitories);
-    const filename = `dormitories-${new Date().toISOString().slice(0, 10)}.xlsx`;
-    audit(admin, req, 'EXPORT_DORMITORIES', 'DORMITORY', 'ALL', '', { count: dormitories.length });
+    const filename = `dormitories-${round.code}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    audit(admin, req, 'EXPORT_DORMITORIES', 'DORMITORY_ROUND', round.id, '', { count: dormitories.length, roundCode: round.code }, grant);
     res.writeHead(200, {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${filename}"`,
@@ -1003,11 +1690,16 @@ async function handleAdminApi(req, res, url, admin) {
     const dormitoryId = Number(match[1]);
     const building = cleanText(body.building, 40, true);
     const roomNumber = cleanText(body.roomNumber, 20, true);
+    const dormitory = db.prepare('SELECT * FROM dormitories WHERE id = ?').get(dormitoryId);
+    if (!dormitory) throw new HttpError(404, 'DORMITORY_NOT_FOUND', '宿舍不存在');
+    const round = db.prepare('SELECT status FROM dormitory_selection_rounds WHERE id = ?').get(dormitory.selection_round_id);
+    if (round?.status === 'ARCHIVED') throw new HttpError(409, 'ROUND_ARCHIVED', '归档轮次不能再修改宿舍');
+    const grant = authorize(admin, 'DORMITORY_LOCATION_ASSIGN', dormitory.management_grade_id);
     const result = db.prepare(`
       UPDATE dormitories SET building = ?, room_number = ?, updated_at = ? WHERE id = ?
     `).run(building, roomNumber, now(), dormitoryId);
     if (!result.changes) throw new HttpError(404, 'DORMITORY_NOT_FOUND', '宿舍不存在');
-    audit(admin, req, 'ASSIGN_DORMITORY_LOCATION', 'DORMITORY', dormitoryId, cleanText(body.reason, 200, true), { building, roomNumber });
+    audit(admin, req, 'ASSIGN_DORMITORY_LOCATION', 'DORMITORY', dormitoryId, cleanText(body.reason, 200, true), {}, grant, { before: { building: dormitory.building, roomNumber: dormitory.room_number }, after: { building, roomNumber } });
     return json(res, 200, { dormitory: dormitoryDetails(dormitoryId) });
   }
 
@@ -1016,21 +1708,21 @@ async function handleAdminApi(req, res, url, admin) {
     const body = await readBody(req);
     const dormitoryId = Number(match[1]);
     const reason = cleanText(body.reason, 200, true);
-    if (!dormitoryDetails(dormitoryId)) throw new HttpError(404, 'DORMITORY_NOT_FOUND', '宿舍不存在');
+    const dormitory = db.prepare('SELECT * FROM dormitories WHERE id = ?').get(dormitoryId);
+    if (!dormitory) throw new HttpError(404, 'DORMITORY_NOT_FOUND', '宿舍不存在');
+    const round = db.prepare('SELECT status FROM dormitory_selection_rounds WHERE id = ?').get(dormitory.selection_round_id);
+    if (round?.status === 'ARCHIVED') throw new HttpError(409, 'ROUND_ARCHIVED', '归档轮次不能再修改宿舍');
+    const grant = authorize(admin, 'DORMITORY_CLOSE', dormitory.management_grade_id);
     db.prepare(`UPDATE dormitories SET status = 'CLOSED', updated_at = ? WHERE id = ?`).run(now(), dormitoryId);
     db.prepare(`UPDATE dormitory_applications SET status = 'CANCELLED', updated_at = ? WHERE dormitory_id = ? AND status = 'PENDING'`)
       .run(now(), dormitoryId);
-    audit(admin, req, 'CLOSE_DORMITORY', 'DORMITORY', dormitoryId, reason);
+    audit(admin, req, 'CLOSE_DORMITORY', 'DORMITORY', dormitoryId, reason, {}, grant, { before: { status: dormitory.status }, after: { status: 'CLOSED' } });
     return json(res, 200, { dormitory: dormitoryDetails(dormitoryId) });
   }
 
   if (method === 'GET' && pathname === '/api/admin/reports') {
-    const reports = db.prepare(`
-      SELECT r.*, reporter.name AS reporter_name, handler.name AS handler_name
-      FROM reports r JOIN users reporter ON reporter.id = r.reporter_id
-      LEFT JOIN users handler ON handler.id = r.handled_by
-      ORDER BY CASE r.status WHEN 'PENDING' THEN 0 ELSE 1 END, r.id DESC
-    `).all().map((report) => ({ ...report, snapshot: JSON.parse(report.snapshot || '{}') }));
+    const reports = gradeFilter(reportRows(), 'REPORT_READ', 'target_grade_id')
+      .map((report) => ({ ...report, snapshot: JSON.parse(report.snapshot || '{}') }));
     return json(res, 200, { reports });
   }
 
@@ -1040,19 +1732,33 @@ async function handleAdminApi(req, res, url, admin) {
     const reportId = Number(match[1]);
     const status = body.status === 'REJECTED' ? 'REJECTED' : 'RESOLVED';
     const resolution = cleanText(body.resolution, 500, true);
+    const report = reportRows().find((item) => item.id === reportId);
+    if (!report) throw new HttpError(404, 'REPORT_NOT_FOUND', '举报不存在');
+    const grant = authorize(admin, 'REPORT_RESOLVE', report.target_grade_id);
     const result = db.prepare(`
       UPDATE reports SET status = ?, resolution = ?, handled_by = ?, handled_at = ? WHERE id = ?
     `).run(status, resolution, admin.id, now(), reportId);
     if (!result.changes) throw new HttpError(404, 'REPORT_NOT_FOUND', '举报不存在');
-    audit(admin, req, 'RESOLVE_REPORT', 'REPORT', reportId, resolution, { status });
+    audit(admin, req, 'RESOLVE_REPORT', 'REPORT', reportId, resolution, {}, grant, { before: { status: report.status }, after: { status } });
     return json(res, 200, { ok: true });
   }
 
   if (method === 'GET' && pathname === '/api/admin/audit-logs') {
-    const logs = db.prepare(`
-      SELECT a.*, u.name AS admin_name FROM audit_logs a
-      LEFT JOIN users u ON u.id = a.admin_id ORDER BY a.id DESC LIMIT 200
-    `).all().map((log) => ({ ...log, metadata: JSON.parse(log.metadata || '{}') }));
+    let logs = db.prepare(`
+      SELECT a.*, COALESCE(NULLIF(a.admin_name_snapshot, ''), u.name) AS admin_name FROM audit_logs a
+      LEFT JOIN users u ON u.id = a.admin_id ORDER BY a.id DESC LIMIT 500
+    `).all();
+    if (admin.account_type !== 'SUPER_ADMIN') {
+      const gradeIds = authorizedGradeIds(admin, 'AUDIT_READ_SCOPED');
+      if (!gradeIds.length) throw new HttpError(403, 'PERMISSION_DENIED', '当前账号缺少所需管理权限');
+      logs = logs.filter((log) => log.scope_type === 'GRADE' && String(log.scope_value).split(',').some((value) => gradeIds.includes(Number(value))));
+    }
+    logs = logs.slice(0, 200).map((log) => ({
+      ...log,
+      metadata: JSON.parse(log.metadata || '{}'),
+      before_snapshot: JSON.parse(log.before_snapshot || '{}'),
+      after_snapshot: JSON.parse(log.after_snapshot || '{}'),
+    }));
     return json(res, 200, { logs });
   }
 
@@ -1099,7 +1805,17 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith('/api/')) return await handleApi(req, res, url);
     return serveStatic(req, res, url);
   } catch (error) {
-    if (error instanceof HttpError) return json(res, error.status, { error: { code: error.code, message: error.message } });
+    if (error instanceof HttpError) {
+      if (url.pathname.startsWith('/api/admin/') && !['GET', 'HEAD', 'OPTIONS'].includes(req.method) && error.status !== 401) {
+        try {
+          const actor = authenticate(req);
+          audit(actor, req, 'DENIED_MANAGEMENT_REQUEST', 'API', url.pathname, '', {
+            method: req.method, errorCode: error.code,
+          }, {}, { result: 'FAILURE' });
+        } catch {}
+      }
+      return json(res, error.status, { error: { code: error.code, message: error.message } });
+    }
     console.error(error);
     return json(res, 500, { error: { code: 'INTERNAL_ERROR', message: '服务器暂时无法处理请求' } });
   }

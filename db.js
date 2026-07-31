@@ -43,8 +43,12 @@ function createSchema(db) {
       password_hash TEXT NOT NULL,
       password_salt TEXT NOT NULL,
       role TEXT NOT NULL CHECK (role IN ('STUDENT', 'ADMIN')),
+      account_type TEXT NOT NULL DEFAULT 'USER' CHECK (account_type IN ('USER', 'SUPER_ADMIN')),
+      authorization_version INTEGER NOT NULL DEFAULT 1,
+      must_change_password INTEGER NOT NULL DEFAULT 0 CHECK (must_change_password IN (0, 1)),
       name TEXT NOT NULL,
       grade TEXT NOT NULL,
+      grade_id INTEGER REFERENCES grades(id),
       gender TEXT NOT NULL DEFAULT 'UNSPECIFIED' CHECK (gender IN ('MALE', 'FEMALE', 'UNSPECIFIED')),
       major TEXT NOT NULL DEFAULT '',
       email TEXT,
@@ -164,12 +168,22 @@ function createSchema(db) {
     CREATE TABLE IF NOT EXISTS audit_logs (
       id INTEGER PRIMARY KEY,
       admin_id INTEGER REFERENCES users(id),
+      admin_name_snapshot TEXT NOT NULL DEFAULT '',
       action TEXT NOT NULL,
       target_type TEXT NOT NULL,
       target_id TEXT NOT NULL,
       reason TEXT NOT NULL DEFAULT '',
       metadata TEXT NOT NULL DEFAULT '{}',
       ip_address TEXT NOT NULL DEFAULT '',
+      user_agent TEXT NOT NULL DEFAULT '',
+      request_id TEXT NOT NULL DEFAULT '',
+      permission_code TEXT NOT NULL DEFAULT '',
+      grant_group_id INTEGER REFERENCES admin_groups(id),
+      scope_type TEXT NOT NULL DEFAULT '',
+      scope_value TEXT NOT NULL DEFAULT '',
+      result TEXT NOT NULL DEFAULT 'SUCCESS',
+      before_snapshot TEXT NOT NULL DEFAULT '{}',
+      after_snapshot TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL
     );
 
@@ -188,14 +202,63 @@ function createSchema(db) {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS dormitory_selection_rounds (
+      id INTEGER PRIMARY KEY,
+      code TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'DRAFT'
+        CHECK (status IN ('DRAFT', 'OPEN', 'CLOSED', 'ARCHIVED')),
+      starts_at TEXT,
+      ends_at TEXT,
+      created_by INTEGER REFERENCES users(id),
+      opened_at TEXT,
+      closed_at TEXT,
+      archived_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_single_open_dormitory_round
+      ON dormitory_selection_rounds(status) WHERE status = 'OPEN';
+
+    CREATE TABLE IF NOT EXISTS dormitory_round_participants (
+      round_id INTEGER NOT NULL REFERENCES dormitory_selection_rounds(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      added_by INTEGER REFERENCES users(id),
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(round_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_dormitory_round_participants_user
+      ON dormitory_round_participants(user_id, round_id);
+
+    CREATE TABLE IF NOT EXISTS student_selection_groups (
+      id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT NOT NULL DEFAULT '',
+      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS student_selection_group_members (
+      group_id INTEGER NOT NULL REFERENCES student_selection_groups(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(group_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_student_selection_group_members_user
+      ON student_selection_group_members(user_id, group_id);
+
     CREATE TABLE IF NOT EXISTS dormitories (
       id INTEGER PRIMARY KEY,
+      selection_round_id INTEGER NOT NULL REFERENCES dormitory_selection_rounds(id),
       dormitory_code TEXT NOT NULL UNIQUE,
       name TEXT NOT NULL,
       building TEXT NOT NULL DEFAULT '',
       room_number TEXT NOT NULL DEFAULT '',
       capacity INTEGER NOT NULL DEFAULT 4 CHECK (capacity = 4),
       initiator_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      management_grade_id INTEGER REFERENCES grades(id),
       gender TEXT NOT NULL CHECK (gender IN ('MALE', 'FEMALE')),
       status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'FULL', 'CLOSED')),
       created_at TEXT NOT NULL,
@@ -203,16 +266,17 @@ function createSchema(db) {
     );
 
     CREATE TABLE IF NOT EXISTS dormitory_members (
+      selection_round_id INTEGER NOT NULL REFERENCES dormitory_selection_rounds(id),
       dormitory_id INTEGER NOT NULL REFERENCES dormitories(id) ON DELETE CASCADE,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       role TEXT NOT NULL CHECK (role IN ('INITIATOR', 'MEMBER')),
       joined_at TEXT NOT NULL,
       PRIMARY KEY(dormitory_id, user_id)
     );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_dormitory_member_user ON dormitory_members(user_id);
 
     CREATE TABLE IF NOT EXISTS dormitory_applications (
       id INTEGER PRIMARY KEY,
+      selection_round_id INTEGER NOT NULL REFERENCES dormitory_selection_rounds(id),
       dormitory_id INTEGER NOT NULL REFERENCES dormitories(id) ON DELETE CASCADE,
       applicant_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
@@ -226,6 +290,85 @@ function createSchema(db) {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_dormitory_application
       ON dormitory_applications(dormitory_id, applicant_id) WHERE status = 'PENDING';
+
+    CREATE TABLE IF NOT EXISTS dormitory_result_snapshots (
+      id INTEGER PRIMARY KEY,
+      selection_round_id INTEGER NOT NULL REFERENCES dormitory_selection_rounds(id) ON DELETE CASCADE,
+      source_dormitory_id INTEGER,
+      dormitory_code TEXT NOT NULL,
+      dormitory_name TEXT NOT NULL,
+      building TEXT NOT NULL DEFAULT '',
+      room_number TEXT NOT NULL DEFAULT '',
+      capacity INTEGER NOT NULL,
+      dormitory_status TEXT NOT NULL,
+      management_grade_id INTEGER REFERENCES grades(id),
+      gender TEXT NOT NULL,
+      initiator_user_id INTEGER,
+      initiator_name_snapshot TEXT NOT NULL,
+      generated_at TEXT NOT NULL,
+      UNIQUE(selection_round_id, source_dormitory_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS dormitory_result_members (
+      snapshot_id INTEGER NOT NULL REFERENCES dormitory_result_snapshots(id) ON DELETE CASCADE,
+      source_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      login_identifier_snapshot TEXT NOT NULL,
+      name_snapshot TEXT NOT NULL,
+      grade_snapshot TEXT NOT NULL,
+      gender_snapshot TEXT NOT NULL,
+      major_snapshot TEXT NOT NULL,
+      member_role TEXT NOT NULL,
+      joined_at TEXT NOT NULL,
+      PRIMARY KEY(snapshot_id, login_identifier_snapshot)
+    );
+
+    CREATE TABLE IF NOT EXISTS grades (
+      id INTEGER PRIMARY KEY,
+      code TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'DISABLED')),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS admin_groups (
+      id INTEGER PRIMARY KEY,
+      code TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'DISABLED')),
+      created_by INTEGER REFERENCES users(id),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS admin_group_members (
+      group_id INTEGER NOT NULL REFERENCES admin_groups(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_by INTEGER REFERENCES users(id),
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(group_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS admin_group_permissions (
+      group_id INTEGER NOT NULL REFERENCES admin_groups(id) ON DELETE CASCADE,
+      permission_code TEXT NOT NULL,
+      created_by INTEGER REFERENCES users(id),
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(group_id, permission_code)
+    );
+
+    CREATE TABLE IF NOT EXISTS admin_group_scopes (
+      group_id INTEGER NOT NULL REFERENCES admin_groups(id) ON DELETE CASCADE,
+      scope_type TEXT NOT NULL,
+      scope_value TEXT NOT NULL,
+      created_by INTEGER REFERENCES users(id),
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(group_id, scope_type, scope_value)
+    );
+    CREATE INDEX IF NOT EXISTS idx_admin_group_members_user ON admin_group_members(user_id);
+    CREATE INDEX IF NOT EXISTS idx_admin_group_permissions_code ON admin_group_permissions(permission_code);
+    CREATE INDEX IF NOT EXISTS idx_admin_group_scopes_value ON admin_group_scopes(scope_type, scope_value);
   `);
 }
 
@@ -245,6 +388,19 @@ function migrateSchema(db) {
   if (!userColumns.includes('major')) {
     db.exec("ALTER TABLE users ADD COLUMN major TEXT NOT NULL DEFAULT ''");
   }
+  const addedAccountType = !userColumns.includes('account_type');
+  if (!userColumns.includes('account_type')) {
+    db.exec("ALTER TABLE users ADD COLUMN account_type TEXT NOT NULL DEFAULT 'USER'");
+  }
+  if (!userColumns.includes('authorization_version')) {
+    db.exec('ALTER TABLE users ADD COLUMN authorization_version INTEGER NOT NULL DEFAULT 1');
+  }
+  if (!userColumns.includes('must_change_password')) {
+    db.exec('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!userColumns.includes('grade_id')) {
+    db.exec('ALTER TABLE users ADD COLUMN grade_id INTEGER REFERENCES grades(id)');
+  }
   const cardColumns = db.prepare('PRAGMA table_info(roommate_cards)').all().map((column) => column.name);
   const newCardColumns = [
     'origin_province', 'origin_city', 'clothing_size', 'wake_up_time', 'sleep_time', 'nap_habit',
@@ -259,10 +415,96 @@ function migrateSchema(db) {
   if (!dormitoryColumns.includes('gender')) {
     db.exec("ALTER TABLE dormitories ADD COLUMN gender TEXT NOT NULL DEFAULT 'UNSPECIFIED'");
   }
+  if (!dormitoryColumns.includes('management_grade_id')) {
+    db.exec('ALTER TABLE dormitories ADD COLUMN management_grade_id INTEGER REFERENCES grades(id)');
+  }
+  if (!dormitoryColumns.includes('selection_round_id')) {
+    db.exec('ALTER TABLE dormitories ADD COLUMN selection_round_id INTEGER REFERENCES dormitory_selection_rounds(id)');
+  }
+  const memberColumns = db.prepare('PRAGMA table_info(dormitory_members)').all().map((column) => column.name);
+  if (!memberColumns.includes('selection_round_id')) {
+    db.exec('ALTER TABLE dormitory_members ADD COLUMN selection_round_id INTEGER REFERENCES dormitory_selection_rounds(id)');
+  }
+  const applicationColumns = db.prepare('PRAGMA table_info(dormitory_applications)').all().map((column) => column.name);
+  if (!applicationColumns.includes('selection_round_id')) {
+    db.exec('ALTER TABLE dormitory_applications ADD COLUMN selection_round_id INTEGER REFERENCES dormitory_selection_rounds(id)');
+  }
+  const auditColumns = db.prepare('PRAGMA table_info(audit_logs)').all().map((column) => column.name);
+  const newAuditColumns = [
+    ['admin_name_snapshot', "TEXT NOT NULL DEFAULT ''"],
+    ['user_agent', "TEXT NOT NULL DEFAULT ''"],
+    ['request_id', "TEXT NOT NULL DEFAULT ''"],
+    ['permission_code', "TEXT NOT NULL DEFAULT ''"],
+    ['grant_group_id', 'INTEGER REFERENCES admin_groups(id)'],
+    ['scope_type', "TEXT NOT NULL DEFAULT ''"],
+    ['scope_value', "TEXT NOT NULL DEFAULT ''"],
+    ['result', "TEXT NOT NULL DEFAULT 'SUCCESS'"],
+    ['before_snapshot', "TEXT NOT NULL DEFAULT '{}'"],
+    ['after_snapshot', "TEXT NOT NULL DEFAULT '{}'"],
+  ];
+  for (const [column, definition] of newAuditColumns) {
+    if (!auditColumns.includes(column)) db.exec(`ALTER TABLE audit_logs ADD COLUMN ${column} ${definition}`);
+  }
+  if (addedAccountType) {
+    db.prepare("UPDATE users SET account_type = CASE role WHEN 'ADMIN' THEN 'SUPER_ADMIN' ELSE 'USER' END").run();
+  }
+  const timestamp = new Date().toISOString();
+  const gradeNames = db.prepare("SELECT DISTINCT grade FROM users WHERE account_type = 'USER' AND grade != '' AND grade != '-'").all();
+  for (const { grade } of gradeNames) {
+    db.prepare(`INSERT OR IGNORE INTO grades (code, name, created_at, updated_at) VALUES (?, ?, ?, ?)`)
+      .run(grade, grade, timestamp, timestamp);
+  }
+  db.prepare(`
+    UPDATE users SET grade_id = (SELECT id FROM grades WHERE code = users.grade)
+    WHERE account_type = 'USER' AND grade_id IS NULL
+  `).run();
+  db.prepare(`
+    UPDATE dormitories SET management_grade_id = (
+      SELECT grade_id FROM users WHERE id = dormitories.initiator_id
+    ) WHERE management_grade_id IS NULL
+  `).run();
   db.prepare(`
     INSERT OR IGNORE INTO system_settings (key, value, updated_at)
     VALUES ('dormitory_selection_open', 'true', ?)
   `).run(new Date().toISOString());
+  let initialRound = db.prepare('SELECT id FROM dormitory_selection_rounds ORDER BY id LIMIT 1').get();
+  let createdInitialRound = false;
+  if (!initialRound) {
+    createdInitialRound = true;
+    const selectionOpen = db.prepare("SELECT value FROM system_settings WHERE key = 'dormitory_selection_open'").get()?.value === 'true';
+    const createdBy = db.prepare("SELECT id FROM users WHERE account_type = 'SUPER_ADMIN' ORDER BY id LIMIT 1").get()?.id || null;
+    const roundTime = new Date().toISOString();
+    initialRound = { id: Number(db.prepare(`
+      INSERT INTO dormitory_selection_rounds (
+        code, name, description, status, created_by, opened_at, closed_at, created_at, updated_at
+      ) VALUES ('LEGACY_INITIAL', '默认选宿舍轮次', '由原自由选宿舍阶段迁移生成', ?, ?, ?, ?, ?, ?)
+    `).run(
+      selectionOpen ? 'OPEN' : 'CLOSED', createdBy,
+      selectionOpen ? roundTime : null, selectionOpen ? null : roundTime, roundTime, roundTime,
+    ).lastInsertRowid) };
+  }
+  db.prepare('UPDATE dormitories SET selection_round_id = ? WHERE selection_round_id IS NULL').run(initialRound.id);
+  db.prepare(`
+    UPDATE dormitory_members SET selection_round_id = (
+      SELECT selection_round_id FROM dormitories WHERE id = dormitory_members.dormitory_id
+    ) WHERE selection_round_id IS NULL
+  `).run();
+  db.prepare(`
+    UPDATE dormitory_applications SET selection_round_id = (
+      SELECT selection_round_id FROM dormitories WHERE id = dormitory_applications.dormitory_id
+    ) WHERE selection_round_id IS NULL
+  `).run();
+  db.exec('DROP INDEX IF EXISTS idx_dormitory_member_user');
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_dormitory_member_round_user
+    ON dormitory_members(selection_round_id, user_id)
+  `);
+  if (createdInitialRound) {
+    db.prepare(`
+      INSERT OR IGNORE INTO dormitory_round_participants (round_id, user_id, added_by, created_at)
+      SELECT ?, id, ?, ? FROM users WHERE account_type = 'USER'
+    `).run(initialRound.id, initialRound.created_by || null, new Date().toISOString());
+  }
   db.prepare(`UPDATE roommate_cards SET status = 'PUBLISHED' WHERE status = 'ROOMMATE_CONFIRMED'`).run();
   db.prepare(`UPDATE dormitories SET capacity = 4`).run();
   db.prepare(`UPDATE roommate_cards SET personal_cleanliness = 'BASIC' WHERE personal_cleanliness = 'REGULAR'`).run();
@@ -289,15 +531,22 @@ function seedDatabase(db) {
   const now = new Date().toISOString();
   const insertUser = db.prepare(`
     INSERT INTO users
-      (login_identifier, password_hash, password_salt, role, name, grade, gender, major, status, imported_by, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (login_identifier, password_hash, password_salt, role, account_type, name, grade, gender, major, status, imported_by, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   let admin = db.prepare(`SELECT id FROM users WHERE login_identifier = 'admin'`).get();
   if (!admin) {
-    const adminPassword = hashPassword('Admin123!');
+    const initialPassword = process.env.INITIAL_ADMIN_PASSWORD || (process.env.NODE_ENV === 'production' ? '' : 'Admin123!');
+    if (!initialPassword || (process.env.NODE_ENV === 'production' && initialPassword.length < 12)) {
+      throw new Error('INITIAL_ADMIN_PASSWORD must provide at least 12 characters when initializing production');
+    }
+    const adminPassword = hashPassword(initialPassword);
     admin = { id: Number(insertUser.run(
-      'admin', adminPassword.hash, adminPassword.salt, 'ADMIN', '系统管理员', '-', 'UNSPECIFIED', '', 'ACTIVE', null, now, now,
+      'admin', adminPassword.hash, adminPassword.salt, 'ADMIN', 'SUPER_ADMIN', '系统管理员', '-', 'UNSPECIFIED', '', 'ACTIVE', null, now, now,
     ).lastInsertRowid) };
+    if (process.env.NODE_ENV === 'production') {
+      db.prepare('UPDATE users SET must_change_password = 1 WHERE id = ?').run(admin.id);
+    }
   }
 
   const insertCard = db.prepare(`
@@ -316,16 +565,28 @@ function seedDatabase(db) {
       self_acknowledged_shortcoming, additional_note, status, published_at, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PUBLISHED', ?, ?, ?)
   `);
+  const demoRound = db.prepare("SELECT id FROM dormitory_selection_rounds WHERE code = 'LEGACY_INITIAL'").get();
+  const addDemoParticipant = demoRound
+    ? db.prepare(`
+        INSERT OR IGNORE INTO dormitory_round_participants (round_id, user_id, added_by, created_at)
+        VALUES (?, ?, ?, ?)
+      `)
+    : null;
 
   for (let i = 0; i < DEMO_STUDENTS.length; i += 1) {
     const [login, name, grade, gender, avatar, summerMin, summerMax, winterMin, winterMax,
       sleep, clean, personality, expected, hobbies, sports, gaming, keyboard, media, weakness, note] = DEMO_STUDENTS[i];
     const major = ['计算机科学与技术', '视觉传达设计', '工商管理'][i % 3];
+    db.prepare(`INSERT OR IGNORE INTO grades (code, name, created_at, updated_at) VALUES (?, ?, ?, ?)`)
+      .run(grade, grade, now, now);
+    const gradeId = db.prepare('SELECT id FROM grades WHERE code = ?').get(grade).id;
     const existingUser = db.prepare(`SELECT id FROM users WHERE login_identifier = ?`).get(login);
     if (existingUser) {
       db.prepare(`
-        UPDATE users SET major = ? WHERE id = ? AND (major = '' OR major IN ('计算机学院', '设计学院', '商学院'))
-      `).run(major, existingUser.id);
+        UPDATE users SET grade_id = ?, major = CASE
+          WHEN major = '' OR major IN ('计算机学院', '设计学院', '商学院') THEN ? ELSE major END
+        WHERE id = ?
+      `).run(gradeId, major, existingUser.id);
       db.prepare(`
         UPDATE roommate_cards SET
           origin_province = ?, origin_city = ?, clothing_size = ?,
@@ -343,12 +604,15 @@ function seedDatabase(db) {
         keyboard === 'MIND' ? '休息时介意连续点击声，其他时间可以接受' : '正常使用可以接受',
         media === 'MIND' ? '介意外放，请使用耳机' : '短时间可以，休息时请使用耳机', existingUser.id,
       );
+      addDemoParticipant?.run(demoRound.id, existingUser.id, admin.id, now);
       continue;
     }
     const password = hashPassword('Student123!');
     const userId = Number(insertUser.run(
-      login, password.hash, password.salt, 'STUDENT', name, grade, gender, major, 'ACTIVE', admin.id, now, now,
+      login, password.hash, password.salt, 'STUDENT', 'USER', name, grade, gender, major, 'ACTIVE', admin.id, now, now,
     ).lastInsertRowid);
+    db.prepare('UPDATE users SET grade_id = ? WHERE id = ?').run(gradeId, userId);
+    addDemoParticipant?.run(demoRound.id, userId, admin.id, now);
     insertCard.run(
       userId, avatar, '明德大学', i % 2 ? '南校区' : '北校区', major,
       ['浙江', '江苏', '上海', '安徽'][i % 4], ['杭州', '南京', '上海', '合肥'][i % 4], ['M', 'L', 'XL'][i % 3],

@@ -12,6 +12,7 @@ services:
       PORT: 4173
       DB_PATH: /app/data/app.db
       APP_VERSION: "${IMAGE_TAG:?IMAGE_TAG is required}"
+      INITIAL_ADMIN_PASSWORD: "${INITIAL_ADMIN_PASSWORD:-}"
 
     ports:
       - "127.0.0.1:4173:4173"

@@ -266,6 +266,30 @@ test('administrator imports accounts and exclusively updates identity fields', a
   assert.equal(user.major, '人工智能');
   assert.equal(user.status, 'PENDING_ACTIVATION');
 
+  const presetMembers = users.data.users.filter((item) => ['2026002', '2026004'].includes(item.login_identifier));
+  const createdSelectionGroup = await request(admin, '/api/admin/student-selection-groups', {
+    method: 'POST', body: JSON.stringify({
+      name: '第一批测试学生', description: '用于重复选人', memberIds: presetMembers.map((item) => item.id),
+    }),
+  });
+  assert.equal(createdSelectionGroup.response.status, 201);
+  assert.deepEqual(new Set(createdSelectionGroup.data.group.members.map((item) => item.login_identifier)), new Set(['2026002', '2026004']));
+  const duplicateSelectionGroup = await request(admin, '/api/admin/student-selection-groups', {
+    method: 'POST', body: JSON.stringify({ name: '第一批测试学生', memberIds: [presetMembers[0].id] }),
+  });
+  assert.equal(duplicateSelectionGroup.response.status, 409);
+  assert.equal(duplicateSelectionGroup.data.error.code, 'DUPLICATE_SELECTION_GROUP_NAME');
+  const updatedSelectionGroup = await request(admin, `/api/admin/student-selection-groups/${createdSelectionGroup.data.group.id}`, {
+    method: 'PATCH', body: JSON.stringify({
+      name: '第一批测试学生', description: '更新后的预设群组', memberIds: [presetMembers[0].id], reason: '测试更新群组',
+    }),
+  });
+  assert.equal(updatedSelectionGroup.response.status, 200);
+  assert.equal(updatedSelectionGroup.data.group.members.length, 1);
+  const selectionGroups = await request(admin, '/api/admin/student-selection-groups');
+  assert.equal(selectionGroups.response.status, 200);
+  assert.equal(selectionGroups.data.groups.find((item) => item.name === '第一批测试学生').members[0].name, presetMembers[0].name);
+
   const student = await login('2026002', 'Student123!');
   const stageDormitory = await request(student, '/api/dormitories', {
     method: 'POST', body: JSON.stringify({ name: '阶段测试宿舍', capacity: 8, building: '学生不可设置' }),
@@ -286,7 +310,7 @@ test('administrator imports accounts and exclusively updates identity fields', a
   });
   assert.equal(exportResponse.status, 200);
   assert.equal(exportResponse.headers.get('content-type'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  assert.match(exportResponse.headers.get('content-disposition'), /^attachment; filename="dormitories-\d{4}-\d{2}-\d{2}\.xlsx"$/);
+  assert.match(exportResponse.headers.get('content-disposition'), /^attachment; filename="dormitories-LEGACY_INITIAL-\d{4}-\d{2}-\d{2}\.xlsx"$/);
   const workbook = Buffer.from(await exportResponse.arrayBuffer());
   assert.equal(workbook.readUInt32LE(0), 0x04034b50);
   assert.ok(workbook.includes(Buffer.from('[Content_Types].xml')));
@@ -298,11 +322,14 @@ test('administrator imports accounts and exclusively updates identity fields', a
   });
   assert.equal(studentExport.status, 403);
 
-  const stageClosed = await request(admin, '/api/admin/settings/dormitory-selection', {
-    method: 'PATCH', body: JSON.stringify({ open: false, reason: '测试关闭阶段' }),
+  const rounds = await request(admin, '/api/admin/dormitory-rounds');
+  const firstRound = rounds.data.rounds.find((round) => round.code === 'LEGACY_INITIAL');
+  assert.equal(firstRound.status, 'OPEN');
+  const stageClosed = await request(admin, `/api/admin/dormitory-rounds/${firstRound.id}/close`, {
+    method: 'POST', body: JSON.stringify({ reason: '测试截止第一轮' }),
   });
   assert.equal(stageClosed.response.status, 200);
-  assert.equal(stageClosed.data.open, false);
+  assert.equal(stageClosed.data.round.status, 'CLOSED');
 
   const otherStudent = await login('2026003', 'Student123!');
   const forbidden = await request(otherStudent, '/api/dormitories', {
@@ -314,4 +341,318 @@ test('administrator imports accounts and exclusively updates identity fields', a
   const leaveForbidden = await request(student, '/api/me/dormitory/leave', { method: 'POST', body: '{}' });
   assert.equal(leaveForbidden.response.status, 403);
   assert.equal(leaveForbidden.data.error.code, 'DORMITORY_SELECTION_CLOSED');
+
+  const archived = await request(admin, `/api/admin/dormitory-rounds/${firstRound.id}/archive`, {
+    method: 'POST', body: JSON.stringify({ reason: '保留第一轮宿舍结果' }),
+  });
+  assert.equal(archived.response.status, 200);
+  assert.equal(archived.data.round.status, 'ARCHIVED');
+  assert.equal(archived.data.snapshotCount, 1);
+
+  const firstRoundResults = await request(student, `/api/dormitory-rounds/${firstRound.id}/results`);
+  assert.equal(firstRoundResults.response.status, 200);
+  assert.equal(firstRoundResults.data.dormitories[0].name, '阶段测试宿舍');
+  assert.equal(firstRoundResults.data.dormitories[0].building, '北苑 3 号楼');
+  assert.equal(firstRoundResults.data.dormitories[0].members[0].login_identifier, '2026002');
+
+  const participantIds = users.data.users
+    .filter((item) => item.account_type === 'USER' && item.login_identifier !== '2026003')
+    .map((item) => item.id);
+  const createdSecondRound = await request(admin, '/api/admin/dormitory-rounds', {
+    method: 'POST',
+    body: JSON.stringify({
+      code: 'SECOND_ROUND', name: '第二轮选宿舍', description: '同一批学生再次选宿舍', participantIds,
+    }),
+  });
+  assert.equal(createdSecondRound.response.status, 201);
+  const secondRoundId = createdSecondRound.data.round.id;
+  const openedSecondRound = await request(admin, `/api/admin/dormitory-rounds/${secondRoundId}/open`, {
+    method: 'POST', body: JSON.stringify({ reason: '开始第二轮测试' }),
+  });
+  assert.equal(openedSecondRound.response.status, 200);
+  assert.equal(openedSecondRound.data.round.status, 'OPEN');
+
+  const secondRoundDormitory = await request(student, '/api/dormitories', {
+    method: 'POST', body: JSON.stringify({ name: '第二轮测试宿舍' }),
+  });
+  assert.equal(secondRoundDormitory.response.status, 201);
+  assert.equal(secondRoundDormitory.data.dormitory.selection_round_id, secondRoundId);
+  const duplicateInSecondRound = await request(student, '/api/dormitories', {
+    method: 'POST', body: JSON.stringify({ name: '同一轮不应重复创建' }),
+  });
+  assert.equal(duplicateInSecondRound.response.status, 409);
+  assert.equal(duplicateInSecondRound.data.error.code, 'ALREADY_IN_DORMITORY');
+
+  const nonParticipant = await request(otherStudent, '/api/dormitories', {
+    method: 'POST', body: JSON.stringify({ name: '未参与本轮' }),
+  });
+  assert.equal(nonParticipant.response.status, 403);
+  assert.equal(nonParticipant.data.error.code, 'ROUND_PARTICIPATION_REQUIRED');
+
+  const anotherDraft = await request(admin, '/api/admin/dormitory-rounds', {
+    method: 'POST', body: JSON.stringify({ code: 'FUTURE_ROUND', name: '后续轮次', participantIds }),
+  });
+  assert.equal(anotherDraft.response.status, 201);
+  const simultaneousOpen = await request(admin, `/api/admin/dormitory-rounds/${anotherDraft.data.round.id}/open`, {
+    method: 'POST', body: JSON.stringify({ reason: '不应同时开放两轮' }),
+  });
+  assert.equal(simultaneousOpen.response.status, 409);
+  assert.equal(simultaneousOpen.data.error.code, 'ROUND_ALREADY_OPEN');
+
+  const retainedFirstRoundResults = await request(student, `/api/dormitory-rounds/${firstRound.id}/results`);
+  assert.equal(retainedFirstRoundResults.data.dormitories[0].name, '阶段测试宿舍');
+  const secondRoundResults = await request(student, `/api/dormitory-rounds/${secondRoundId}/results`);
+  assert.equal(secondRoundResults.data.dormitories[0].name, '第二轮测试宿舍');
+  const deletedSelectionGroup = await request(admin, `/api/admin/student-selection-groups/${createdSelectionGroup.data.group.id}`, {
+    method: 'DELETE', body: JSON.stringify({ reason: '完成预设群组删除验收' }),
+  });
+  assert.equal(deletedSelectionGroup.response.status, 200);
+  const selectionGroupsAfterDelete = await request(admin, '/api/admin/student-selection-groups');
+  assert.equal(selectionGroupsAfterDelete.data.groups.some((item) => item.id === createdSelectionGroup.data.group.id), false);
+});
+
+test('administrator groups enforce permission and grade scope from the same group', async () => {
+  const superAdmin = await login('admin', 'Admin123!');
+  assert.equal(superAdmin.user.accountType, 'SUPER_ADMIN');
+  assert.equal(superAdmin.user.isSuperAdmin, true);
+  assert.equal(superAdmin.user.canManage, true);
+
+  const gradesResult = await request(superAdmin, '/api/admin/grades');
+  const grade2025 = gradesResult.data.grades.find((grade) => grade.name === '2025级');
+  const grade2026 = gradesResult.data.grades.find((grade) => grade.name === '2026级');
+  assert.ok(grade2025?.id);
+  assert.ok(grade2026?.id);
+
+  const usersResult = await request(superAdmin, '/api/admin/users');
+  const groupAdminUser = usersResult.data.users.find((user) => user.login_identifier === '2026001');
+  const protectedGroupAdmin = usersResult.data.users.find((user) => user.login_identifier === '2026003');
+  const grade2026Target = usersResult.data.users.find((user) => user.login_identifier === '2026005');
+  const grade2025Target = usersResult.data.users.find((user) => user.login_identifier === '2026004');
+
+  async function createGroup(code, permissions, gradeIds, userIds) {
+    const created = await request(superAdmin, '/api/admin/admin-groups', {
+      method: 'POST', body: JSON.stringify({ code, name: code, description: '权限边界测试' }),
+    });
+    assert.equal(created.response.status, 201);
+    const groupId = created.data.group.id;
+    for (const [section, body] of [
+      ['permissions', { permissions }], ['scopes', { gradeIds }], ['members', { userIds }],
+    ]) {
+      const configured = await request(superAdmin, `/api/admin/admin-groups/${groupId}/${section}`, {
+        method: 'PUT', body: JSON.stringify({ ...body, reason: '自动化权限测试' }),
+      });
+      assert.equal(configured.response.status, 200);
+    }
+    return groupId;
+  }
+
+  const identityGroupId = await createGroup(
+    'IDENTITY_2026', ['USER_IDENTITY_UPDATE', 'USER_STATUS_UPDATE'], [grade2026.id], [groupAdminUser.id],
+  );
+  const readGroupId = await createGroup(
+    'READ_2025', ['USER_READ', 'AUDIT_READ_SCOPED'], [grade2025.id], [groupAdminUser.id, protectedGroupAdmin.id],
+  );
+  const dormitoryGroupId = await createGroup(
+    'DORMITORY_2026',
+    ['DORMITORY_READ', 'DORMITORY_LOCATION_ASSIGN', 'DORMITORY_CLOSE', 'DORMITORY_EXPORT'],
+    [grade2026.id], [groupAdminUser.id],
+  );
+
+  const groupAdmin = await login('2026001', 'Student123!');
+  assert.equal(groupAdmin.user.accountType, 'USER');
+  assert.equal(groupAdmin.user.canManage, true);
+  assert.equal(groupAdmin.user.isSuperAdmin, false);
+  assert.ok(groupAdmin.user.permissions.includes('USER_READ'));
+  assert.ok(groupAdmin.user.permissions.includes('USER_IDENTITY_UPDATE'));
+
+  const disabledIdentityGroup = await request(superAdmin, `/api/admin/admin-groups/${identityGroupId}`, {
+    method: 'PATCH', body: JSON.stringify({ name: 'IDENTITY_2026', description: '权限边界测试', status: 'DISABLED', reason: '验证停用立即生效' }),
+  });
+  assert.equal(disabledIdentityGroup.response.status, 200);
+  const disabledPermission = await request(groupAdmin, `/api/admin/users/${grade2026Target.id}/identity`, {
+    method: 'PATCH', body: JSON.stringify({
+      name: grade2026Target.name, grade: grade2026Target.grade, gender: grade2026Target.gender,
+      major: grade2026Target.major, reason: '停用组后不应继续生效',
+    }),
+  });
+  assert.equal(disabledPermission.response.status, 403);
+  await request(superAdmin, `/api/admin/admin-groups/${identityGroupId}`, {
+    method: 'PATCH', body: JSON.stringify({ name: 'IDENTITY_2026', description: '权限边界测试', status: 'ACTIVE', reason: '继续后续验收' }),
+  });
+  await request(superAdmin, `/api/admin/admin-groups/${readGroupId}/permissions`, {
+    method: 'PUT', body: JSON.stringify({ permissions: ['AUDIT_READ_SCOPED'], reason: '验证撤销权限立即生效' }),
+  });
+  const revokedReadPermission = await request(groupAdmin, '/api/admin/users');
+  assert.equal(revokedReadPermission.response.status, 403);
+  await request(superAdmin, `/api/admin/admin-groups/${readGroupId}/permissions`, {
+    method: 'PUT', body: JSON.stringify({ permissions: ['USER_READ', 'AUDIT_READ_SCOPED'], reason: '继续后续验收' }),
+  });
+
+  const grade2025Student = await login('2026004', 'Student123!');
+  const outOfScopeDormitory = await request(grade2025Student, '/api/dormitories', {
+    method: 'POST', body: JSON.stringify({ name: '2025范围外宿舍' }),
+  });
+  assert.equal(outOfScopeDormitory.response.status, 201);
+  const scopedDormitories = await request(groupAdmin, '/api/admin/dormitories');
+  assert.equal(scopedDormitories.response.status, 200);
+  assert.ok(scopedDormitories.data.dormitories.length > 0);
+  assert.ok(scopedDormitories.data.dormitories.every((dormitory) => dormitory.management_grade_id === grade2026.id));
+  assert.equal(scopedDormitories.data.dormitories.some((dormitory) => dormitory.id === outOfScopeDormitory.data.dormitory.id), false);
+  const outOfScopeLocation = await request(groupAdmin, `/api/admin/dormitories/${outOfScopeDormitory.data.dormitory.id}/location`, {
+    method: 'PATCH', body: JSON.stringify({ building: '越权楼栋', roomNumber: '999', reason: '不应允许跨年级分配' }),
+  });
+  assert.equal(outOfScopeLocation.response.status, 404);
+  const scopedExportResponse = await fetch(`${baseUrl}/api/admin/dormitories/export`, { headers: { Cookie: groupAdmin.cookie } });
+  assert.equal(scopedExportResponse.status, 200);
+  const scopedWorkbook = Buffer.from(await scopedExportResponse.arrayBuffer());
+  assert.ok(scopedWorkbook.includes(Buffer.from('第二轮测试宿舍')));
+  assert.equal(scopedWorkbook.includes(Buffer.from('2025范围外宿舍')), false);
+
+  const scopedUsers = await request(groupAdmin, '/api/admin/users');
+  assert.equal(scopedUsers.response.status, 200);
+  assert.ok(scopedUsers.data.users.length > 0);
+  assert.ok(scopedUsers.data.users.every((user) => user.grade_id === grade2025.id));
+
+  const crossGroupEscalation = await request(groupAdmin, `/api/admin/users/${grade2025Target.id}/identity`, {
+    method: 'PATCH', body: JSON.stringify({
+      name: grade2025Target.name, grade: '2025级', gender: grade2025Target.gender,
+      major: grade2025Target.major, reason: '不应允许跨组拼接授权',
+    }),
+  });
+  assert.equal(crossGroupEscalation.response.status, 404);
+  assert.equal(crossGroupEscalation.data.error.code, 'RESOURCE_NOT_FOUND');
+
+  const moveOutOfScope = await request(groupAdmin, `/api/admin/users/${grade2026Target.id}/identity`, {
+    method: 'PATCH', body: JSON.stringify({
+      name: grade2026Target.name, grade: '2025级', gender: grade2026Target.gender,
+      major: grade2026Target.major, reason: '原目标年级必须由同组覆盖',
+    }),
+  });
+  assert.equal(moveOutOfScope.response.status, 404);
+
+  const expandedScope = await request(superAdmin, `/api/admin/admin-groups/${identityGroupId}/scopes`, {
+    method: 'PUT', body: JSON.stringify({ gradeIds: [grade2025.id, grade2026.id], reason: '验证同组覆盖两个年级' }),
+  });
+  assert.equal(expandedScope.response.status, 200);
+  const authorizedMove = await request(groupAdmin, `/api/admin/users/${grade2026Target.id}/identity`, {
+    method: 'PATCH', body: JSON.stringify({
+      name: grade2026Target.name, grade: '2025级', gender: grade2026Target.gender,
+      major: grade2026Target.major, reason: '同一组同时覆盖原年级和目标年级',
+    }),
+  });
+  assert.equal(authorizedMove.response.status, 200);
+
+  const selfManagement = await request(groupAdmin, `/api/admin/users/${groupAdminUser.id}/identity`, {
+    method: 'PATCH', body: JSON.stringify({
+      name: groupAdminUser.name, grade: groupAdminUser.grade, gender: groupAdminUser.gender,
+      major: groupAdminUser.major, reason: '不应允许管理自己',
+    }),
+  });
+  assert.equal(selfManagement.response.status, 403);
+  assert.equal(selfManagement.data.error.code, 'PROTECTED_ADMIN_ACCOUNT');
+
+  const otherAdminManagement = await request(groupAdmin, `/api/admin/users/${protectedGroupAdmin.id}/status`, {
+    method: 'PATCH', body: JSON.stringify({ status: 'SUSPENDED', reason: '不应允许管理其他组管理员' }),
+  });
+  assert.equal(otherAdminManagement.response.status, 403);
+  assert.equal(otherAdminManagement.data.error.code, 'PROTECTED_ADMIN_ACCOUNT');
+
+  const globalSetting = await request(groupAdmin, '/api/admin/dormitory-rounds', {
+    method: 'POST', body: JSON.stringify({ code: 'UNAUTHORIZED', name: '组管理员不应创建轮次', participantIds: [groupAdminUser.id] }),
+  });
+  assert.equal(globalSetting.response.status, 403);
+  assert.equal(globalSetting.data.error.code, 'SUPER_ADMIN_ONLY');
+  const selectionGroupForbidden = await request(groupAdmin, '/api/admin/student-selection-groups');
+  assert.equal(selectionGroupForbidden.response.status, 403);
+  assert.equal(selectionGroupForbidden.data.error.code, 'SUPER_ADMIN_ONLY');
+
+  const promoted = await request(superAdmin, `/api/admin/users/${grade2025Target.id}/account-type`, {
+    method: 'PATCH', body: JSON.stringify({ accountType: 'SUPER_ADMIN', reason: '验证超级管理员账号管理' }),
+  });
+  assert.equal(promoted.response.status, 200);
+  const demoted = await request(superAdmin, `/api/admin/users/${grade2025Target.id}/account-type`, {
+    method: 'PATCH', body: JSON.stringify({ accountType: 'USER', reason: '恢复普通用户' }),
+  });
+  assert.equal(demoted.response.status, 200);
+
+  const auditResult = await request(superAdmin, '/api/admin/audit-logs');
+  const identityAudit = auditResult.data.logs.find((log) => log.action === 'UPDATE_IDENTITY' && log.target_id === String(grade2026Target.id));
+  assert.ok(identityAudit);
+  assert.equal(identityAudit.permission_code, 'USER_IDENTITY_UPDATE');
+  assert.equal(identityAudit.grant_group_id, identityGroupId);
+  assert.equal(identityAudit.scope_type, 'GRADE');
+  assert.deepEqual(new Set(identityAudit.scope_value.split(',').map(Number)), new Set([grade2025.id, grade2026.id]));
+  const scopedAudit = await request(groupAdmin, '/api/admin/audit-logs');
+  assert.equal(scopedAudit.response.status, 200);
+  assert.ok(scopedAudit.data.logs.some((log) => log.id === identityAudit.id));
+  assert.ok(scopedAudit.data.logs.every((log) => log.scope_type === 'GRADE' && log.scope_value.split(',').map(Number).includes(grade2025.id)));
+  const groupAudit = auditResult.data.logs.find((log) => log.action === 'UPDATE_ADMIN_GROUP_MEMBERS' && log.target_id === String(readGroupId));
+  assert.ok(groupAudit);
+  assert.equal(groupAudit.permission_code, 'SUPER_ADMIN');
+  assert.ok(groupAudit.request_id);
+
+  const lastSuperAdmin = await request(superAdmin, `/api/admin/users/${superAdmin.user.id}/status`, {
+    method: 'PATCH', body: JSON.stringify({ status: 'SUSPENDED', reason: '验证最后一个超级管理员保护' }),
+  });
+  assert.equal(lastSuperAdmin.response.status, 409);
+  assert.equal(lastSuperAdmin.data.error.code, 'LAST_SUPER_ADMIN');
+  const lastSuperAdminDowngrade = await request(superAdmin, `/api/admin/users/${superAdmin.user.id}/account-type`, {
+    method: 'PATCH', body: JSON.stringify({ accountType: 'USER', reason: '验证最后一个超级管理员降级保护' }),
+  });
+  assert.equal(lastSuperAdminDowngrade.response.status, 409);
+  assert.equal(lastSuperAdminDowngrade.data.error.code, 'LAST_SUPER_ADMIN');
+  const lastSuperAdminDelete = await request(superAdmin, `/api/admin/users/${superAdmin.user.id}`, {
+    method: 'DELETE', body: JSON.stringify({ confirmation: 'admin', reason: '验证最后一个超级管理员删除保护' }),
+  });
+  assert.equal(lastSuperAdminDelete.response.status, 409);
+  assert.equal(lastSuperAdminDelete.data.error.code, 'LAST_SUPER_ADMIN');
+
+  for (const groupId of [identityGroupId, readGroupId, dormitoryGroupId]) {
+    const revoked = await request(superAdmin, `/api/admin/admin-groups/${groupId}/members`, {
+      method: 'PUT', body: JSON.stringify({ userIds: groupId === readGroupId ? [protectedGroupAdmin.id] : [], reason: '验证权限即时失效' }),
+    });
+    assert.equal(revoked.response.status, 200);
+  }
+  const revokedImmediately = await request(groupAdmin, '/api/admin/overview');
+  assert.equal(revokedImmediately.response.status, 403);
+  assert.equal(revokedImmediately.data.error.code, 'MANAGEMENT_FORBIDDEN');
+  const studentSideStillAvailable = await request(groupAdmin, '/api/me/roommate-card');
+  assert.equal(studentSideStillAvailable.response.status, 200);
+
+  const roundList = await request(superAdmin, '/api/admin/dormitory-rounds');
+  const secondRound = roundList.data.rounds.find((round) => round.code === 'SECOND_ROUND');
+  const closedSecondRound = await request(superAdmin, `/api/admin/dormitory-rounds/${secondRound.id}/close`, {
+    method: 'POST', body: JSON.stringify({ reason: '验证归档快照' }),
+  });
+  assert.equal(closedSecondRound.response.status, 200);
+  const deleteBeforeArchive = await request(superAdmin, `/api/admin/users/${grade2025Target.id}`, {
+    method: 'DELETE', body: JSON.stringify({ confirmation: grade2025Target.login_identifier, reason: '未归档前不应删除结果成员' }),
+  });
+  assert.equal(deleteBeforeArchive.response.status, 409);
+  assert.equal(deleteBeforeArchive.data.error.code, 'UNARCHIVED_DORMITORY_RESULT');
+  const archivedSecondRound = await request(superAdmin, `/api/admin/dormitory-rounds/${secondRound.id}/archive`, {
+    method: 'POST', body: JSON.stringify({ reason: '生成第二轮不可变结果' }),
+  });
+  assert.equal(archivedSecondRound.response.status, 200);
+  const deletedSnapshotMember = await request(superAdmin, `/api/admin/users/${grade2025Target.id}`, {
+    method: 'DELETE', body: JSON.stringify({ confirmation: grade2025Target.login_identifier, reason: '验证归档后删除账号仍保留结果' }),
+  });
+  assert.equal(deletedSnapshotMember.response.status, 200);
+  const resultViewer = await login('2026002', 'Student123!');
+  const resultsAfterDelete = await request(resultViewer, `/api/dormitory-rounds/${secondRound.id}/results`);
+  const preservedDormitory = resultsAfterDelete.data.dormitories.find((item) => item.name === '2025范围外宿舍');
+  assert.ok(preservedDormitory);
+  assert.equal(preservedDormitory.initiator_name, grade2025Target.name);
+  assert.equal(preservedDormitory.members[0].login_identifier, grade2025Target.login_identifier);
+  assert.equal(preservedDormitory.members[0].user_id, null);
+
+  const deletedFormerAdmin = await request(superAdmin, `/api/admin/users/${groupAdminUser.id}`, {
+    method: 'DELETE', body: JSON.stringify({ confirmation: groupAdminUser.login_identifier, reason: '验证永久删除保留审计记录' }),
+  });
+  assert.equal(deletedFormerAdmin.response.status, 200);
+  const auditAfterDelete = await request(superAdmin, '/api/admin/audit-logs');
+  const preservedAudit = auditAfterDelete.data.logs.find((log) => log.id === identityAudit.id);
+  assert.ok(preservedAudit);
+  assert.equal(preservedAudit.admin_id, null);
+  assert.equal(preservedAudit.admin_name, groupAdminUser.name);
 });
