@@ -24,10 +24,33 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install Python dependencies
+        run: uv sync --frozen
+
+      - name: Check Python code
+        run: |
+          uv run ruff format --check .
+          uv run ruff check .
+
+      - name: Validate Alembic revision chain and model alignment
+        run: |
+          test "$(uv run alembic heads | wc -l)" -eq 1
+          DB_PATH="$RUNNER_TEMP/alembic-check.db" uv run alembic upgrade head
+          DB_PATH="$RUNNER_TEMP/alembic-check.db" uv run alembic check
+
+      - name: Run FastAPI tests
+        run: uv run pytest
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -40,11 +63,34 @@ jobs:
           node --check db.js
           node --check server.js
           node --check public/app.js
-          node --check ops/database-maintenance.js
           bash -n ops/restore-database.sh
 
       - name: Run tests
         run: npm test
+
+      - name: Run FastAPI browser acceptance
+        env:
+          APP_URL: http://127.0.0.1:43127
+          BROWSER_EXECUTABLE: /usr/bin/google-chrome
+          DB_PATH: ${{ runner.temp }}/browser-check.db
+        run: |
+          google-chrome --version
+          node -e "const database = require('./db').openDatabase(process.env.DB_PATH); database.close()"
+          uv run alembic upgrade head
+          uv run uvicorn app.main:app --host 127.0.0.1 --port 43127 --workers 1 --no-server-header >"$RUNNER_TEMP/browser-server.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent --max-time 2 "$APP_URL/api/health" >/dev/null; then
+              break
+            fi
+            if [[ "$attempt" == 30 ]]; then
+              cat "$RUNNER_TEMP/browser-server.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          node scripts/browser-check.js
 
       - name: Validate production Compose configuration
         env:
@@ -53,3 +99,23 @@ jobs:
 
       - name: Build production image
         run: docker build --tag openshude:ci .
+
+      - name: Check production image health
+        run: |
+          container=""
+          trap '[[ -z "$container" ]] || docker rm --force "$container" >/dev/null 2>&1 || true; docker volume rm openshude-ci-data >/dev/null 2>&1 || true' EXIT
+          docker volume create openshude-ci-data >/dev/null
+          docker run --rm --volume openshude-ci-data:/app/data openshude:ci alembic upgrade head
+          container=$(docker run --detach --publish 127.0.0.1:43127:4173 \
+            --env APP_VERSION=ci --volume openshude-ci-data:/app/data openshude:ci)
+          for attempt in {1..30}; do
+            response=$(curl --fail --silent --max-time 2 http://127.0.0.1:43127/api/health || true)
+            if [[ "$response" == *'"version":"ci"'* ]]; then
+              exit 0
+            fi
+            if [[ "$attempt" == 30 ]]; then
+              docker logs "$container"
+              exit 1
+            fi
+            sleep 1
+          done
