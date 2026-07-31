@@ -50,6 +50,31 @@ def valid_request_origin(request: Request) -> bool:
     return same_origin or origin in settings.allowed_origins
 
 
+def ensure_request_id(scope: Scope) -> str:
+    request_id = dict(scope.get("headers", [])).get(b"x-request-id", b"").decode("ascii", "ignore")[:100]
+    if not request_id:
+        request_id = str(uuid.uuid4())
+        scope["headers"] = [*scope.get("headers", []), (b"x-request-id", request_id.encode("ascii"))]
+    return request_id
+
+
+def request_rejection(request: Request) -> JSONResponse | None:
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > settings.max_body_bytes:
+                return JSONResponse(
+                    status_code=413, content={"error": {"code": "BODY_TOO_LARGE", "message": "请求内容过大"}}
+                )
+        except ValueError:
+            return JSONResponse(
+                status_code=400, content={"error": {"code": "INVALID_CONTENT_LENGTH", "message": "请求长度无效"}}
+            )
+    if request.method not in ("GET", "HEAD", "OPTIONS") and not valid_request_origin(request):
+        return JSONResponse(status_code=403, content={"error": {"code": "INVALID_ORIGIN", "message": "请求来源无效"}})
+    return None
+
+
 class SecurityMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -58,36 +83,11 @@ class SecurityMiddleware:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        request_id = dict(scope.get("headers", [])).get(b"x-request-id", b"").decode("ascii", "ignore")[:100]
-        if not request_id:
-            request_id = str(uuid.uuid4())
-            scope["headers"] = [*scope.get("headers", []), (b"x-request-id", request_id.encode("ascii"))]
+        request_id = ensure_request_id(scope)
         request = Request(scope)
         started = time.perf_counter()
         response_status = 500
 
-        async def early_send(message: Message) -> None:
-            nonlocal response_status
-            if message["type"] == "http.response.start":
-                response_status = message["status"]
-                message["headers"] = [
-                    *message.get("headers", []),
-                    *response_security_headers(request.url.path.startswith("/api/"), request_id),
-                ]
-            await send(message)
-
-        headers = request.headers
-        content_length = headers.get("content-length")
-        if content_length and int(content_length) > settings.max_body_bytes:
-            await JSONResponse(
-                status_code=413, content={"error": {"code": "BODY_TOO_LARGE", "message": "请求内容过大"}}
-            )(scope, receive, early_send)
-            return
-        if request.method not in ("GET", "HEAD", "OPTIONS") and not valid_request_origin(request):
-            await JSONResponse(
-                status_code=403, content={"error": {"code": "INVALID_ORIGIN", "message": "请求来源无效"}}
-            )(scope, receive, early_send)
-            return
         consumed = 0
 
         async def limited_receive() -> Message:
@@ -107,6 +107,11 @@ class SecurityMiddleware:
                 response_headers.extend(response_security_headers(request.url.path.startswith("/api/"), request_id))
                 message["headers"] = response_headers
             await send(message)
+
+        rejection = request_rejection(request)
+        if rejection:
+            await rejection(scope, receive, security_send)
+            return
 
         try:
             await self.app(scope, limited_receive, security_send)
