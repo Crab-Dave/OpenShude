@@ -10,6 +10,7 @@ from .errors import ApiError
 from .security import token_hash
 
 PERMISSIONS = {
+    "HOMEPAGE_UPDATE": "更新首页内容",
     "USER_READ": "查看用户",
     "USER_IMPORT": "导入普通用户",
     "USER_IDENTITY_UPDATE": "修改用户身份信息",
@@ -158,6 +159,28 @@ def authorize(db: Session, user: dict, permission: str, grade_ids: int | list[in
         "groupId": group["id"],
         "scopeType": "GRADE",
         "scopeValue": ",".join(map(str, target_ids)),
+    }
+
+
+def authorize_global(db: Session, user: dict, permission: str, resource: str) -> dict:
+    if user["account_type"] == "SUPER_ADMIN":
+        return {
+            "permissionCode": permission,
+            "groupId": None,
+            "scopeType": "GLOBAL",
+            "scopeValue": resource,
+        }
+    group = next(
+        (item for item in active_admin_groups(db, user["id"]) if permission in item["permissions"]),
+        None,
+    )
+    if not group:
+        raise ApiError(403, "PERMISSION_DENIED", "当前账号缺少所需管理权限")
+    return {
+        "permissionCode": permission,
+        "groupId": group["id"],
+        "scopeType": "GLOBAL",
+        "scopeValue": resource,
     }
 
 

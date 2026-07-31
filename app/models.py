@@ -192,6 +192,7 @@ class SystemSetting(Base):
     value: Mapped[str] = mapped_column(Text)
     updated_by: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID))
     updated_at: Mapped[str] = mapped_column(Text)
+    revision: Mapped[int] = mapped_column(server_default=text("1"))
 
 
 class DormitorySelectionRound(Base):

@@ -17,6 +17,7 @@ from .config import get_settings
 from .database import SessionLocal
 from .dormitories import router as dormitories_router
 from .errors import ApiError, api_error_handler, validation_error_handler
+from .homepage import router as homepage_router
 from .student import router as student_router
 
 settings = get_settings()
@@ -152,6 +153,7 @@ app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(student_router)
 app.include_router(dormitories_router)
+app.include_router(homepage_router)
 
 
 @app.get("/api/health")

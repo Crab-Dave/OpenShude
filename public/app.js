@@ -30,6 +30,7 @@ const state = {
   applicationDormitoryId: null,
   adminRoundId: null,
   selectionGroups: [],
+  homepage: null,
 };
 
 const labels = {
@@ -99,7 +100,9 @@ async function api(path, options = {}) {
   if (!response.ok) {
     if (response.status === 401 && state.user) {
       state.user = null;
-      renderLogin();
+      state.csrfToken = '';
+      history.replaceState({}, '', '/');
+      renderHomepage();
     }
     if (response.status === 403 && state.user && state.mode === 'management') {
       try {
@@ -197,6 +200,7 @@ const studentNav = [
 
 const adminNav = [
   ['overview', 'layout-dashboard', '数据概览'],
+  ['homepage', 'file-pen-line', '首页内容'],
   ['users', 'users', '账号管理'],
   ['cards', 'contact-round', '卡片治理'],
   ['rounds', 'calendar-range', '选宿舍轮次'],
@@ -225,6 +229,7 @@ function hasScopedPermission(code, gradeId) {
 function visibleAdminNav() {
   return adminNav.filter(([key]) => {
     if (key === 'overview') return true;
+    if (key === 'homepage') return hasPermission('HOMEPAGE_UPDATE');
     if (key === 'users') return hasPermission('USER_READ') || hasPermission('USER_IMPORT');
     if (key === 'cards') return hasPermission('CARD_READ');
     if (key === 'groups') return hasPermission('DORMITORY_READ');
@@ -242,6 +247,7 @@ const titles = {
   history: ['历史选宿舍', '查看每一次选宿舍轮次保留的结果'],
   settings: ['账号设置', '身份字段由管理员统一维护'],
   overview: ['数据概览', '平台当前运行状态'],
+  homepage: ['首页内容', '编辑并发布网站首页文章'],
   users: ['账号管理', '导入正式账号并维护身份字段'],
   cards: ['卡片治理', '处理公开卡片中的违规内容'],
   rounds: ['选宿舍轮次', '配置参与学生并分别保留每轮结果'],
@@ -250,6 +256,64 @@ const titles = {
   audit: ['审计日志', '管理员关键操作留痕'],
   access: ['权限管理', '配置管理员组、权限、成员和年级范围'],
 };
+
+async function renderHomepage() {
+  let content;
+  try {
+    content = await api('/api/public/homepage');
+    state.homepage = content;
+  } catch (error) {
+    content = { html: `<div class="homepage-error"><h1>首页暂时无法加载</h1><p>${escapeHtml(error.message)}</p></div>`, updatedAt: null };
+  }
+  app.innerHTML = `
+    <div class="public-shell">
+      <header class="site-header">
+        <div class="site-header-inner">
+          <button class="site-logo" id="site-home" aria-label="返回首页"><img src="/assets/logo/透明底白色字.png" alt="合住"></button>
+          <nav class="site-nav" aria-label="主要导航">
+            <button class="active" id="site-home-nav">首页</button>
+            <button id="site-roommates">室友双选系统</button>
+          </nav>
+          <div class="site-account">
+            ${state.user ? `<details class="account-menu"><summary>${icon('circle-user-round')}<span>${escapeHtml(state.user.name)}</span>${icon('chevron-down')}</summary><div class="account-menu-panel"><button id="account-workspace">${icon('layout-dashboard')}进入系统</button><button id="account-logout">${icon('log-out')}退出登录</button></div></details>` : `<button class="site-login" id="site-login">${icon('log-in')}<span>登录</span></button>`}
+          </div>
+        </div>
+      </header>
+      <main class="homepage-main">
+        <article class="markdown-article">${content.html}</article>
+        ${content.updatedAt ? `<p class="homepage-updated">最近更新于 ${formatDate(content.updatedAt)}</p>` : ''}
+      </main>
+    </div>`;
+  document.querySelector('#site-home').addEventListener('click', goHome);
+  document.querySelector('#site-home-nav').addEventListener('click', goHome);
+  document.querySelector('#site-roommates').addEventListener('click', enterRoommateSystem);
+  document.querySelector('#site-login')?.addEventListener('click', () => openLoginModal(false));
+  document.querySelector('#account-workspace')?.addEventListener('click', enterRoommateSystem);
+  document.querySelector('#account-logout')?.addEventListener('click', logout);
+  refreshIcons();
+}
+
+async function goHome() {
+  if (window.location.pathname !== '/') history.pushState({}, '', '/');
+  await renderHomepage();
+}
+
+async function enterRoommateSystem() {
+  if (window.location.pathname !== '/roommates') history.pushState({}, '', '/roommates');
+  if (!state.user) {
+    await renderHomepage();
+    openLoginModal(true);
+    return;
+  }
+  state.mode = state.user.isSuperAdmin ? 'management' : 'student';
+  state.view = state.mode === 'management' ? 'overview' : 'discover';
+  if (state.user.mustChangePassword) {
+    await renderHomepage();
+    showRequiredPasswordChange(true);
+    return;
+  }
+  await navigate(state.view);
+}
 
 function renderShell() {
   const management = state.mode === 'management';
@@ -269,6 +333,7 @@ function renderShell() {
         <header class="topbar">
           <div class="topbar-title"><h1>${title}</h1><p>${subtitle}</p></div>
           <div class="topbar-actions">
+            <button class="btn btn-secondary" id="home-btn">${icon('home')}<span>首页</span></button>
             ${state.user.accountType === 'USER' && state.user.canManage ? `<button class="btn btn-secondary" id="switch-mode">${icon(management ? 'users-round' : 'layout-dashboard')}<span>${management ? '返回学生端' : '进入管理工作台'}</span></button>` : ''}
             <button class="btn btn-secondary" id="logout-btn">${icon('log-out')}<span>退出</span></button>
           </div>
@@ -284,6 +349,7 @@ function renderShell() {
     state.mode = management ? 'student' : 'management';
     await navigate(state.mode === 'management' ? 'overview' : 'discover');
   });
+  document.querySelector('#home-btn').addEventListener('click', goHome);
   document.querySelector('#logout-btn').addEventListener('click', logout);
   refreshIcons();
 }
@@ -300,27 +366,18 @@ async function navigate(view) {
   }
 }
 
-function renderLogin() {
-  state.user = null;
-  state.csrfToken = '';
-  state.selectedConversationId = null;
-  state.applicationDormitoryId = null;
-  app.innerHTML = `
-    <main class="login-shell">
-      <section class="login-panel">
-        <div class="login-brand"><div class="brand-mark">合</div><div><strong>合住</strong><span>内部室友双选系统</span></div></div>
-        <h1>账号登录</h1>
-        <p>使用管理员导入的正式账号进入系统。</p>
-        <form id="login-form">
-          <div class="form-field"><label for="login-id">登录标识</label><input id="login-id" name="loginIdentifier" autocomplete="username" required></div>
-          <div class="form-field" style="margin-top:16px"><label for="login-password">密码</label><input id="login-password" name="password" type="password" autocomplete="current-password" required></div>
-          <button class="btn btn-primary" style="width:100%;margin-top:20px" type="submit">${icon('log-in')}登录</button>
-        </form>
-        <div class="login-accounts"><p>演示账号</p><div class="account-chips">${demoAccounts.map(([identifier, name]) => `<button class="btn btn-secondary btn-sm" data-demo-id="${identifier}">${escapeHtml(name)} · ${identifier}</button>`).join('')}</div></div>
-      </section>
-    </main>`;
-  const form = document.querySelector('#login-form');
-  document.querySelectorAll('[data-demo-id]').forEach((button) => button.addEventListener('click', () => {
+function openLoginModal(redirectToSystem = false) {
+  closeModal();
+  const modal = openModal('账号登录', `
+    <p class="login-intro">使用管理员导入的正式账号进入系统。</p>
+    <form id="login-form">
+      <div class="form-field"><label for="login-id">登录标识</label><input id="login-id" name="loginIdentifier" autocomplete="username" required></div>
+      <div class="form-field" style="margin-top:16px"><label for="login-password">密码</label><input id="login-password" name="password" type="password" autocomplete="current-password" required></div>
+      <button class="btn btn-primary" style="width:100%;margin-top:20px" type="submit">${icon('log-in')}登录</button>
+    </form>
+    <div class="login-accounts"><p>演示账号</p><div class="account-chips">${demoAccounts.map(([identifier, name]) => `<button type="button" class="btn btn-secondary btn-sm" data-demo-id="${identifier}">${escapeHtml(name)} · ${identifier}</button>`).join('')}</div></div>`);
+  const form = modal.querySelector('#login-form');
+  modal.querySelectorAll('[data-demo-id]').forEach((button) => button.addEventListener('click', () => {
     const account = demoAccounts.find(([identifier]) => identifier === button.dataset.demoId);
     form.loginIdentifier.value = account[0]; form.password.value = account[2];
   }));
@@ -338,10 +395,15 @@ function renderLogin() {
       state.mode = data.user.isSuperAdmin ? 'management' : 'student';
       state.view = state.mode === 'management' ? 'overview' : 'discover';
       if (data.user.mustChangePassword) {
-        renderShell();
-        showRequiredPasswordChange();
+        closeModal();
+        await renderHomepage();
+        showRequiredPasswordChange(redirectToSystem);
+      } else if (redirectToSystem) {
+        closeModal();
+        await enterRoommateSystem();
       } else {
-        await navigate(state.view);
+        closeModal();
+        await renderHomepage();
       }
     } catch (error) {
       toast(error.message, 'error');
@@ -352,12 +414,24 @@ function renderLogin() {
   refreshIcons();
 }
 
-async function logout() {
-  try { await api('/api/auth/logout', { method: 'POST', body: '{}' }); } catch {}
-  renderLogin();
+function renderLogin(redirectToSystem = false) {
+  state.user = null;
+  state.csrfToken = '';
+  state.selectedConversationId = null;
+  state.applicationDormitoryId = null;
+  history.replaceState({}, '', '/');
+  renderHomepage().then(() => openLoginModal(redirectToSystem));
 }
 
-function showRequiredPasswordChange() {
+async function logout() {
+  try { await api('/api/auth/logout', { method: 'POST', body: '{}' }); } catch {}
+  state.user = null;
+  state.csrfToken = '';
+  closeModal();
+  await goHome();
+}
+
+function showRequiredPasswordChange(continueToSystem = true) {
   const modal = openModal('修改初始密码', `<p>这是首次登录。设置你自己的密码后才能继续使用系统。</p><form id="required-password-form" class="form-grid"><div class="form-field full"><label>当前初始密码</label><input name="currentPassword" type="password" autocomplete="current-password" required></div><div class="form-field full"><label>新密码</label><input name="newPassword" type="password" minlength="8" autocomplete="new-password" required></div><div class="form-actions"><button type="button" class="btn btn-secondary" data-logout>退出登录</button><button class="btn btn-primary">${icon('key-round')}设置新密码</button></div></form>`);
   modal.querySelector('[data-close]').remove();
   modal.querySelector('[data-logout]').addEventListener('click', logout);
@@ -368,7 +442,8 @@ function showRequiredPasswordChange() {
       state.user.mustChangePassword = false;
       closeModal();
       toast('密码已更新');
-      await navigate(state.view);
+      if (continueToSystem) await enterRoommateSystem();
+      else await renderHomepage();
     } catch (error) { toast(error.message, 'error'); }
   });
 }
@@ -859,13 +934,14 @@ function showDeactivateModal() {
   const modal = openModal('注销账号', `<p>账号注销后将无法登录，室友卡片停止展示，当前宿舍组会解散。已有资源继续保留，除非管理员永久删除。</p><div class="form-field"><label>输入“注销账号”确认</label><input id="deactivate-confirm"></div><div class="modal-actions"><button class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-danger" data-confirm>${icon('user-minus')}确认注销</button></div>`);
   modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
   modal.querySelector('[data-confirm]').addEventListener('click', async () => {
-    try { await api('/api/me/deactivate', { method: 'POST', body: JSON.stringify({ confirmation: modal.querySelector('#deactivate-confirm').value }) }); closeModal(); renderLogin(); }
+    try { await api('/api/me/deactivate', { method: 'POST', body: JSON.stringify({ confirmation: modal.querySelector('#deactivate-confirm').value }) }); state.user = null; state.csrfToken = ''; closeModal(); await goHome(); }
     catch (error) { toast(error.message, 'error'); }
   });
 }
 
 async function loadAdminView(view) {
   if (view === 'overview') return renderAdminOverview();
+  if (view === 'homepage') return renderAdminHomepage();
   if (view === 'users') return renderAdminUsers();
   if (view === 'cards') return renderAdminCards();
   if (view === 'rounds') return renderAdminRounds();
@@ -881,6 +957,71 @@ async function renderAdminOverview() {
   setPage(`<div class="stats-grid"><div class="stat"><span>正式学生账号</span><strong>${counts.students}</strong></div><div class="stat"><span>正常账号</span><strong>${counts.activeStudents}</strong></div><div class="stat"><span>公开卡片</span><strong>${counts.publishedCards}</strong></div><div class="stat"><span>待处理举报</span><strong>${counts.pendingReports}</strong></div></div>
     <section class="panel"><div class="section-heading"><div><h2>${escapeHtml(counts.currentRound?.name || '当前没有选宿舍轮次')}</h2><p>${counts.currentRound ? `${escapeHtml(counts.currentRound.code)} · ${counts.currentRound.status === 'OPEN' ? '进行中' : counts.currentRound.status === 'CLOSED' ? '已截止' : '已归档'}` : '由超级管理员新建并开启轮次'}</p></div>${counts.currentRound ? statusBadge(counts.currentRound.status === 'OPEN' ? '进行中' : counts.currentRound.status === 'CLOSED' ? '已截止' : '已归档', counts.currentRound.status === 'OPEN' ? 'open' : 'closed', counts.currentRound.status === 'OPEN' ? 'door-open' : 'archive') : ''}</div><div class="detail-header"><div class="brand-mark" style="background:var(--accent)">${counts.dormitories}</div><div><strong>本轮有效宿舍</strong><p class="field-hint">当前结果包含 ${counts.dormitoryMembers} 名学生</p></div>${state.user.isSuperAdmin ? `<div class="detail-actions"><button class="btn btn-primary" id="manage-rounds">${icon('calendar-range')}管理轮次</button></div>` : ''}</div></section>`);
   document.querySelector('#manage-rounds')?.addEventListener('click', () => navigate('rounds'));
+}
+
+async function renderAdminHomepage() {
+  const content = await api('/api/admin/homepage');
+  setPage(`
+    <div class="homepage-editor-meta">
+      <div><strong>当前修订 #<span id="homepage-revision">${content.revision}</span></strong><p>最近更新：${formatDate(content.updatedAt)}</p></div>
+      <button class="btn btn-secondary" id="reload-homepage">${icon('refresh-cw')}重新加载</button>
+    </div>
+    <div class="editor-tabs segmented" aria-label="编辑器视图">
+      <button class="active" data-editor-pane="write">编辑</button><button data-editor-pane="preview">预览</button>
+    </div>
+    <div class="homepage-editor">
+      <section class="editor-pane active" data-pane="write">
+        <div class="section-heading"><div><h2>Markdown 正文</h2><p>支持标题、段落、列表、引用、链接、表格和代码块</p></div></div>
+        <textarea id="homepage-markdown" maxlength="100000" spellcheck="false">${escapeHtml(content.markdown)}</textarea>
+      </section>
+      <section class="editor-pane" data-pane="preview">
+        <div class="section-heading"><div><h2>发布预览</h2><p>预览内容已按公开页面规则进行安全清洗</p></div></div>
+        <article class="markdown-article editor-preview" id="homepage-preview">${content.html}</article>
+      </section>
+    </div>
+    <div class="homepage-publish">
+      <div class="form-field"><label for="homepage-reason">更新原因</label><input id="homepage-reason" maxlength="200" required placeholder="用于审计记录"></div>
+      <p class="conflict-message" id="homepage-conflict" hidden>检测到其他管理员已经更新内容。请重新加载后再编辑。</p>
+      <div class="form-actions"><button class="btn btn-secondary" id="preview-homepage">${icon('scan-eye')}更新预览</button><button class="btn btn-primary" id="publish-homepage">${icon('send')}发布更新</button></div>
+    </div>`);
+  let revision = content.revision;
+  const markdownInput = document.querySelector('#homepage-markdown');
+  const preview = document.querySelector('#homepage-preview');
+  const publishButton = document.querySelector('#publish-homepage');
+  const showPane = (pane) => {
+    document.querySelectorAll('[data-editor-pane]').forEach((button) => button.classList.toggle('active', button.dataset.editorPane === pane));
+    document.querySelectorAll('[data-pane]').forEach((section) => section.classList.toggle('active', section.dataset.pane === pane));
+  };
+  document.querySelectorAll('[data-editor-pane]').forEach((button) => button.addEventListener('click', () => showPane(button.dataset.editorPane)));
+  document.querySelector('#reload-homepage').addEventListener('click', renderAdminHomepage);
+  document.querySelector('#preview-homepage').addEventListener('click', async () => {
+    try {
+      const result = await api('/api/admin/homepage/preview', { method: 'POST', body: JSON.stringify({ markdown: markdownInput.value }) });
+      preview.innerHTML = result.html;
+      showPane('preview');
+      toast('预览已更新');
+    } catch (error) { toast(error.message, 'error'); }
+  });
+  publishButton.addEventListener('click', async () => {
+    try {
+      const result = await api('/api/admin/homepage', { method: 'PUT', body: JSON.stringify({
+        markdown: markdownInput.value,
+        reason: document.querySelector('#homepage-reason').value,
+        expectedRevision: revision,
+      }) });
+      revision = result.revision;
+      document.querySelector('#homepage-revision').textContent = revision;
+      document.querySelector('#homepage-reason').value = '';
+      preview.innerHTML = result.html;
+      toast('首页内容已发布');
+    } catch (error) {
+      if (error.code === 'CONTENT_VERSION_CONFLICT') {
+        document.querySelector('#homepage-conflict').hidden = false;
+        publishButton.disabled = true;
+      }
+      toast(error.message, 'error');
+    }
+  });
 }
 
 async function renderAdminUsers() {
@@ -1226,7 +1367,7 @@ async function renderAdminAccess() {
   ]);
   state.selectionGroups = selectionGroups;
   state.accessCatalog = { permissions, grades, users: users.filter((user) => user.account_type === 'USER') };
-  setPage(`<div class="toolbar"><div class="search-field">${icon('search')}<input id="admin-group-member-search" placeholder="按成员姓名搜索管理员组"></div><div class="toolbar-spacer"></div><button class="btn btn-secondary" id="manage-selection-groups">${icon('users-round')}预设学生群组</button><button class="btn btn-primary" id="create-admin-group">${icon('plus')}新建管理员组</button></div><div class="field-hint toolbar-note">一次授权必须由同一个组同时提供权限和年级范围</div>
+  setPage(`<div class="toolbar"><div class="search-field">${icon('search')}<input id="admin-group-member-search" placeholder="按成员姓名搜索管理员组"></div><div class="toolbar-spacer"></div><button class="btn btn-secondary" id="manage-selection-groups">${icon('users-round')}预设学生群组</button><button class="btn btn-primary" id="create-admin-group">${icon('plus')}新建管理员组</button></div><div class="field-hint toolbar-note">按年级授权时，权限和年级范围必须由同一个组提供；首页更新是全局权限，不使用年级范围。</div>
     ${groups.length ? `<div class="access-grid">${groups.map((group) => `<section class="panel access-card"><div class="section-heading"><div><h2>${escapeHtml(group.name)}</h2><p><code>${escapeHtml(group.code)}</code> · ${escapeHtml(group.description || '暂无说明')}</p></div>${statusBadge(group.status === 'ACTIVE' ? '有效' : '已停用', group.status === 'ACTIVE' ? 'active' : 'closed')}</div><dl class="access-summary"><div><dt>成员</dt><dd>${group.members.map((member) => escapeHtml(member.name)).join('、') || '未配置'}</dd></div><div><dt>年级范围</dt><dd>${group.scopes.map((scope) => escapeHtml(scope.grade_name || scope.scope_value)).join('、') || '未配置'}</dd></div><div><dt>权限</dt><dd>${group.permissions.map((code) => escapeHtml(permissions.find((item) => item.code === code)?.name || code)).join('、') || '未配置'}</dd></div></dl><button class="btn btn-secondary" data-configure-group="${group.id}">${icon('settings')}配置管理员组</button></section>`).join('')}</div>` : emptyState('shield-check', '暂无管理员组', '新建管理员组后配置成员、权限和年级范围')}`);
   document.querySelector('#create-admin-group').addEventListener('click', showCreateAdminGroup);
   document.querySelector('#manage-selection-groups').addEventListener('click', openSelectionGroupManager);
@@ -1278,17 +1419,19 @@ async function init() {
     state.user = data.user;
     state.gender = data.user.gender === 'MALE' ? 'MALE' : 'FEMALE';
     state.csrfToken = data.csrfToken;
-    state.mode = data.user.isSuperAdmin ? 'management' : 'student';
-    state.view = state.mode === 'management' ? 'overview' : 'discover';
-    if (data.user.mustChangePassword) {
-      renderShell();
-      showRequiredPasswordChange();
-    } else {
-      await navigate(state.view);
-    }
-  } catch {
-    renderLogin();
+  } catch (error) {
+    if (error.status !== 401) toast(error.message, 'error');
+  }
+  if (window.location.pathname === '/roommates') await enterRoommateSystem();
+  else {
+    if (window.location.pathname !== '/') history.replaceState({}, '', '/');
+    await renderHomepage();
   }
 }
+
+window.addEventListener('popstate', () => {
+  if (window.location.pathname === '/roommates') enterRoommateSystem();
+  else renderHomepage();
+});
 
 init();

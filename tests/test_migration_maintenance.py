@@ -47,7 +47,29 @@ def test_alembic_upgrades_a_legacy_database(tmp_path, monkeypatch):
             database.execute("SELECT account_type FROM users WHERE login_identifier='admin'").fetchone()[0]
             == "SUPER_ADMIN"
         )
-        assert database.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "20260801_01"
+        assert database.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "20260801_02"
+        homepage = database.execute(
+            "SELECT value,revision FROM system_settings WHERE key='homepage_markdown'"
+        ).fetchone()
+        assert homepage and homepage[0].startswith("# 欢迎来到合住") and homepage[1] == 1
+
+
+def test_homepage_migration_preserves_existing_content(tmp_path, monkeypatch):
+    database_path = tmp_path / "homepage.db"
+    monkeypatch.setenv("DB_PATH", str(database_path))
+    get_settings.cache_clear()
+    config = Config("alembic.ini")
+    command.upgrade(config, "20260801_01")
+    with sqlite3.connect(database_path) as database:
+        database.execute(
+            "INSERT INTO system_settings(key,value,updated_at) VALUES('homepage_markdown','保留正文','2026-01-01Z')"
+        )
+    command.upgrade(config, "head")
+    get_settings.cache_clear()
+    with sqlite3.connect(database_path) as database:
+        assert database.execute(
+            "SELECT value,revision FROM system_settings WHERE key='homepage_markdown'"
+        ).fetchone() == ("保留正文", 1)
 
 
 def test_models_map_all_current_tables():
