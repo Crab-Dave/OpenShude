@@ -1,7 +1,7 @@
 # Database operations
 
-Production deploys create a verified SQLite backup before replacing an existing
-application container. Backups and their SHA-256 files are stored in the
+Production deploys stop the web container and create a verified SQLite backup
+before migrating an existing database. Backups and their SHA-256 files are stored in the
 external `openshude-backups` volume; the newest 10 backups are retained.
 
 List the available backups on the server:
@@ -19,7 +19,7 @@ cd /opt/myapp
 image_tag=$(<.deployed-image-tag)
 backup="/app/backups/manual-$(date -u +%Y%m%dT%H%M%SZ)-${image_tag}.db"
 IMAGE_TAG="$image_tag" docker compose -f compose.prod.yml run -T --rm --no-deps web \
-  node ops/database-maintenance.js backup /app/data/app.db "$backup"
+  python -m app.maintenance backup /app/data/app.db "$backup"
 ```
 
 Restore one of those backups:

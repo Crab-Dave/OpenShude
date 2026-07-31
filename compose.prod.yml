@@ -7,12 +7,15 @@ services:
     restart: unless-stopped
 
     environment:
-      NODE_ENV: production
+      ENVIRONMENT: production
       HOST: 0.0.0.0
       PORT: 4173
       DB_PATH: /app/data/app.db
       APP_VERSION: "${IMAGE_TAG:?IMAGE_TAG is required}"
-      INITIAL_ADMIN_PASSWORD: "${INITIAL_ADMIN_PASSWORD:-}"
+      DOCS_ENABLED: "false"
+      SESSION_COOKIE_SECURE: "false"
+      ALLOWED_HOSTS: '["39.96.36.207","127.0.0.1","localhost"]'
+      ALLOWED_ORIGINS: '["http://39.96.36.207"]'
 
     ports:
       - "127.0.0.1:4173:4173"
@@ -24,9 +27,9 @@ services:
     healthcheck:
       test:
         - CMD
-        - node
-        - -e
-        - fetch('http://127.0.0.1:4173/').then(response=>{if(!response.ok)process.exit(1)}).catch(()=>process.exit(1))
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:4173/api/health', timeout=4).read()
       interval: 10s
       timeout: 5s
       retries: 6

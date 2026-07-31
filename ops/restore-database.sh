@@ -36,21 +36,21 @@ wait_for_healthy() {
 }
 
 backup_path="/app/backups/$backup_name"
-compose run -T --rm --no-deps web node ops/database-maintenance.js verify "$backup_path"
+compose run -T --rm --no-deps web python -m app.maintenance verify "$backup_path"
 
 timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 safety_name="pre-restore-${timestamp}-${image_tag}.db"
 safety_path="/app/backups/$safety_name"
-compose run -T --rm --no-deps web node ops/database-maintenance.js \
+compose run -T --rm --no-deps web python -m app.maintenance \
   backup /app/data/app.db "$safety_path"
 
 compose stop web
-if ! compose run -T --rm --no-deps web node ops/database-maintenance.js \
+if ! compose run -T --rm --no-deps web python -m app.maintenance \
   restore "$backup_path" /app/data/app.db; then
-  if compose run -T --rm --no-deps web node ops/database-maintenance.js \
+  if compose run -T --rm --no-deps web python -m app.maintenance \
        restore "$safety_path" /app/data/app.db && \
      compose up -d --remove-orphans && wait_for_healthy; then
-    compose run -T --rm --no-deps web node ops/database-maintenance.js prune /app/backups 10
+    compose run -T --rm --no-deps web python -m app.maintenance prune /app/backups 10
     echo "Restore failed; the pre-restore database was reapplied" >&2
   else
     echo "Restore and automatic database rollback both failed" >&2
@@ -60,16 +60,16 @@ fi
 
 compose up -d --remove-orphans
 if wait_for_healthy; then
-  compose run -T --rm --no-deps web node ops/database-maintenance.js prune /app/backups 10
+  compose run -T --rm --no-deps web python -m app.maintenance prune /app/backups 10
   echo "Database restored from $backup_name"
   exit 0
 fi
 
 compose stop web
-if compose run -T --rm --no-deps web node ops/database-maintenance.js \
+if compose run -T --rm --no-deps web python -m app.maintenance \
      restore "$safety_path" /app/data/app.db && \
    compose up -d --remove-orphans && wait_for_healthy; then
-  compose run -T --rm --no-deps web node ops/database-maintenance.js prune /app/backups 10
+  compose run -T --rm --no-deps web python -m app.maintenance prune /app/backups 10
   echo "Restored database failed health checks; reverted to $safety_name" >&2
 else
   echo "Restored database failed health checks and automatic rollback failed" >&2
