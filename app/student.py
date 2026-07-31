@@ -1,5 +1,4 @@
 import base64
-import binascii
 import json
 from typing import Annotated
 
@@ -14,6 +13,12 @@ from .errors import ApiError
 
 router = APIRouter(prefix="/api")
 DB = Annotated[Session, Depends(get_db)]
+CARD_NOT_FOUND_MESSAGE = "室友卡片不存在"
+AVATAR_SIGNATURES = {
+    "data:image/png;base64": lambda data: data.startswith(b"\x89PNG\r\n\x1a\n"),
+    "data:image/jpeg;base64": lambda data: data.startswith(b"\xff\xd8\xff"),
+    "data:image/webp;base64": lambda data: data.startswith(b"RIFF") and data[8:12] == b"WEBP",
+}
 
 CARD_SELECT = """
 SELECT c.id,c.user_id,c.avatar_url,c.origin_province,c.origin_city,c.clothing_size,
@@ -63,36 +68,38 @@ def conversation_for_user(db: Session, conversation_id: int, user_id: int) -> di
     return conversation
 
 
+def number(value: object) -> int | float | None:
+    if value in ("", None):
+        return None
+    try:
+        result = float(value)
+        return int(result) if result.is_integer() else result
+    except (TypeError, ValueError):
+        return None
+
+
+def validated_avatar(value: object) -> str:
+    avatar = clean_text(value, 3_000_000)
+    if not avatar or avatar.startswith("/assets/"):
+        return avatar
+    header, separator, encoded = avatar.partition(",")
+    mime = header.lower()
+    try:
+        decoded = base64.b64decode(encoded, validate=True)
+    except ValueError:
+        decoded = b""
+    if not separator or mime not in AVATAR_SIGNATURES or not AVATAR_SIGNATURES[mime](decoded):
+        raise ApiError(400, "INVALID_AVATAR", "头像格式不受支持")
+    if len(decoded) > 2 * 1024 * 1024:
+        raise ApiError(413, "AVATAR_TOO_LARGE", "头像不能超过 2 MB")
+    return avatar
+
+
 def card_input(body: dict) -> dict:
     if any(field in body for field in ("name", "grade", "gender", "major")):
         raise ApiError(403, "IDENTITY_FIELDS_READ_ONLY", "姓名、年级、性别和专业只能由管理员修改")
 
-    def number(value: object) -> int | float | None:
-        if value in ("", None):
-            return None
-        try:
-            result = float(value)
-            return int(result) if result.is_integer() else result
-        except (TypeError, ValueError):
-            return None
-
-    avatar = clean_text(body.get("avatar_url"), 3_000_000)
-    if avatar and not avatar.startswith("/assets/"):
-        header, separator, encoded = avatar.partition(",")
-        mime = header.lower()
-        signatures = {
-            "data:image/png;base64": lambda data: data.startswith(b"\x89PNG\r\n\x1a\n"),
-            "data:image/jpeg;base64": lambda data: data.startswith(b"\xff\xd8\xff"),
-            "data:image/webp;base64": lambda data: data.startswith(b"RIFF") and data[8:12] == b"WEBP",
-        }
-        try:
-            decoded = base64.b64decode(encoded, validate=True)
-        except (binascii.Error, ValueError):
-            decoded = b""
-        if not separator or mime not in signatures or not signatures[mime](decoded):
-            raise ApiError(400, "INVALID_AVATAR", "头像格式不受支持")
-        if len(decoded) > 2 * 1024 * 1024:
-            raise ApiError(413, "AVATAR_TOO_LARGE", "头像不能超过 2 MB")
+    avatar = validated_avatar(body.get("avatar_url"))
     clothing = clean_text(body.get("clothing_size"), 8)
     if clothing and clothing not in ("S", "M", "L", "XL", "XXL", "XXXL", "XXXXL"):
         raise ApiError(400, "INVALID_CLOTHING_SIZE", "院服尺码无效")
@@ -302,7 +309,7 @@ def card_detail(card_id: int, request: Request, db: DB) -> dict:
     require_user(user)
     card = card_by_id(db, card_id)
     if not card or card["user_status"] != "ACTIVE" or card["status"] != "PUBLISHED":
-        raise ApiError(404, "CARD_NOT_FOUND", "室友卡片不存在")
+        raise ApiError(404, "CARD_NOT_FOUND", CARD_NOT_FOUND_MESSAGE)
     if has_block(db, user["id"], card["user_id"]):
         raise ApiError(403, "USER_BLOCKED", "无法查看该用户")
     return {"card": card}
@@ -314,7 +321,7 @@ def conversation_from_card(card_id: int, request: Request, db: DB) -> dict:
     require_user(user)
     card = card_by_id(db, card_id)
     if not card or card["user_id"] == user["id"] or card["user_status"] != "ACTIVE":
-        raise ApiError(404, "CARD_NOT_FOUND", "室友卡片不存在")
+        raise ApiError(404, "CARD_NOT_FOUND", CARD_NOT_FOUND_MESSAGE)
     if has_block(db, user["id"], card["user_id"]):
         raise ApiError(403, "USER_BLOCKED", "无法与该用户联系")
     return {"conversation": get_or_create_conversation(db, user["id"], card["user_id"])}
@@ -333,7 +340,7 @@ def conversation_from_user(other_id: int, request: Request, db: DB) -> dict:
 
 
 @router.get("/conversations")
-def conversations(request: Request, db: DB, search: str = Query(default="")) -> dict:
+def conversations(request: Request, db: DB, search: Annotated[str, Query()] = "") -> dict:
     user = current_user(request, db)
     require_user(user)
     rows = all_rows(
@@ -488,7 +495,7 @@ def report(request: Request, body: dict, db: DB) -> dict:
     if target_type == "ROOMMATE_CARD":
         card = card_by_id(db, target_id)
         if not card:
-            raise ApiError(404, "CARD_NOT_FOUND", "室友卡片不存在")
+            raise ApiError(404, "CARD_NOT_FOUND", CARD_NOT_FOUND_MESSAGE)
         snapshot = {
             "name": card["name"],
             "additional_note": card["additional_note"],

@@ -42,6 +42,14 @@ from .student import CARD_SELECT, card_by_id
 
 router = APIRouter(prefix="/api/admin")
 DB = Annotated[Session, Depends(get_db)]
+ADMIN_GROUP_BY_ID = "SELECT * FROM admin_groups WHERE id=:id"
+USER_BY_ID = "SELECT * FROM users WHERE id=:id"
+SELECTION_GROUP_BY_ID = "SELECT * FROM student_selection_groups WHERE id=:id"
+DORMITORY_ROUND_BY_ID = "SELECT * FROM dormitory_selection_rounds WHERE id=:id"
+PERMISSION_DENIED_MESSAGE = "当前账号缺少所需管理权限"
+NOT_FOUND_MESSAGE = "接口不存在"
+USER_NOT_FOUND_MESSAGE = "用户账号不存在"
+DORMITORY_ROUND_NOT_FOUND_MESSAGE = "选宿舍轮次不存在"
 
 
 def admin_user(request: Request, db: Session) -> dict:
@@ -55,7 +63,7 @@ def grade_filter(db: Session, admin: dict, rows: list[dict], permission: str, fi
     if grade_ids is None:
         return rows
     if not grade_ids:
-        raise ApiError(403, "PERMISSION_DENIED", "当前账号缺少所需管理权限")
+        raise ApiError(403, "PERMISSION_DENIED", PERMISSION_DENIED_MESSAGE)
     return [row for row in rows if row.get(field) is not None and int(row[field]) in grade_ids]
 
 
@@ -127,7 +135,9 @@ def report_rows(db: Session) -> list[dict]:
 
 
 def valid_user_ids(db: Session, values: object, statuses: bool = False) -> list[int]:
-    ids = sorted({int(value) for value in values if str(value).isdigit()}) if isinstance(values, list) else []
+    if not isinstance(values, list):
+        return []
+    ids = sorted({int(value) for value in values if str(value).isdigit()})
     for user_id in ids:
         suffix = " AND status IN('ACTIVE','PENDING_ACTIVATION')" if statuses else ""
         if not one(db, f"SELECT 1 AS found FROM users WHERE id=:id AND account_type='USER'{suffix}", {"id": user_id}):
@@ -241,14 +251,14 @@ def create_admin_group(request: Request, body: dict, db: DB) -> dict:
         after={"code": code, "name": name, "description": description, "status": "ACTIVE"},
     )
     db.commit()
-    return {"group": group_details(db, one(db, "SELECT * FROM admin_groups WHERE id=:id", {"id": result.lastrowid}))}
+    return {"group": group_details(db, one(db, ADMIN_GROUP_BY_ID, {"id": result.lastrowid}))}
 
 
 @router.patch("/admin-groups/{group_id}")
 def update_admin_group(group_id: int, request: Request, body: dict, db: DB) -> dict:
     admin = admin_user(request, db)
     grant = require_super_admin(admin)
-    before = one(db, "SELECT * FROM admin_groups WHERE id=:id", {"id": group_id})
+    before = one(db, ADMIN_GROUP_BY_ID, {"id": group_id})
     if not before:
         raise ApiError(404, "ADMIN_GROUP_NOT_FOUND", "管理员组不存在")
     name = clean_text(body.get("name"), 80, True)
@@ -265,7 +275,7 @@ def update_admin_group(group_id: int, request: Request, body: dict, db: DB) -> d
       WHERE id IN(SELECT user_id FROM admin_group_members WHERE group_id=:id)"""),
         {"id": group_id},
     )
-    after = one(db, "SELECT * FROM admin_groups WHERE id=:id", {"id": group_id})
+    after = one(db, ADMIN_GROUP_BY_ID, {"id": group_id})
     audit(
         db,
         admin,
@@ -282,89 +292,102 @@ def update_admin_group(group_id: int, request: Request, body: dict, db: DB) -> d
     return {"group": group_details(db, after)}
 
 
+def configure_group_permissions(db: Session, group_id: int, body: dict, admin_id: int) -> tuple[list, list]:
+    supplied = body.get("permissions")
+    values = sorted(set(supplied)) if isinstance(supplied, list) else []
+    if any(value not in PERMISSIONS for value in values):
+        raise ApiError(400, "INVALID_PERMISSION", "包含不受支持的权限编码")
+    before = [
+        row["permission_code"]
+        for row in all_rows(
+            db,
+            "SELECT permission_code FROM admin_group_permissions WHERE group_id=:id ORDER BY permission_code",
+            {"id": group_id},
+        )
+    ]
+    db.execute(text("DELETE FROM admin_group_permissions WHERE group_id=:id"), {"id": group_id})
+    for value in values:
+        db.execute(
+            text(
+                "INSERT INTO admin_group_permissions(group_id,permission_code,created_by,created_at) VALUES(:group,:value,:admin,:now)"
+            ),
+            {"group": group_id, "value": value, "admin": admin_id, "now": now()},
+        )
+    return before, values
+
+
+def configure_group_scopes(db: Session, group_id: int, body: dict, admin_id: int) -> tuple[list, list]:
+    try:
+        values = sorted({int(value) for value in body.get("gradeIds", [])})
+    except (TypeError, ValueError):
+        values = []
+    if any(
+        not one(db, "SELECT 1 AS found FROM grades WHERE id=:id AND status='ACTIVE'", {"id": value}) for value in values
+    ):
+        raise ApiError(400, "INVALID_GRADE_SCOPE", "包含无效的年级范围")
+    before = [
+        int(row["scope_value"])
+        for row in all_rows(
+            db,
+            "SELECT scope_value FROM admin_group_scopes WHERE group_id=:id AND scope_type='GRADE' ORDER BY scope_value",
+            {"id": group_id},
+        )
+    ]
+    db.execute(text("DELETE FROM admin_group_scopes WHERE group_id=:id"), {"id": group_id})
+    for value in values:
+        db.execute(
+            text(
+                "INSERT INTO admin_group_scopes(group_id,scope_type,scope_value,created_by,created_at) VALUES(:group,'GRADE',:value,:admin,:now)"
+            ),
+            {"group": group_id, "value": str(value), "admin": admin_id, "now": now()},
+        )
+    return before, values
+
+
+def configure_group_members(db: Session, group_id: int, body: dict, admin_id: int) -> tuple[list, list]:
+    try:
+        values = sorted({int(value) for value in body.get("userIds", [])})
+    except (TypeError, ValueError):
+        values = []
+    if any(
+        not one(db, "SELECT 1 AS found FROM users WHERE id=:id AND account_type='USER'", {"id": value})
+        for value in values
+    ):
+        raise ApiError(400, "INVALID_GROUP_MEMBER", "管理员组成员必须是普通用户")
+    before = [
+        row["user_id"]
+        for row in all_rows(
+            db, "SELECT user_id FROM admin_group_members WHERE group_id=:id ORDER BY user_id", {"id": group_id}
+        )
+    ]
+    db.execute(text("DELETE FROM admin_group_members WHERE group_id=:id"), {"id": group_id})
+    for value in values:
+        db.execute(
+            text(
+                "INSERT INTO admin_group_members(group_id,user_id,created_by,created_at) VALUES(:group,:value,:admin,:now)"
+            ),
+            {"group": group_id, "value": value, "admin": admin_id, "now": now()},
+        )
+    for value in set(before + values):
+        db.execute(text("UPDATE users SET authorization_version=authorization_version+1 WHERE id=:id"), {"id": value})
+    return before, values
+
+
 @router.put("/admin-groups/{group_id}/{section}")
 def configure_admin_group(group_id: int, section: str, request: Request, body: dict, db: DB) -> dict:
     if section not in ("permissions", "scopes", "members"):
-        raise ApiError(404, "NOT_FOUND", "接口不存在")
+        raise ApiError(404, "NOT_FOUND", NOT_FOUND_MESSAGE)
     admin = admin_user(request, db)
     grant = require_super_admin(admin)
     if not one(db, "SELECT 1 AS found FROM admin_groups WHERE id=:id", {"id": group_id}):
         raise ApiError(404, "ADMIN_GROUP_NOT_FOUND", "管理员组不存在")
     begin_immediate(db)
     if section == "permissions":
-        values = sorted(set(body.get("permissions") if isinstance(body.get("permissions"), list) else []))
-        if any(value not in PERMISSIONS for value in values):
-            raise ApiError(400, "INVALID_PERMISSION", "包含不受支持的权限编码")
-        before = [
-            row["permission_code"]
-            for row in all_rows(
-                db,
-                "SELECT permission_code FROM admin_group_permissions WHERE group_id=:id ORDER BY permission_code",
-                {"id": group_id},
-            )
-        ]
-        db.execute(text("DELETE FROM admin_group_permissions WHERE group_id=:id"), {"id": group_id})
-        for value in values:
-            db.execute(
-                text(
-                    "INSERT INTO admin_group_permissions(group_id,permission_code,created_by,created_at) VALUES(:group,:value,:admin,:now)"
-                ),
-                {"group": group_id, "value": value, "admin": admin["id"], "now": now()},
-            )
+        before, values = configure_group_permissions(db, group_id, body, admin["id"])
     elif section == "scopes":
-        try:
-            values = sorted({int(value) for value in body.get("gradeIds", [])})
-        except (TypeError, ValueError):
-            values = []
-        if any(
-            not one(db, "SELECT 1 AS found FROM grades WHERE id=:id AND status='ACTIVE'", {"id": value})
-            for value in values
-        ):
-            raise ApiError(400, "INVALID_GRADE_SCOPE", "包含无效的年级范围")
-        before = [
-            int(row["scope_value"])
-            for row in all_rows(
-                db,
-                "SELECT scope_value FROM admin_group_scopes WHERE group_id=:id AND scope_type='GRADE' ORDER BY scope_value",
-                {"id": group_id},
-            )
-        ]
-        db.execute(text("DELETE FROM admin_group_scopes WHERE group_id=:id"), {"id": group_id})
-        for value in values:
-            db.execute(
-                text(
-                    "INSERT INTO admin_group_scopes(group_id,scope_type,scope_value,created_by,created_at) VALUES(:group,'GRADE',:value,:admin,:now)"
-                ),
-                {"group": group_id, "value": str(value), "admin": admin["id"], "now": now()},
-            )
+        before, values = configure_group_scopes(db, group_id, body, admin["id"])
     else:
-        try:
-            values = sorted({int(value) for value in body.get("userIds", [])})
-        except (TypeError, ValueError):
-            values = []
-        if any(
-            not one(db, "SELECT 1 AS found FROM users WHERE id=:id AND account_type='USER'", {"id": value})
-            for value in values
-        ):
-            raise ApiError(400, "INVALID_GROUP_MEMBER", "管理员组成员必须是普通用户")
-        before = [
-            row["user_id"]
-            for row in all_rows(
-                db, "SELECT user_id FROM admin_group_members WHERE group_id=:id ORDER BY user_id", {"id": group_id}
-            )
-        ]
-        db.execute(text("DELETE FROM admin_group_members WHERE group_id=:id"), {"id": group_id})
-        for value in values:
-            db.execute(
-                text(
-                    "INSERT INTO admin_group_members(group_id,user_id,created_by,created_at) VALUES(:group,:value,:admin,:now)"
-                ),
-                {"group": group_id, "value": value, "admin": admin["id"], "now": now()},
-            )
-        for value in set(before + values):
-            db.execute(
-                text("UPDATE users SET authorization_version=authorization_version+1 WHERE id=:id"), {"id": value}
-            )
+        before, values = configure_group_members(db, group_id, body, admin["id"])
     if section != "members":
         db.execute(
             text("""UPDATE users SET authorization_version=authorization_version+1
@@ -384,7 +407,7 @@ def configure_admin_group(group_id: int, section: str, request: Request, body: d
         after={"values": values},
     )
     db.commit()
-    return {"group": group_details(db, one(db, "SELECT * FROM admin_groups WHERE id=:id", {"id": group_id}))}
+    return {"group": group_details(db, one(db, ADMIN_GROUP_BY_ID, {"id": group_id}))}
 
 
 @router.get("/users")
@@ -505,9 +528,9 @@ def update_identity(user_id: int, request: Request, body: dict, db: DB) -> dict:
     gender = body.get("gender")
     if gender not in ("MALE", "FEMALE"):
         raise ApiError(400, "INVALID_GENDER", "性别必须为男或女")
-    account = one(db, "SELECT * FROM users WHERE id=:id", {"id": user_id})
+    account = one(db, USER_BY_ID, {"id": user_id})
     if not account:
-        raise ApiError(404, "USER_NOT_FOUND", "用户账号不存在")
+        raise ApiError(404, "USER_NOT_FOUND", USER_NOT_FOUND_MESSAGE)
     protected_account(db, admin, account)
     grant = (
         require_super_admin(admin)
@@ -567,9 +590,9 @@ def update_user_status(user_id: int, request: Request, body: dict, db: DB) -> di
     status = body.get("status")
     if status not in ("ACTIVE", "SUSPENDED", "BANNED"):
         raise ApiError(400, "INVALID_STATUS", "账号状态无效")
-    account = one(db, "SELECT * FROM users WHERE id=:id", {"id": user_id})
+    account = one(db, USER_BY_ID, {"id": user_id})
     if not account:
-        raise ApiError(404, "USER_NOT_FOUND", "用户账号不存在")
+        raise ApiError(404, "USER_NOT_FOUND", USER_NOT_FOUND_MESSAGE)
     protected_account(db, admin, account)
     grant = (
         require_super_admin(admin)
@@ -577,7 +600,7 @@ def update_user_status(user_id: int, request: Request, body: dict, db: DB) -> di
         else authorize(db, admin, "USER_STATUS_UPDATE", account["grade_id"])
     )
     begin_immediate(db)
-    account = one(db, "SELECT * FROM users WHERE id=:id", {"id": user_id})
+    account = one(db, USER_BY_ID, {"id": user_id})
     if (
         account["account_type"] == "SUPER_ADMIN"
         and account["status"] in ("ACTIVE", "PENDING_ACTIVATION")
@@ -617,9 +640,9 @@ def update_account_type(user_id: int, request: Request, body: dict, db: DB) -> d
     if account_type not in ("USER", "SUPER_ADMIN"):
         raise ApiError(400, "INVALID_ACCOUNT_TYPE", "账号类型无效")
     begin_immediate(db)
-    account = one(db, "SELECT * FROM users WHERE id=:id", {"id": user_id})
+    account = one(db, USER_BY_ID, {"id": user_id})
     if not account:
-        raise ApiError(404, "USER_NOT_FOUND", "用户账号不存在")
+        raise ApiError(404, "USER_NOT_FOUND", USER_NOT_FOUND_MESSAGE)
     if account["account_type"] == "SUPER_ADMIN" and account_type == "USER":
         if effective_super_admin_count(db) <= 1 and account["status"] in ("ACTIVE", "PENDING_ACTIVATION"):
             raise ApiError(409, "LAST_SUPER_ADMIN", "不能降级最后一个有效超级管理员")
@@ -653,9 +676,9 @@ def delete_user(user_id: int, request: Request, body: dict, db: DB) -> dict:
     admin = admin_user(request, db)
     grant = require_super_admin(admin)
     begin_immediate(db)
-    account = one(db, "SELECT * FROM users WHERE id=:id", {"id": user_id})
+    account = one(db, USER_BY_ID, {"id": user_id})
     if not account:
-        raise ApiError(404, "USER_NOT_FOUND", "用户账号不存在")
+        raise ApiError(404, "USER_NOT_FOUND", USER_NOT_FOUND_MESSAGE)
     if (
         account["account_type"] == "SUPER_ADMIN"
         and effective_super_admin_count(db) <= 1
@@ -720,7 +743,7 @@ def admin_cards(request: Request, db: DB, search: str = "") -> dict:
 @router.post("/roommate-cards/{card_id}/{action}")
 def moderate_card(card_id: int, action: str, request: Request, body: dict, db: DB) -> dict:
     if action not in ("hide", "restore"):
-        raise ApiError(404, "NOT_FOUND", "接口不存在")
+        raise ApiError(404, "NOT_FOUND", NOT_FOUND_MESSAGE)
     admin = admin_user(request, db)
     card = card_by_id(db, card_id)
     if not card:
@@ -806,18 +829,14 @@ def create_selection_group(request: Request, body: dict, db: DB) -> dict:
         after={"name": name, "description": description},
     )
     db.commit()
-    return {
-        "group": selection_group_details(
-            db, one(db, "SELECT * FROM student_selection_groups WHERE id=:id", {"id": result.lastrowid})
-        )
-    }
+    return {"group": selection_group_details(db, one(db, SELECTION_GROUP_BY_ID, {"id": result.lastrowid}))}
 
 
 @router.patch("/student-selection-groups/{group_id}")
 def update_selection_group(group_id: int, request: Request, body: dict, db: DB) -> dict:
     admin = admin_user(request, db)
     grant = require_super_admin(admin)
-    before = one(db, "SELECT * FROM student_selection_groups WHERE id=:id", {"id": group_id})
+    before = one(db, SELECTION_GROUP_BY_ID, {"id": group_id})
     if not before:
         raise ApiError(404, "SELECTION_GROUP_NOT_FOUND", "预设群组不存在")
     name, description, member_ids = validate_selection_group(db, body)
@@ -852,18 +871,14 @@ def update_selection_group(group_id: int, request: Request, body: dict, db: DB) 
         after={"name": name, "description": description},
     )
     db.commit()
-    return {
-        "group": selection_group_details(
-            db, one(db, "SELECT * FROM student_selection_groups WHERE id=:id", {"id": group_id})
-        )
-    }
+    return {"group": selection_group_details(db, one(db, SELECTION_GROUP_BY_ID, {"id": group_id}))}
 
 
 @router.delete("/student-selection-groups/{group_id}")
 def delete_selection_group(group_id: int, request: Request, body: dict, db: DB) -> dict:
     admin = admin_user(request, db)
     grant = require_super_admin(admin)
-    group = one(db, "SELECT * FROM student_selection_groups WHERE id=:id", {"id": group_id})
+    group = one(db, SELECTION_GROUP_BY_ID, {"id": group_id})
     if not group:
         raise ApiError(404, "SELECTION_GROUP_NOT_FOUND", "预设群组不存在")
     reason = clean_text(body.get("reason"), 200, True)
@@ -965,16 +980,16 @@ def create_round(request: Request, body: dict, db: DB) -> dict:
         after={"code": code, "name": name, "status": "DRAFT"},
     )
     db.commit()
-    return {"round": one(db, "SELECT * FROM dormitory_selection_rounds WHERE id=:id", {"id": result.lastrowid})}
+    return {"round": one(db, DORMITORY_ROUND_BY_ID, {"id": result.lastrowid})}
 
 
 @router.patch("/dormitory-rounds/{round_id}")
 def update_round(round_id: int, request: Request, body: dict, db: DB) -> dict:
     admin = admin_user(request, db)
     grant = require_super_admin(admin)
-    before = one(db, "SELECT * FROM dormitory_selection_rounds WHERE id=:id", {"id": round_id})
+    before = one(db, DORMITORY_ROUND_BY_ID, {"id": round_id})
     if not before:
-        raise ApiError(404, "DORMITORY_ROUND_NOT_FOUND", "选宿舍轮次不存在")
+        raise ApiError(404, "DORMITORY_ROUND_NOT_FOUND", DORMITORY_ROUND_NOT_FOUND_MESSAGE)
     if before["status"] != "DRAFT":
         raise ApiError(409, "ROUND_NOT_EDITABLE", "只有草稿轮次可以修改配置")
     name, description, starts_at, ends_at, participant_ids = validate_round_body(db, body)
@@ -1005,20 +1020,20 @@ def update_round(round_id: int, request: Request, body: dict, db: DB) -> dict:
         after={"name": name, "description": description, "startsAt": starts_at, "endsAt": ends_at},
     )
     db.commit()
-    return {"round": one(db, "SELECT * FROM dormitory_selection_rounds WHERE id=:id", {"id": round_id})}
+    return {"round": one(db, DORMITORY_ROUND_BY_ID, {"id": round_id})}
 
 
 @router.post("/dormitory-rounds/{round_id}/{action}")
 def transition_round(round_id: int, action: str, request: Request, body: dict, db: DB) -> dict:
     if action not in ("open", "close", "archive"):
-        raise ApiError(404, "NOT_FOUND", "接口不存在")
+        raise ApiError(404, "NOT_FOUND", NOT_FOUND_MESSAGE)
     admin = admin_user(request, db)
     grant = require_super_admin(admin)
     reason = clean_text(body.get("reason"), 200, True)
     begin_immediate(db)
-    round_row = one(db, "SELECT * FROM dormitory_selection_rounds WHERE id=:id", {"id": round_id})
+    round_row = one(db, DORMITORY_ROUND_BY_ID, {"id": round_id})
     if not round_row:
-        raise ApiError(404, "DORMITORY_ROUND_NOT_FOUND", "选宿舍轮次不存在")
+        raise ApiError(404, "DORMITORY_ROUND_NOT_FOUND", DORMITORY_ROUND_NOT_FOUND_MESSAGE)
     required = {"open": "DRAFT", "close": "OPEN", "archive": "CLOSED"}[action]
     if round_row["status"] != required:
         raise ApiError(409, "INVALID_ROUND_TRANSITION", "当前轮次状态不能执行该操作")
@@ -1065,14 +1080,14 @@ def transition_round(round_id: int, action: str, request: Request, body: dict, d
     )
     db.commit()
     return {
-        "round": one(db, "SELECT * FROM dormitory_selection_rounds WHERE id=:id", {"id": round_id}),
+        "round": one(db, DORMITORY_ROUND_BY_ID, {"id": round_id}),
         "snapshotCount": snapshot_count,
     }
 
 
 def selected_admin_round(db: Session, round_id: int | None) -> dict:
     round_row = (
-        one(db, "SELECT * FROM dormitory_selection_rounds WHERE id=:id", {"id": round_id})
+        one(db, DORMITORY_ROUND_BY_ID, {"id": round_id})
         if round_id
         else (
             active_round(db)
@@ -1080,7 +1095,7 @@ def selected_admin_round(db: Session, round_id: int | None) -> dict:
         )
     )
     if not round_row:
-        raise ApiError(404, "DORMITORY_ROUND_NOT_FOUND", "选宿舍轮次不存在")
+        raise ApiError(404, "DORMITORY_ROUND_NOT_FOUND", DORMITORY_ROUND_NOT_FOUND_MESSAGE)
     return round_row
 
 
@@ -1099,7 +1114,10 @@ def dormitories_for_round(db: Session, round_row: dict) -> list[dict]:
 
 @router.get("/dormitories")
 def admin_dormitories(
-    request: Request, db: DB, round_id: int | None = Query(default=None, alias="roundId"), search: str = ""
+    request: Request,
+    db: DB,
+    round_id: Annotated[int | None, Query(alias="roundId")] = None,
+    search: str = "",
 ) -> dict:
     admin = admin_user(request, db)
     round_row = selected_admin_round(db, round_id)
@@ -1156,13 +1174,13 @@ def workbook_bytes(dormitories: list[dict]) -> bytes:
 
 @router.get("/dormitories/export")
 def export_dormitories(
-    request: Request, db: DB, round_id: int | None = Query(default=None, alias="roundId")
+    request: Request, db: DB, round_id: Annotated[int | None, Query(alias="roundId")] = None
 ) -> StreamingResponse:
     admin = admin_user(request, db)
     round_row = selected_admin_round(db, round_id)
     grade_ids = authorized_grade_ids(db, admin, "DORMITORY_EXPORT")
     if grade_ids is not None and not grade_ids:
-        raise ApiError(403, "PERMISSION_DENIED", "当前账号缺少所需管理权限")
+        raise ApiError(403, "PERMISSION_DENIED", PERMISSION_DENIED_MESSAGE)
     dormitories = [
         item
         for item in dormitories_for_round(db, round_row)
@@ -1331,7 +1349,7 @@ def audit_logs(request: Request, db: DB, search: str = "") -> dict:
     if admin["account_type"] != "SUPER_ADMIN":
         grade_ids = authorized_grade_ids(db, admin, "AUDIT_READ_SCOPED")
         if not grade_ids:
-            raise ApiError(403, "PERMISSION_DENIED", "当前账号缺少所需管理权限")
+            raise ApiError(403, "PERMISSION_DENIED", PERMISSION_DENIED_MESSAGE)
         logs = [
             log
             for log in logs

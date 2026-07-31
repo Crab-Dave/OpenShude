@@ -2,12 +2,28 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sqlite3
 from contextlib import closing
 from pathlib import Path
 
 from .common import now
+from .config import get_settings
 from .security import hash_password
+
+QUICK_CHECK = "PRAGMA quick_check"
+FOREIGN_KEY_CHECK = "PRAGMA foreign_key_check"
+BACKUP_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\.db")
+
+
+def configured_backup_path(directory: Path, filename: str) -> Path:
+    if not BACKUP_NAME.fullmatch(filename):
+        raise RuntimeError("Backup filename must contain only letters, numbers, dots, underscores, or hyphens")
+    root = directory.resolve()
+    candidate = (root / filename).resolve()
+    if not candidate.is_relative_to(root):
+        raise RuntimeError("Backup file must remain inside the configured backup directory")
+    return candidate
 
 
 def checksum(filename: Path) -> str:
@@ -29,8 +45,8 @@ def verify(filename: Path) -> str:
     if expected != actual:
         raise RuntimeError(f"Checksum mismatch for {filename}")
     with closing(sqlite3.connect(f"file:{filename.as_posix()}?mode=ro", uri=True)) as database:
-        checks = database.execute("PRAGMA quick_check").fetchall()
-        foreign_keys = database.execute("PRAGMA foreign_key_check").fetchall()
+        checks = database.execute(QUICK_CHECK).fetchall()
+        foreign_keys = database.execute(FOREIGN_KEY_CHECK).fetchall()
     if not checks or any(row[0] != "ok" for row in checks):
         raise RuntimeError(f"SQLite quick_check failed for {filename}")
     if foreign_keys:
@@ -81,9 +97,9 @@ def restore(source: Path, target: Path) -> str:
         Path(f"{target}-shm").unlink(missing_ok=True)
         temporary.replace(target)
         with closing(sqlite3.connect(f"file:{target.as_posix()}?mode=ro", uri=True)) as database:
-            if any(row[0] != "ok" for row in database.execute("PRAGMA quick_check")):
+            if any(row[0] != "ok" for row in database.execute(QUICK_CHECK)):
                 raise RuntimeError(f"SQLite quick_check failed after restoring {target}")
-            if database.execute("PRAGMA foreign_key_check").fetchall():
+            if database.execute(FOREIGN_KEY_CHECK).fetchall():
                 raise RuntimeError(f"SQLite foreign_key_check failed after restoring {target}")
         return expected
     finally:
@@ -115,8 +131,8 @@ def validate_database(filename: Path) -> dict:
     }
     with closing(sqlite3.connect(filename)) as database:
         database.row_factory = sqlite3.Row
-        quick_check = [row[0] for row in database.execute("PRAGMA quick_check")]
-        foreign_keys = database.execute("PRAGMA foreign_key_check").fetchall()
+        quick_check = [row[0] for row in database.execute(QUICK_CHECK)]
+        foreign_keys = database.execute(FOREIGN_KEY_CHECK).fetchall()
         tables = {row[0] for row in database.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         open_rounds = database.execute(
             "SELECT COUNT(*) FROM dormitory_selection_rounds WHERE status='OPEN'"
@@ -165,49 +181,47 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
     backup_parser = subparsers.add_parser("backup")
-    backup_parser.add_argument("source", type=Path)
-    backup_parser.add_argument("target", type=Path)
+    backup_parser.add_argument("filename")
     verify_parser = subparsers.add_parser("verify")
-    verify_parser.add_argument("filename", type=Path)
+    verify_parser.add_argument("filename")
     restore_parser = subparsers.add_parser("restore")
-    restore_parser.add_argument("source", type=Path)
-    restore_parser.add_argument("target", type=Path)
+    restore_parser.add_argument("filename")
     prune_parser = subparsers.add_parser("prune")
-    prune_parser.add_argument("directory", type=Path)
     prune_parser.add_argument("retain", type=int)
-    validate_parser = subparsers.add_parser("validate")
-    validate_parser.add_argument("filename", type=Path)
-    bootstrap_parser = subparsers.add_parser("bootstrap-admin")
-    bootstrap_parser.add_argument("filename", type=Path)
+    subparsers.add_parser("validate")
+    subparsers.add_parser("bootstrap-admin")
     args = parser.parse_args()
+    settings = get_settings()
+    database = settings.db_path.resolve()
+    backup_directory = settings.backup_dir.resolve()
 
     if args.command == "backup":
+        target = configured_backup_path(backup_directory, args.filename)
         result = {
             "operation": "backup",
-            "source": str(args.source),
-            "target": str(args.target),
-            "sha256": backup(args.source, args.target),
+            "filename": args.filename,
+            "sha256": backup(database, target),
         }
     elif args.command == "verify":
-        result = {"operation": "verify", "filename": str(args.filename), "sha256": verify(args.filename)}
+        source = configured_backup_path(backup_directory, args.filename)
+        result = {"operation": "verify", "filename": args.filename, "sha256": verify(source)}
     elif args.command == "restore":
+        source = configured_backup_path(backup_directory, args.filename)
         result = {
             "operation": "restore",
-            "source": str(args.source),
-            "target": str(args.target),
-            "sha256": restore(args.source, args.target),
+            "filename": args.filename,
+            "sha256": restore(source, database),
         }
     elif args.command == "prune":
         result = {
             "operation": "prune",
-            "directory": str(args.directory),
-            "retained": prune(args.directory, args.retain),
+            "retained": prune(backup_directory, args.retain),
         }
     elif args.command == "validate":
-        result = {"operation": "validate", **validate_database(args.filename)}
+        result = {"operation": "validate", **validate_database(database)}
     else:
         password = os.environ.get("INITIAL_ADMIN_PASSWORD", "")
-        result = {"operation": "bootstrap-admin", "created": bootstrap_admin(args.filename, password)}
+        result = {"operation": "bootstrap-admin", "created": bootstrap_admin(database, password)}
     print(json.dumps(result, ensure_ascii=False))
 
 

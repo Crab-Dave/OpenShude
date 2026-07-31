@@ -11,7 +11,7 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 COPY --from=uv /uv /usr/local/bin/uv
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen --no-build --no-dev --no-install-project
 
 COPY alembic.ini ./
 COPY alembic ./alembic

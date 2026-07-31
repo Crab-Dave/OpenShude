@@ -17,9 +17,9 @@ Create a manual backup before a sensitive operation such as data import:
 ```bash
 cd /opt/myapp
 image_tag=$(<.deployed-image-tag)
-backup="/app/backups/manual-$(date -u +%Y%m%dT%H%M%SZ)-${image_tag}.db"
+backup="manual-$(date -u +%Y%m%dT%H%M%SZ)-${image_tag}.db"
 IMAGE_TAG="$image_tag" docker compose -f compose.prod.yml run -T --rm --no-deps web \
-  python -m app.maintenance backup /app/data/app.db "$backup"
+  python -m app.maintenance backup "$backup"
 ```
 
 Restore one of those backups:

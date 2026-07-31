@@ -202,11 +202,9 @@ def audit(
 ) -> None:
     grant = grant or {}
     forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
-    ip_address = (
-        forwarded
-        if request.client and request.client.host in ("127.0.0.1", "::1")
-        else (request.client.host if request.client else "")
-    )
+    ip_address = request.client.host if request.client else ""
+    if request.client and request.client.host in ("127.0.0.1", "::1"):
+        ip_address = forwarded
     db.execute(
         text("""INSERT INTO audit_logs (
           admin_id,admin_name_snapshot,action,target_type,target_id,reason,metadata,ip_address,user_agent,

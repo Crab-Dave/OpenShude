@@ -15,7 +15,8 @@ def test_auth_security_and_card_contract(client):
     me = login(client, "2026001")
     assert me["user"]["name"] == "林夏"
     cards = client.get("/api/roommate-cards", params={"gender": "FEMALE", "search": "林"}).json()["cards"]
-    assert len(cards) == 1 and cards[0]["is_own"] is True
+    assert len(cards) == 1
+    assert cards[0]["is_own"] is True
     card = client.get(f"/api/roommate-cards/{cards[0]['id']}").json()["card"]
     assert card["one_sentence_intro"] == "一句话介绍"
     invalid_origin = client.put(
@@ -90,7 +91,8 @@ def test_dormitory_workflow_and_same_gender(client):
     created = client.post("/api/dormitories", json={"name": "女生测试宿舍"})
     assert created.status_code == 201, created.text
     dormitory = created.json()["dormitory"]
-    assert dormitory["capacity"] == 4 and dormitory["building"] == ""
+    assert dormitory["capacity"] == 4
+    assert dormitory["building"] == ""
 
     applicant = TestClient(client.app)
     login(applicant, "2026002")
@@ -135,7 +137,8 @@ def test_admin_rounds_scoped_permissions_and_export(client):
     scoped = TestClient(client.app)
     login(scoped, "2026001")
     scoped_users = scoped.get("/api/admin/users").json()["users"]
-    assert scoped_users and all(user["grade_id"] == 1 for user in scoped_users)
+    assert scoped_users
+    assert all(user["grade_id"] == 1 for user in scoped_users)
     export = scoped.get("/api/admin/dormitories/export")
     assert export.status_code == 200
     assert export.content.startswith(b"PK")

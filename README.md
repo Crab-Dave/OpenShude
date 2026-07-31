@@ -14,7 +14,7 @@
 uv sync --frozen
 uv run alembic upgrade head
 $env:INITIAL_ADMIN_PASSWORD = "Replace-With-A-Strong-Password"
-uv run python -m app.maintenance bootstrap-admin data/app.db
+uv run python -m app.maintenance bootstrap-admin
 uv run uvicorn app.main:app --host 127.0.0.1 --port 4173 --workers 1
 ```
 
@@ -73,6 +73,7 @@ pytest 使用独立临时数据库，覆盖迁移、权限、安全、并发和�
 
 - `PORT`：HTTP 端口，默认 `4173`。
 - `DB_PATH`：SQLite 数据库路径，默认 `data/app.db`。
+- `BACKUP_DIR`：数据库备份目录，默认 `backups`；维护命令仅允许访问此目录内的 `.db` 文件。
 - `ALLOWED_HOSTS`：允许的 Host JSON 数组；生产环境必须包含公网 IP 或后续域名。
 - `ALLOWED_ORIGINS`：额外允许的 Origin JSON 数组。
 - `DOCS_ENABLED`：是否开放 OpenAPI 文档；生产环境设为 `false`。

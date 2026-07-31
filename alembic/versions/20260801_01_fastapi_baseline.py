@@ -10,6 +10,8 @@ revision = "20260801_01"
 down_revision = None
 branch_labels = None
 depends_on = None
+EMPTY_TEXT_COLUMN = "TEXT NOT NULL DEFAULT ''"
+DORMITORY_ROUND_REFERENCE = "INTEGER REFERENCES dormitory_selection_rounds(id)"
 
 
 def _columns(bind, table: str) -> set[str]:
@@ -36,7 +38,7 @@ def upgrade() -> None:
         "users",
         [
             ("gender", "TEXT NOT NULL DEFAULT 'UNSPECIFIED'"),
-            ("major", "TEXT NOT NULL DEFAULT ''"),
+            ("major", EMPTY_TEXT_COLUMN),
             ("account_type", "TEXT NOT NULL DEFAULT 'USER'"),
             ("authorization_version", "INTEGER NOT NULL DEFAULT 1"),
             ("must_change_password", "INTEGER NOT NULL DEFAULT 0"),
@@ -57,7 +59,7 @@ def upgrade() -> None:
         bind,
         "roommate_cards",
         [
-            (name, "TEXT NOT NULL DEFAULT ''")
+            (name, EMPTY_TEXT_COLUMN)
             for name in (
                 "origin_province",
                 "origin_city",
@@ -86,26 +88,22 @@ def upgrade() -> None:
         [
             ("gender", "TEXT NOT NULL DEFAULT 'UNSPECIFIED'"),
             ("management_grade_id", "INTEGER REFERENCES grades(id)"),
-            ("selection_round_id", "INTEGER REFERENCES dormitory_selection_rounds(id)"),
+            ("selection_round_id", DORMITORY_ROUND_REFERENCE),
         ],
     )
-    _add_missing(
-        bind, "dormitory_members", [("selection_round_id", "INTEGER REFERENCES dormitory_selection_rounds(id)")]
-    )
-    _add_missing(
-        bind, "dormitory_applications", [("selection_round_id", "INTEGER REFERENCES dormitory_selection_rounds(id)")]
-    )
+    _add_missing(bind, "dormitory_members", [("selection_round_id", DORMITORY_ROUND_REFERENCE)])
+    _add_missing(bind, "dormitory_applications", [("selection_round_id", DORMITORY_ROUND_REFERENCE)])
     _add_missing(
         bind,
         "audit_logs",
         [
-            ("admin_name_snapshot", "TEXT NOT NULL DEFAULT ''"),
-            ("user_agent", "TEXT NOT NULL DEFAULT ''"),
-            ("request_id", "TEXT NOT NULL DEFAULT ''"),
-            ("permission_code", "TEXT NOT NULL DEFAULT ''"),
+            ("admin_name_snapshot", EMPTY_TEXT_COLUMN),
+            ("user_agent", EMPTY_TEXT_COLUMN),
+            ("request_id", EMPTY_TEXT_COLUMN),
+            ("permission_code", EMPTY_TEXT_COLUMN),
             ("grant_group_id", "INTEGER REFERENCES admin_groups(id)"),
-            ("scope_type", "TEXT NOT NULL DEFAULT ''"),
-            ("scope_value", "TEXT NOT NULL DEFAULT ''"),
+            ("scope_type", EMPTY_TEXT_COLUMN),
+            ("scope_value", EMPTY_TEXT_COLUMN),
             ("result", "TEXT NOT NULL DEFAULT 'SUCCESS'"),
             ("before_snapshot", "TEXT NOT NULL DEFAULT '{}'"),
             ("after_snapshot", "TEXT NOT NULL DEFAULT '{}'"),
