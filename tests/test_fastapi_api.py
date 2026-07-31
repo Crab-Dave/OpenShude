@@ -162,6 +162,39 @@ def test_admin_rounds_scoped_permissions_and_export(client):
     assert opened.status_code == 200
 
 
+def test_imported_user_must_change_temporary_password(client):
+    login(client, "admin", "Admin123!")
+    imported = client.post(
+        "/api/admin/users/import",
+        json={
+            "accounts": [
+                {
+                    "loginIdentifier": "formal-001",
+                    "name": "正式用户",
+                    "grade": "2026级",
+                    "gender": "FEMALE",
+                    "major": "计算机科学",
+                }
+            ]
+        },
+    )
+    assert imported.status_code == 200
+    account = imported.json()["created"][0]
+
+    student = TestClient(client.app)
+    session = login(student, "formal-001", account["initialPassword"])
+    assert session["user"]["mustChangePassword"] is True
+    blocked = student.get("/api/roommate-cards", params={"gender": "FEMALE"})
+    assert blocked.status_code == 403
+    assert blocked.json()["error"]["code"] == "PASSWORD_CHANGE_REQUIRED"
+    changed = student.patch(
+        "/api/me/password",
+        json={"currentPassword": account["initialPassword"], "newPassword": "FormalPassword123!"},
+    )
+    assert changed.status_code == 200
+    assert student.get("/api/roommate-cards", params={"gender": "FEMALE"}).status_code == 200
+
+
 def test_scoped_permissions_cannot_be_combined_across_groups(client):
     login(client, "admin", "Admin123!")
     for code, permissions, grades in (

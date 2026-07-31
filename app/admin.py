@@ -458,8 +458,8 @@ def import_users(request: Request, body: dict, db: DB) -> dict:
             timestamp = now()
             result = db.execute(
                 text("""INSERT INTO users(login_identifier,password_hash,password_salt,role,account_type,
-              name,grade,grade_id,gender,major,status,imported_by,created_at,updated_at)
-              VALUES(:login,:hash,:salt,'STUDENT','USER',:name,:grade,:grade_id,:gender,:major,
+              must_change_password,name,grade,grade_id,gender,major,status,imported_by,created_at,updated_at)
+              VALUES(:login,:hash,:salt,'STUDENT','USER',1,:name,:grade,:grade_id,:gender,:major,
               'PENDING_ACTIVATION',:admin,:now,:now)"""),
                 {
                     "login": login,
