@@ -101,8 +101,9 @@ async function api(path, options = {}) {
     if (response.status === 401 && state.user) {
       state.user = null;
       state.csrfToken = '';
-      history.replaceState({}, '', '/');
-      renderHomepage();
+      const next = window.location.pathname === '/roommates' ? '/roommates' : '/';
+      history.replaceState({}, '', next === '/roommates' ? '/login?next=%2Froommates' : '/login');
+      renderLoginPage();
     }
     if (response.status === 403 && state.user && state.mode === 'management') {
       try {
@@ -287,7 +288,7 @@ async function renderHomepage() {
   document.querySelector('#site-home').addEventListener('click', goHome);
   document.querySelector('#site-home-nav').addEventListener('click', goHome);
   document.querySelector('#site-roommates').addEventListener('click', enterRoommateSystem);
-  document.querySelector('#site-login')?.addEventListener('click', () => openLoginModal(false));
+  document.querySelector('#site-login')?.addEventListener('click', () => goLogin());
   document.querySelector('#account-workspace')?.addEventListener('click', enterRoommateSystem);
   document.querySelector('#account-logout')?.addEventListener('click', logout);
   refreshIcons();
@@ -298,13 +299,20 @@ async function goHome() {
   await renderHomepage();
 }
 
+function goLogin(next = '/') {
+  const url = next === '/roommates' ? '/login?next=%2Froommates' : '/login';
+  if (`${window.location.pathname}${window.location.search}` !== url) history.pushState({}, '', url);
+  renderLoginPage();
+}
+
 async function enterRoommateSystem() {
-  if (window.location.pathname !== '/roommates') history.pushState({}, '', '/roommates');
   if (!state.user) {
-    await renderHomepage();
-    openLoginModal(true);
+    if (window.location.pathname === '/roommates') history.replaceState({}, '', '/login?next=%2Froommates');
+    else history.pushState({}, '', '/login?next=%2Froommates');
+    renderLoginPage();
     return;
   }
+  if (window.location.pathname !== '/roommates') history.pushState({}, '', '/roommates');
   state.mode = state.user.isSuperAdmin ? 'management' : 'student';
   state.view = state.mode === 'management' ? 'overview' : 'discover';
   if (state.user.mustChangePassword) {
@@ -366,18 +374,27 @@ async function navigate(view) {
   }
 }
 
-function openLoginModal(redirectToSystem = false) {
+function renderLoginPage() {
+  const continueToSystem = new URLSearchParams(window.location.search).get('next') === '/roommates';
   closeModal();
-  const modal = openModal('账号登录', `
-    <p class="login-intro">使用管理员导入的正式账号进入系统。</p>
-    <form id="login-form">
-      <div class="form-field"><label for="login-id">登录标识</label><input id="login-id" name="loginIdentifier" autocomplete="username" required></div>
-      <div class="form-field" style="margin-top:16px"><label for="login-password">密码</label><input id="login-password" name="password" type="password" autocomplete="current-password" required></div>
-      <button class="btn btn-primary" style="width:100%;margin-top:20px" type="submit">${icon('log-in')}登录</button>
-    </form>
-    <div class="login-accounts"><p>演示账号</p><div class="account-chips">${demoAccounts.map(([identifier, name]) => `<button type="button" class="btn btn-secondary btn-sm" data-demo-id="${identifier}">${escapeHtml(name)} · ${identifier}</button>`).join('')}</div></div>`);
-  const form = modal.querySelector('#login-form');
-  modal.querySelectorAll('[data-demo-id]').forEach((button) => button.addEventListener('click', () => {
+  app.innerHTML = `
+    <main class="login-shell">
+      <section class="login-panel">
+        <div class="login-logo-band"><img src="/assets/logo/透明底白色字.png" alt="合住"></div>
+        <button class="btn btn-quiet login-home" id="login-home">${icon('arrow-left')}返回首页</button>
+        <h1>账号登录</h1>
+        <p>使用管理员导入的正式账号进入系统。</p>
+        <form id="login-form">
+          <div class="form-field"><label for="login-id">登录标识</label><input id="login-id" name="loginIdentifier" autocomplete="username" required></div>
+          <div class="form-field" style="margin-top:16px"><label for="login-password">密码</label><input id="login-password" name="password" type="password" autocomplete="current-password" required></div>
+          <button class="btn btn-primary" style="width:100%;margin-top:20px" type="submit">${icon('log-in')}登录</button>
+        </form>
+        <div class="login-accounts"><p>演示账号</p><div class="account-chips">${demoAccounts.map(([identifier, name]) => `<button type="button" class="btn btn-secondary btn-sm" data-demo-id="${identifier}">${escapeHtml(name)} · ${identifier}</button>`).join('')}</div></div>
+      </section>
+    </main>`;
+  const form = document.querySelector('#login-form');
+  document.querySelector('#login-home').addEventListener('click', goHome);
+  document.querySelectorAll('[data-demo-id]').forEach((button) => button.addEventListener('click', () => {
     const account = demoAccounts.find(([identifier]) => identifier === button.dataset.demoId);
     form.loginIdentifier.value = account[0]; form.password.value = account[2];
   }));
@@ -395,14 +412,12 @@ function openLoginModal(redirectToSystem = false) {
       state.mode = data.user.isSuperAdmin ? 'management' : 'student';
       state.view = state.mode === 'management' ? 'overview' : 'discover';
       if (data.user.mustChangePassword) {
-        closeModal();
-        await renderHomepage();
-        showRequiredPasswordChange(redirectToSystem);
-      } else if (redirectToSystem) {
-        closeModal();
+        showRequiredPasswordChange(continueToSystem);
+      } else if (continueToSystem) {
+        history.replaceState({}, '', '/roommates');
         await enterRoommateSystem();
       } else {
-        closeModal();
+        history.replaceState({}, '', '/');
         await renderHomepage();
       }
     } catch (error) {
@@ -412,15 +427,6 @@ function openLoginModal(redirectToSystem = false) {
     }
   });
   refreshIcons();
-}
-
-function renderLogin(redirectToSystem = false) {
-  state.user = null;
-  state.csrfToken = '';
-  state.selectedConversationId = null;
-  state.applicationDormitoryId = null;
-  history.replaceState({}, '', '/');
-  renderHomepage().then(() => openLoginModal(redirectToSystem));
 }
 
 async function logout() {
@@ -443,7 +449,7 @@ function showRequiredPasswordChange(continueToSystem = true) {
       closeModal();
       toast('密码已更新');
       if (continueToSystem) await enterRoommateSystem();
-      else await renderHomepage();
+      else await goHome();
     } catch (error) { toast(error.message, 'error'); }
   });
 }
@@ -1423,7 +1429,17 @@ async function init() {
     if (error.status !== 401) toast(error.message, 'error');
   }
   if (window.location.pathname === '/roommates') await enterRoommateSystem();
-  else {
+  else if (window.location.pathname === '/login') {
+    const continueToSystem = new URLSearchParams(window.location.search).get('next') === '/roommates';
+    if (!state.user) renderLoginPage();
+    else if (continueToSystem) {
+      history.replaceState({}, '', '/roommates');
+      await enterRoommateSystem();
+    } else {
+      history.replaceState({}, '', '/');
+      await renderHomepage();
+    }
+  } else {
     if (window.location.pathname !== '/') history.replaceState({}, '', '/');
     await renderHomepage();
   }
@@ -1431,7 +1447,17 @@ async function init() {
 
 window.addEventListener('popstate', () => {
   if (window.location.pathname === '/roommates') enterRoommateSystem();
-  else renderHomepage();
+  else if (window.location.pathname === '/login') {
+    const continueToSystem = new URLSearchParams(window.location.search).get('next') === '/roommates';
+    if (!state.user) renderLoginPage();
+    else if (continueToSystem) {
+      history.replaceState({}, '', '/roommates');
+      enterRoommateSystem();
+    } else {
+      history.replaceState({}, '', '/');
+      renderHomepage();
+    }
+  } else renderHomepage();
 });
 
 init();

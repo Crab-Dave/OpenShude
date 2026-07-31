@@ -14,6 +14,9 @@ fs.mkdirSync(outputDir, { recursive: true });
 async function login(page, identifier, password) {
   await page.goto(`${baseUrl}/roommates`, { waitUntil: 'networkidle' });
   await page.waitForSelector('#login-form');
+  assert.equal(new URL(page.url()).pathname, '/login');
+  assert.equal(new URL(page.url()).searchParams.get('next'), '/roommates');
+  assert.equal(await page.locator('.modal').count(), 0);
   assert.equal(await page.locator('[data-demo-id]').count(), 13);
   await page.locator('#login-id').fill(identifier);
   await page.locator('#login-password').fill(password);
@@ -34,9 +37,16 @@ let browser;
   await desktop.waitForSelector('.public-shell');
   assert.equal(await desktop.locator('.site-logo img').getAttribute('src'), '/assets/logo/透明底白色字.png');
   assert.ok(await desktop.locator('.site-logo img').evaluate((image) => image.complete && image.naturalWidth > 0));
-  assert.match(await desktop.locator('.markdown-article').textContent(), /欢迎来到合住/);
+  assert.equal(await desktop.locator('.markdown-article h1').count(), 1);
   assert.equal(await desktop.locator('#site-login').count(), 1);
   await desktop.screenshot({ path: path.join(outputDir, 'homepage-desktop.png'), fullPage: true });
+  await desktop.locator('#site-login').click();
+  await desktop.waitForSelector('.login-shell');
+  assert.equal(new URL(desktop.url()).pathname, '/login');
+  assert.equal(await desktop.locator('.modal').count(), 0);
+  await desktop.screenshot({ path: path.join(outputDir, 'login-desktop.png'), fullPage: true });
+  await desktop.locator('#login-home').click();
+  await desktop.waitForSelector('.public-shell');
 
   await login(desktop, '2026001', 'Student123!');
   await desktop.waitForSelector('.roommate-card');
