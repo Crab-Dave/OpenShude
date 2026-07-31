@@ -14,6 +14,7 @@ from .student import conversation_for_user, has_block
 
 router = APIRouter(prefix="/api")
 DB = Annotated[Session, Depends(get_db)]
+ROUND_PARTICIPANT_EXISTS = "SELECT 1 AS found FROM dormitory_round_participants WHERE round_id=:round AND user_id=:user"
 
 
 def begin_immediate(db: Session) -> None:
@@ -36,7 +37,7 @@ def require_open_round(db: Session, user_id: int | None = None) -> dict:
         raise ApiError(403, "DORMITORY_SELECTION_CLOSED", "自由选宿舍阶段已关闭")
     if user_id and not one(
         db,
-        "SELECT 1 AS found FROM dormitory_round_participants WHERE round_id=:round AND user_id=:user",
+        ROUND_PARTICIPANT_EXISTS,
         {"round": round_row["id"], "user": user_id},
     ):
         raise ApiError(403, "ROUND_PARTICIPATION_REQUIRED", "你不在当前选宿舍轮次的参与名单中")
@@ -267,7 +268,7 @@ def selection_status(request: Request, db: DB) -> dict:
         round_row
         and one(
             db,
-            "SELECT 1 AS found FROM dormitory_round_participants WHERE round_id=:round AND user_id=:user",
+            ROUND_PARTICIPANT_EXISTS,
             {"round": round_row["id"], "user": user["id"]},
         )
     )
@@ -309,7 +310,7 @@ def round_results(round_id: int, request: Request, db: DB) -> dict:
 
 
 @router.get("/dormitories")
-def dormitories(request: Request, db: DB, round_id: int | None = Query(default=None, alias="roundId")) -> dict:
+def dormitories(request: Request, db: DB, round_id: Annotated[int | None, Query(alias="roundId")] = None) -> dict:
     user = current_user(request, db)
     require_user(user)
     round_row = student_round(db, user["id"], round_id, False)
@@ -327,7 +328,7 @@ def dormitories(request: Request, db: DB, round_id: int | None = Query(default=N
 
 
 @router.get("/me/dormitory")
-def my_dormitory(request: Request, db: DB, round_id: int | None = Query(default=None, alias="roundId")) -> dict:
+def my_dormitory(request: Request, db: DB, round_id: Annotated[int | None, Query(alias="roundId")] = None) -> dict:
     user = current_user(request, db)
     require_user(user)
     round_row = student_round(db, user["id"], round_id, False)
@@ -473,6 +474,32 @@ def apply_dormitory(conversation_id: int, request: Request, body: dict, db: DB) 
     return {"application": one(db, "SELECT * FROM dormitory_applications WHERE id=:id", {"id": result.lastrowid})}
 
 
+def approve_application(db: Session, application: dict, round_id: int, application_id: int) -> None:
+    if application["dormitory_status"] != "OPEN" or application["member_count"] >= application["capacity"]:
+        raise ApiError(409, "DORMITORY_FULL", "宿舍已满员")
+    if not one(db, ROUND_PARTICIPANT_EXISTS, {"round": round_id, "user": application["applicant_id"]}):
+        raise ApiError(409, "APPLICANT_NOT_PARTICIPATING", "申请人不在本轮参与名单中")
+    if current_dormitory(db, application["applicant_id"], round_id):
+        raise ApiError(409, "APPLICANT_JOINED_OTHER", "申请人已加入其他宿舍")
+    if application["applicant_gender"] != application["dormitory_gender"]:
+        raise ApiError(409, "SAME_GENDER_REQUIRED", "申请人与宿舍性别不一致")
+    db.execute(
+        text("""INSERT INTO dormitory_members(selection_round_id,dormitory_id,user_id,role,joined_at)
+      VALUES(:round,:dormitory,:user,'MEMBER',:now)"""),
+        {
+            "round": round_id,
+            "dormitory": application["dormitory_id"],
+            "user": application["applicant_id"],
+            "now": now(),
+        },
+    )
+    db.execute(
+        text("""UPDATE dormitory_applications SET status='CANCELLED',updated_at=:now WHERE selection_round_id=:round
+      AND applicant_id=:user AND status='PENDING' AND id!=:id"""),
+        {"now": now(), "round": round_id, "user": application["applicant_id"], "id": application_id},
+    )
+
+
 @router.post("/dormitory-applications/{application_id}/{action}")
 def review_application(application_id: int, action: str, request: Request, db: DB) -> dict:
     if action not in ("approve", "reject"):
@@ -497,33 +524,7 @@ def review_application(application_id: int, action: str, request: Request, db: D
     if application["status"] != "PENDING":
         raise ApiError(409, "APPLICATION_REVIEWED", "申请已处理")
     if action == "approve":
-        if application["dormitory_status"] != "OPEN" or application["member_count"] >= application["capacity"]:
-            raise ApiError(409, "DORMITORY_FULL", "宿舍已满员")
-        if not one(
-            db,
-            "SELECT 1 AS found FROM dormitory_round_participants WHERE round_id=:round AND user_id=:user",
-            {"round": round_row["id"], "user": application["applicant_id"]},
-        ):
-            raise ApiError(409, "APPLICANT_NOT_PARTICIPATING", "申请人不在本轮参与名单中")
-        if current_dormitory(db, application["applicant_id"], round_row["id"]):
-            raise ApiError(409, "APPLICANT_JOINED_OTHER", "申请人已加入其他宿舍")
-        if application["applicant_gender"] != application["dormitory_gender"]:
-            raise ApiError(409, "SAME_GENDER_REQUIRED", "申请人与宿舍性别不一致")
-        db.execute(
-            text("""INSERT INTO dormitory_members(selection_round_id,dormitory_id,user_id,role,joined_at)
-          VALUES(:round,:dormitory,:user,'MEMBER',:now)"""),
-            {
-                "round": round_row["id"],
-                "dormitory": application["dormitory_id"],
-                "user": application["applicant_id"],
-                "now": now(),
-            },
-        )
-        db.execute(
-            text("""UPDATE dormitory_applications SET status='CANCELLED',updated_at=:now WHERE selection_round_id=:round
-          AND applicant_id=:user AND status='PENDING' AND id!=:id"""),
-            {"now": now(), "round": round_row["id"], "user": application["applicant_id"], "id": application_id},
-        )
+        approve_application(db, application, round_row["id"], application_id)
     timestamp = now()
     db.execute(
         text("""UPDATE dormitory_applications SET status=:status,reviewed_by=:reviewer,

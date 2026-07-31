@@ -24,39 +24,39 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Set up uv and Python
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
         with:
           python-version: "3.13"
           enable-cache: true
 
       - name: Install Python dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --no-build
 
       - name: Check Python code
         run: |
-          uv run ruff format --check .
-          uv run ruff check .
+          .venv/bin/ruff format --check .
+          .venv/bin/ruff check .
 
       - name: Validate Alembic revision chain and model alignment
         run: |
-          test "$(uv run alembic heads | wc -l)" -eq 1
-          DB_PATH="$RUNNER_TEMP/alembic-check.db" uv run alembic upgrade head
-          DB_PATH="$RUNNER_TEMP/alembic-check.db" uv run alembic check
+          test "$(.venv/bin/alembic heads | wc -l)" -eq 1
+          DB_PATH="$RUNNER_TEMP/alembic-check.db" .venv/bin/alembic upgrade head
+          DB_PATH="$RUNNER_TEMP/alembic-check.db" .venv/bin/alembic check
 
       - name: Run FastAPI tests
-        run: uv run pytest
+        run: .venv/bin/pytest
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Check JavaScript and shell syntax
         run: |
@@ -71,9 +71,9 @@ jobs:
           DB_PATH: ${{ runner.temp }}/browser-check.db
         run: |
           google-chrome --version
-          uv run alembic upgrade head
-          uv run python -m tests.seed_browser_data
-          uv run uvicorn app.main:app --host 127.0.0.1 --port 43127 --workers 1 --no-server-header >"$RUNNER_TEMP/browser-server.log" 2>&1 &
+          .venv/bin/alembic upgrade head
+          .venv/bin/python -m tests.seed_browser_data
+          .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 43127 --workers 1 --no-server-header >"$RUNNER_TEMP/browser-server.log" 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
           for attempt in {1..30}; do

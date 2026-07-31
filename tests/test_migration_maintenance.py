@@ -1,4 +1,3 @@
-import os
 import sqlite3
 
 import pytest
@@ -8,7 +7,7 @@ from sqlalchemy import inspect
 from alembic import command
 from app.config import get_settings
 from app.database import Base, create_database_engine
-from app.maintenance import backup, restore, validate_database, verify
+from app.maintenance import backup, configured_backup_path, restore, validate_database, verify
 from app.security import hash_password, verify_password
 
 
@@ -21,7 +20,7 @@ def test_scrypt_is_compatible_with_existing_passwords():
     assert verify_password("Student123!", password.salt, password.hash)
 
 
-def test_alembic_upgrades_a_legacy_database(tmp_path):
+def test_alembic_upgrades_a_legacy_database(tmp_path, monkeypatch):
     legacy = tmp_path / "legacy.db"
     password = hash_password("Admin123!")
     with sqlite3.connect(legacy) as database:
@@ -37,17 +36,10 @@ def test_alembic_upgrades_a_legacy_database(tmp_path):
           '2026-01-01Z','UNSPECIFIED','')""",
             (password.hash, password.salt),
         )
-    previous = os.environ.get("DB_PATH")
-    try:
-        os.environ["DB_PATH"] = str(legacy)
-        get_settings.cache_clear()
-        command.upgrade(Config("alembic.ini"), "head")
-    finally:
-        if previous is None:
-            os.environ.pop("DB_PATH", None)
-        else:
-            os.environ["DB_PATH"] = previous
-        get_settings.cache_clear()
+    monkeypatch.setenv("DB_PATH", str(legacy))
+    get_settings.cache_clear()
+    command.upgrade(Config("alembic.ini"), "head")
+    get_settings.cache_clear()
     with sqlite3.connect(legacy) as database:
         columns = {row[1] for row in database.execute("PRAGMA table_info(users)")}
         assert {"account_type", "grade_id", "must_change_password"} <= columns
@@ -92,6 +84,13 @@ def test_backup_rejects_foreign_key_violations(tmp_path):
         )
     with pytest.raises(RuntimeError, match="foreign_key_check"):
         backup(source, tmp_path / "invalid-backup.db")
+
+
+def test_configured_backup_path_rejects_directory_escape(tmp_path):
+    assert configured_backup_path(tmp_path, "daily-20260801.db") == tmp_path / "daily-20260801.db"
+    for filename in ("../escape.db", "nested/escape.db", "backup.sqlite"):
+        with pytest.raises(RuntimeError):
+            configured_backup_path(tmp_path, filename)
 
 
 def test_current_database_validation():

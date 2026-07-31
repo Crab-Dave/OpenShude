@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 4173
     db_path: Path = Path("data/app.db")
+    backup_dir: Path = Path("backups")
     app_version: str = ""
     initial_admin_password: str = ""
     session_days: int = 7

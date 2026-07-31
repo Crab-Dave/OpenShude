@@ -5,7 +5,7 @@ const { chromium } = require('playwright-core');
 
 const browserExecutable = process.env.BROWSER_EXECUTABLE
   || (process.platform === 'win32'
-    ? 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
+    ? String.raw`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`
     : '/usr/bin/google-chrome');
 const baseUrl = process.env.APP_URL || 'http://127.0.0.1:4173';
 const outputDir = path.join(__dirname, '..', 'artifacts');

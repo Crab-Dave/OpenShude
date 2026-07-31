@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import text
+from starlette.datastructures import URL
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -35,6 +36,18 @@ def response_security_headers(api_request: bool, request_id: str) -> list[tuple[
         (b"cache-control", b"no-store" if api_request else b"no-cache"),
         (b"x-request-id", request_id.encode("ascii")),
     ]
+
+
+def valid_request_origin(request: Request) -> bool:
+    origin = request.headers.get("origin")
+    if not origin:
+        return True
+    try:
+        parsed = URL(origin)
+    except ValueError:
+        return False
+    same_origin = parsed.scheme in ("http", "https") and parsed.netloc == request.headers.get("host", "")
+    return same_origin or origin in settings.allowed_origins
 
 
 class SecurityMiddleware:
@@ -70,15 +83,11 @@ class SecurityMiddleware:
                 status_code=413, content={"error": {"code": "BODY_TOO_LARGE", "message": "请求内容过大"}}
             )(scope, receive, early_send)
             return
-        if request.method not in ("GET", "HEAD", "OPTIONS"):
-            origin = headers.get("origin")
-            host = headers.get("host", "")
-            same_origins = {f"http://{host}", f"https://{host}"}
-            if origin and origin not in same_origins and origin not in settings.allowed_origins:
-                await JSONResponse(
-                    status_code=403, content={"error": {"code": "INVALID_ORIGIN", "message": "请求来源无效"}}
-                )(scope, receive, early_send)
-                return
+        if request.method not in ("GET", "HEAD", "OPTIONS") and not valid_request_origin(request):
+            await JSONResponse(
+                status_code=403, content={"error": {"code": "INVALID_ORIGIN", "message": "请求来源无效"}}
+            )(scope, receive, early_send)
+            return
         consumed = 0
 
         async def limited_receive() -> Message:
@@ -148,7 +157,7 @@ def health() -> dict:
 
 
 @app.exception_handler(Exception)
-async def unexpected_error(request: Request, error: Exception) -> JSONResponse:
+def unexpected_error(request: Request, error: Exception) -> JSONResponse:
     logger.exception("Unhandled request error on %s", request.url.path, exc_info=error)
     return JSONResponse(status_code=500, content={"error": {"code": "INTERNAL_ERROR", "message": "服务器内部错误"}})
 

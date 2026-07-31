@@ -5,13 +5,14 @@ from threading import Lock
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, Response
-from sqlalchemy import text
+from sqlalchemy import text, update
 from sqlalchemy.orm import Session
 
 from .common import authenticate, clean_text, management_profile, now, one
 from .config import get_settings
 from .database import get_db
 from .errors import ApiError
+from .models import User
 from .security import hash_password, new_csrf_token, new_session_token, token_hash, verify_password
 
 router = APIRouter(prefix="/api")
@@ -122,10 +123,16 @@ def change_password(request: Request, body: dict, db: DB) -> dict:
         raise ApiError(400, "INVALID_CURRENT_PASSWORD", "当前密码不正确")
     password = hash_password(new)
     db.execute(
-        text(
-            """UPDATE users SET password_hash=:hash,password_salt=:salt,must_change_password=0,updated_at=:now WHERE id=:id"""
-        ),
-        {"hash": password.hash, "salt": password.salt, "now": now(), "id": user["id"]},
+        update(User)
+        .where(User.id == user["id"])
+        .values(
+            {
+                User.password_hash: password.hash,
+                User.password_salt: password.salt,
+                User.must_change_password: 0,
+                User.updated_at: now(),
+            }
+        )
     )
     db.commit()
     return {"ok": True}
