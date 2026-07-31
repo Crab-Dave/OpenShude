@@ -7,7 +7,7 @@ from sqlalchemy import inspect
 from alembic import command
 from app.config import get_settings
 from app.database import Base, create_database_engine
-from app.maintenance import backup, configured_backup_path, restore, validate_database, verify
+from app.maintenance import backup, bootstrap_admin, configured_backup_path, restore, validate_database, verify
 from app.security import hash_password, verify_password
 
 
@@ -70,6 +70,49 @@ def test_homepage_migration_preserves_existing_content(tmp_path, monkeypatch):
         assert database.execute(
             "SELECT value,revision FROM system_settings WHERE key='homepage_markdown'"
         ).fetchone() == ("保留正文", 1)
+
+
+def test_fresh_production_database_bootstrap(tmp_path, monkeypatch):
+    database_path = tmp_path / "fresh-production.db"
+    monkeypatch.setenv("DB_PATH", str(database_path))
+    get_settings.cache_clear()
+    command.upgrade(Config("alembic.ini"), "head")
+    assert bootstrap_admin(database_path, "OneTimeAdminPassword123!") is True
+    assert bootstrap_admin(database_path, "UnusedAdminPassword123!") is False
+    assert validate_database(database_path) == {"status": "ok", "openRounds": 0}
+
+    empty_tables = (
+        "admin_group_members",
+        "admin_group_permissions",
+        "admin_group_scopes",
+        "admin_groups",
+        "audit_logs",
+        "blocks",
+        "conversation_reads",
+        "conversations",
+        "dormitories",
+        "dormitory_applications",
+        "dormitory_members",
+        "dormitory_result_members",
+        "dormitory_result_snapshots",
+        "dormitory_round_participants",
+        "dormitory_selection_rounds",
+        "grades",
+        "messages",
+        "reports",
+        "roommate_cards",
+        "sessions",
+        "student_selection_group_members",
+        "student_selection_groups",
+    )
+    with sqlite3.connect(database_path) as database:
+        user = database.execute(
+            "SELECT login_identifier,account_type,must_change_password,status,password_salt,password_hash FROM users"
+        ).fetchone()
+        assert user[:4] == ("admin", "SUPER_ADMIN", 1, "ACTIVE")
+        assert verify_password("OneTimeAdminPassword123!", user[4], user[5])
+        assert all(database.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0] == 0 for table in empty_tables)
+        assert database.execute("SELECT COUNT(*) FROM system_settings WHERE key='homepage_markdown'").fetchone()[0] == 1
 
 
 def test_models_map_all_current_tables():

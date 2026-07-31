@@ -110,6 +110,14 @@ jobs:
             ops/restore-database.sh \
             "$SERVER_USER@$SERVER_HOST:/opt/myapp/restore-database.sh.next"
 
+          scp \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -i ~/.ssh/deploy_key \
+            -P "$SERVER_PORT" \
+            ops/reset-production-database.sh \
+            "$SERVER_USER@$SERVER_HOST:/opt/myapp/reset-production-database.sh.next"
+
       - name: Deploy new image
         shell: bash
         env:
@@ -134,6 +142,7 @@ jobs:
           export INITIAL_ADMIN_PASSWORD
 
           bash -n restore-database.sh.next
+          bash -n reset-production-database.sh.next
           IMAGE_TAG="$IMAGE_TAG" docker compose -f compose.prod.yml.next config --quiet
           docker volume create openshude-data >/dev/null
           docker volume create openshude-backups >/dev/null
@@ -351,6 +360,8 @@ jobs:
 
           mv restore-database.sh.next restore-database.sh
           chmod 700 restore-database.sh
+          mv reset-production-database.sh.next reset-production-database.sh
+          chmod 700 reset-production-database.sh
           if [[ -f compose.prod.yml.rollback ]]; then
             mv compose.prod.yml.rollback compose.prod.yml.previous
           fi

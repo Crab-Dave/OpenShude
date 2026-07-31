@@ -36,3 +36,7 @@ and reverts automatically if health checks fail.
 Before importing formal user data, create a fresh backup, perform a restore
 rehearsal, and copy a verified backup outside this server. The current volume
 protects deployments and operator mistakes, but not loss of the server itself.
+
+For the approved one-time removal of test-only data before the first formal import,
+follow [production-database-reset.md](production-database-reset.md). That destructive
+procedure intentionally creates no backup and must never be used after formal data exists.

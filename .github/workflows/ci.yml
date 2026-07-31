@@ -63,6 +63,7 @@ jobs:
           node --check public/app.js
           node --check scripts/browser-check.js
           bash -n ops/restore-database.sh
+          bash -n ops/reset-production-database.sh
 
       - name: Run FastAPI browser acceptance
         env:
