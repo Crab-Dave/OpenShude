@@ -1058,7 +1058,7 @@ function showAccountTypeModal(user) {
 function showImportModal() {
   const importGradeIds = permissionGradeIds('USER_IMPORT');
   const importGrades = (state.adminGrades || []).filter((grade) => importGradeIds === null || importGradeIds.includes(grade.id));
-  const modal = openModal('导入正式账号', `<form id="import-form"><div class="form-field"><label>账号数据</label><textarea name="rows" rows="8" placeholder="每行填写：登录标识,姓名,年级,性别,专业&#10;例如：2026013,张同学,2026级,女,计算机科学与技术" required></textarea><span class="field-hint">性别填写“男”或“女”。可用年级：${escapeHtml(importGrades.map((grade) => grade.name).join('、') || '无')}。姓名、年级、性别和专业导入后仅管理员可修改。</span></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary" type="submit">${icon('upload')}开始导入</button></div></form>`);
+  const modal = openModal('导入正式账号', `<form id="import-form"><div class="form-field"><label>账号数据</label><textarea name="rows" rows="8" placeholder="每行填写：登录标识,姓名,年级,性别,专业&#10;例如：2026013,张同学,2026级,女,计算机科学与技术" required></textarea><span class="field-hint">性别填写“男”或“女”。可用年级：${escapeHtml(importGrades.map((grade) => grade.name).join('、') || '无')}。初始密码与登录标识相同，首次登录后必须修改。姓名、年级、性别和专业导入后仅管理员可修改。</span></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary" type="submit">${icon('upload')}开始导入</button></div></form>`);
   modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
   modal.querySelector('#import-form').addEventListener('submit', async (event) => {
     event.preventDefault();

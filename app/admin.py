@@ -1,7 +1,6 @@
 import io
 import json
 import re
-import secrets
 from datetime import date
 from typing import Annotated
 
@@ -453,7 +452,7 @@ def import_users(request: Request, body: dict, db: DB) -> dict:
                 raise ApiError(400, "INVALID_GENDER", "性别必须为男或女")
             if one(db, "SELECT 1 AS found FROM users WHERE login_identifier=:login", {"login": login}):
                 raise ApiError(409, "DUPLICATE_LOGIN", "登录标识已存在")
-            initial_password = f"Temp-{secrets.token_urlsafe(6)}"
+            initial_password = login
             password = hash_password(initial_password)
             timestamp = now()
             result = db.execute(

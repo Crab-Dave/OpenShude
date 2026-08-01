@@ -180,6 +180,7 @@ def test_imported_user_must_change_temporary_password(client):
     )
     assert imported.status_code == 200
     account = imported.json()["created"][0]
+    assert account["initialPassword"] == "formal-001"
 
     student = TestClient(client.app)
     session = login(student, "formal-001", account["initialPassword"])
