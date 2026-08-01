@@ -216,7 +216,7 @@ function visibleAdminNav() {
   return adminNav.filter(([key]) => {
     if (key === 'overview') return true;
     if (key === 'homepage') return hasPermission('HOMEPAGE_UPDATE');
-    if (key === 'users') return hasPermission('USER_READ') || hasPermission('USER_IMPORT');
+    if (key === 'users') return hasPermission('USER_READ') || hasPermission('USER_IMPORT') || hasPermission('USER_LOGIN_IDENTIFIER_UPDATE');
     if (key === 'cards') return hasPermission('CARD_READ');
     if (key === 'groups') return hasPermission('DORMITORY_READ');
     if (key === 'reports') return hasPermission('REPORT_READ');
@@ -1005,7 +1005,7 @@ async function renderAdminUsers() {
     api('/api/admin/grades'),
   ]);
   state.adminGrades = grades;
-  setPage(`<div class="toolbar"><div class="search-field">${icon('search')}<input id="admin-user-search" placeholder="按姓名搜索（也支持登录标识、年级或专业）"></div><div class="toolbar-spacer"></div>${state.user.isSuperAdmin ? `<button class="btn btn-secondary" id="manage-selection-groups">${icon('users-round')}预设学生群组</button>` : ''}${hasPermission('USER_IMPORT') ? `<button class="btn btn-primary" id="import-users">${icon('upload')}导入账号</button>` : ''}</div>
+  setPage(`<div class="toolbar"><div class="search-field">${icon('search')}<input id="admin-user-search" placeholder="按姓名搜索（也支持登录标识、年级或专业）"></div><div class="toolbar-spacer"></div>${state.user.isSuperAdmin ? `<button class="btn btn-secondary" id="manage-selection-groups">${icon('users-round')}预设学生群组</button>` : ''}${hasPermission('USER_LOGIN_IDENTIFIER_UPDATE') ? `<button class="btn btn-secondary" id="update-login-identifiers">${icon('replace')}批量换登录标识</button>` : ''}${hasPermission('USER_IMPORT') ? `<button class="btn btn-primary" id="import-users">${icon('upload')}导入账号</button>` : ''}</div>
     <div class="table-wrap"><table class="data-table"><thead><tr><th>学生</th><th>性别</th><th>专业</th><th>登录标识</th><th>状态</th><th>卡片</th><th>最近登录</th><th></th></tr></thead><tbody id="user-rows">${users.map(userRow).join('')}</tbody></table></div>`);
   bindAdminUserRows(users);
   document.querySelector('#admin-user-search').addEventListener('input', (event) => {
@@ -1015,6 +1015,7 @@ async function renderAdminUsers() {
     refreshIcons();
   });
   document.querySelector('#import-users')?.addEventListener('click', showImportModal);
+  document.querySelector('#update-login-identifiers')?.addEventListener('click', showLoginIdentifierBatchModal);
   document.querySelector('#manage-selection-groups')?.addEventListener('click', openSelectionGroupManager);
 }
 
@@ -1060,6 +1061,24 @@ function showImportModal() {
       const result = await api('/api/admin/users/import', { method: 'POST', body: JSON.stringify({ accounts }) });
       modal.querySelector('.modal-body').innerHTML = `<div class="section-heading"><div><h2>导入完成</h2><p>成功 ${result.created.length} 条，失败 ${result.failed.length} 条</p></div></div>${result.created.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>登录标识</th><th>姓名</th><th>年级</th><th>性别</th><th>专业</th><th>初始密码</th></tr></thead><tbody>${result.created.map((item) => `<tr><td>${escapeHtml(item.loginIdentifier)}</td><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.grade)}</td><td>${item.gender === 'MALE' ? '男' : '女'}</td><td>${escapeHtml(item.major)}</td><td><code>${escapeHtml(item.initialPassword)}</code></td></tr>`).join('')}</tbody></table></div>` : ''}${result.failed.length ? `<div class="panel" style="margin-top:12px"><strong>失败明细</strong>${result.failed.map((item) => `<p class="field-hint">第 ${item.row} 行：${escapeHtml(item.reason)}</p>`).join('')}</div>` : ''}<div class="modal-actions"><button class="btn btn-primary" data-done>完成</button></div>`;
       modal.querySelector('[data-done]').addEventListener('click', async () => { closeModal(); await renderAdminUsers(); });
+    } catch (error) { toast(error.message, 'error'); }
+  });
+}
+
+function showLoginIdentifierBatchModal() {
+  const modal = openModal('批量换登录标识', `<form id="login-identifier-batch-form"><div class="form-field"><label>换号数据</label><textarea name="rows" rows="8" placeholder="每行填写：原登录标识,新登录标识&#10;例如：TEMP001,202601001" required></textarea><span class="field-hint">整批校验并更新；任何一行冲突时均不会修改。用户需要使用新登录标识重新登录。</span></div><div class="form-field"><label>操作原因</label><input name="reason" maxlength="200" required></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary" type="submit">${icon('replace')}确认批量修改</button></div></form>`);
+  modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
+  modal.querySelector('#login-identifier-batch-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const changes = event.currentTarget.rows.value.split(/\r?\n/).filter((line) => line.trim()).map((line) => {
+      const [oldLoginIdentifier, newLoginIdentifier] = line.split(/[,，\t]/).map((part) => part.trim());
+      return { oldLoginIdentifier, newLoginIdentifier };
+    });
+    try {
+      const result = await api('/api/admin/users/login-identifiers', { method: 'PATCH', body: JSON.stringify({ changes, reason: event.currentTarget.reason.value }) });
+      closeModal();
+      toast(`已修改 ${result.updated.length} 个登录标识`);
+      await renderAdminUsers();
     } catch (error) { toast(error.message, 'error'); }
   });
 }

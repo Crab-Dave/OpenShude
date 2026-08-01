@@ -182,25 +182,84 @@ def test_imported_user_must_change_temporary_password(client):
     assert imported.status_code == 200
     account = imported.json()["created"][0]
     assert account["initialPassword"] == "formal-001"
+    renamed = client.patch(
+        "/api/admin/users/login-identifiers",
+        json={
+            "changes": [{"oldLoginIdentifier": "formal-001", "newLoginIdentifier": "student-001"}],
+            "reason": "换为正式学号",
+        },
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["updated"][0]["initialPasswordReset"] is True
 
     student = TestClient(client.app)
-    session = login(student, "formal-001", account["initialPassword"])
+    assert (
+        student.post("/api/auth/login", json={"loginIdentifier": "formal-001", "password": "formal-001"}).status_code
+        == 401
+    )
+    session = login(student, "student-001", "student-001")
     assert session["user"]["mustChangePassword"] is True
     blocked = student.get("/api/roommate-cards", params={"gender": "FEMALE"})
     assert blocked.status_code == 403
     assert blocked.json()["error"]["code"] == "PASSWORD_CHANGE_REQUIRED"
     changed = student.patch(
         "/api/me/password",
-        json={"currentPassword": account["initialPassword"], "newPassword": "FormalPassword123!"},
+        json={"currentPassword": "student-001", "newPassword": "FormalPassword123!"},
     )
     assert changed.status_code == 200
     assert student.get("/api/roommate-cards", params={"gender": "FEMALE"}).status_code == 200
 
 
+def test_batch_update_login_identifiers_is_atomic_and_revokes_sessions(client):
+    first_student = TestClient(client.app)
+    login(first_student, "2026001")
+    login(client, "admin", "Admin123!")
+
+    renamed = client.patch(
+        "/api/admin/users/login-identifiers",
+        json={
+            "changes": [
+                {"oldLoginIdentifier": "2026001", "newLoginIdentifier": "S2026001"},
+                {"oldLoginIdentifier": "2026002", "newLoginIdentifier": "S2026002"},
+            ],
+            "reason": "临时编号换为正式学号",
+        },
+    )
+    assert renamed.status_code == 200
+    assert [item["newLoginIdentifier"] for item in renamed.json()["updated"]] == ["S2026001", "S2026002"]
+    assert all(item["initialPasswordReset"] is False for item in renamed.json()["updated"])
+    assert first_student.get("/api/me").status_code == 401
+    assert (
+        first_student.post(
+            "/api/auth/login", json={"loginIdentifier": "2026001", "password": "Student123!"}
+        ).status_code
+        == 401
+    )
+    login(first_student, "S2026001")
+
+    conflict = client.patch(
+        "/api/admin/users/login-identifiers",
+        json={
+            "changes": [
+                {"oldLoginIdentifier": "S2026001", "newLoginIdentifier": "S2026001-next"},
+                {"oldLoginIdentifier": "2026003", "newLoginIdentifier": "S2026002"},
+            ],
+            "reason": "验证整批回滚",
+        },
+    )
+    assert conflict.status_code == 409
+    with SessionLocal() as db:
+        assert db.execute(text("SELECT login_identifier FROM users WHERE id=2")).scalar_one() == "S2026001"
+        assert db.execute(text("SELECT COUNT(*) FROM roommate_cards WHERE user_id IN(2,3)")).scalar_one() == 2
+        assert (
+            db.execute(text("SELECT COUNT(*) FROM audit_logs WHERE action='UPDATE_LOGIN_IDENTIFIER'")).scalar_one() == 2
+        )
+
+
 def test_scoped_permissions_cannot_be_combined_across_groups(client):
     login(client, "admin", "Admin123!")
     for code, permissions, grades in (
-        ("IDENTITY_2026", ["USER_IDENTITY_UPDATE"], [1]),
+        ("IDENTITY_2026", ["USER_IDENTITY_UPDATE", "USER_LOGIN_IDENTIFIER_UPDATE"], [1]),
         ("READ_2025", ["USER_READ"], [2]),
     ):
         group = client.post("/api/admin/admin-groups", json={"code": code, "name": code}).json()["group"]
@@ -226,6 +285,27 @@ def test_scoped_permissions_cannot_be_combined_across_groups(client):
     )
     assert self_update.status_code == 403
     assert self_update.json()["error"]["code"] == "PROTECTED_ADMIN_ACCOUNT"
+    renamed = scoped.patch(
+        "/api/admin/users/login-identifiers",
+        json={
+            "changes": [{"oldLoginIdentifier": "2026002", "newLoginIdentifier": "official-002"}],
+            "reason": "换正式学号",
+        },
+    )
+    assert renamed.status_code == 200
+    cross_scope_rename = scoped.patch(
+        "/api/admin/users/login-identifiers",
+        json={
+            "changes": [
+                {"oldLoginIdentifier": "official-002", "newLoginIdentifier": "official-002-next"},
+                {"oldLoginIdentifier": "2026003", "newLoginIdentifier": "official-003"},
+            ],
+            "reason": "不能跨年级",
+        },
+    )
+    assert cross_scope_rename.status_code == 404
+    with SessionLocal() as db:
+        assert db.execute(text("SELECT login_identifier FROM users WHERE id=3")).scalar_one() == "official-002"
 
     assert (
         client.patch("/api/admin/users/1/status", json={"status": "SUSPENDED", "reason": "最后管理员"}).status_code

@@ -516,6 +516,81 @@ def protected_account(db: Session, admin: dict, account: dict) -> None:
         raise ApiError(403, "PROTECTED_ADMIN_ACCOUNT", "组管理员不能修改自己或其他管理员账号")
 
 
+@router.patch("/users/login-identifiers")
+def update_login_identifiers(request: Request, body: dict, db: DB) -> dict:
+    admin = admin_user(request, db)
+    supplied = body.get("changes")
+    if not isinstance(supplied, list) or not supplied or len(supplied) > 200:
+        raise ApiError(400, "INVALID_LOGIN_IDENTIFIER_BATCH", "每次必须提交 1 至 200 条登录标识变更")
+    reason = clean_text(body.get("reason"), 200, True)
+    changes = []
+    for item in supplied:
+        item = item if isinstance(item, dict) else {}
+        old_login = clean_text(item.get("oldLoginIdentifier"), 100, True)
+        new_login = clean_text(item.get("newLoginIdentifier"), 100, True)
+        if old_login == new_login:
+            raise ApiError(400, "UNCHANGED_LOGIN_IDENTIFIER", "新旧登录标识不能相同")
+        changes.append({"old": old_login, "new": new_login})
+    if len({item["old"] for item in changes}) != len(changes):
+        raise ApiError(400, "DUPLICATE_OLD_LOGIN_IDENTIFIER", "原登录标识不能重复")
+    if len({item["new"] for item in changes}) != len(changes):
+        raise ApiError(400, "DUPLICATE_NEW_LOGIN_IDENTIFIER", "新登录标识不能重复")
+
+    begin_immediate(db)
+    prepared = []
+    for change in changes:
+        account = one(db, "SELECT * FROM users WHERE login_identifier=:login", {"login": change["old"]})
+        if not account or account["account_type"] != "USER":
+            raise ApiError(404, "USER_NOT_FOUND", USER_NOT_FOUND_MESSAGE)
+        protected_account(db, admin, account)
+        grant = authorize(db, admin, "USER_LOGIN_IDENTIFIER_UPDATE", account["grade_id"])
+        if one(db, "SELECT 1 AS found FROM users WHERE login_identifier=:login", {"login": change["new"]}):
+            raise ApiError(409, "DUPLICATE_LOGIN", "新登录标识已存在")
+        prepared.append((change, account, grant))
+
+    timestamp = now()
+    updated = []
+    for change, account, grant in prepared:
+        values = {"login": change["new"], "now": timestamp, "id": account["id"]}
+        if account["must_change_password"]:
+            password = hash_password(change["new"])
+            values.update({"hash": password.hash, "salt": password.salt})
+            db.execute(
+                text("""UPDATE users SET login_identifier=:login,password_hash=:hash,password_salt=:salt,
+              updated_at=:now WHERE id=:id"""),
+                values,
+            )
+        else:
+            db.execute(
+                text("UPDATE users SET login_identifier=:login,updated_at=:now WHERE id=:id"),
+                values,
+            )
+        db.execute(text("DELETE FROM sessions WHERE user_id=:id"), {"id": account["id"]})
+        audit(
+            db,
+            admin,
+            request,
+            "UPDATE_LOGIN_IDENTIFIER",
+            "USER",
+            account["id"],
+            reason,
+            grant=grant,
+            before={"loginIdentifier": change["old"]},
+            after={"loginIdentifier": change["new"]},
+        )
+        updated.append(
+            {
+                "id": account["id"],
+                "name": account["name"],
+                "oldLoginIdentifier": change["old"],
+                "newLoginIdentifier": change["new"],
+                "initialPasswordReset": bool(account["must_change_password"]),
+            }
+        )
+    db.commit()
+    return {"updated": updated}
+
+
 @router.patch("/users/{user_id}/identity")
 def update_identity(user_id: int, request: Request, body: dict, db: DB) -> dict:
     admin = admin_user(request, db)
