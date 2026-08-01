@@ -43,6 +43,13 @@ def card_by_id(db: Session, card_id: int) -> dict | None:
     return one(db, CARD_SELECT + " WHERE c.id=:id", {"id": card_id})
 
 
+def card_for_student(card: dict, user_id: int) -> dict:
+    result = dict(card)
+    if card["user_id"] != user_id:
+        result.pop("clothing_size", None)
+    return result
+
+
 def has_block(db: Session, first: int, second: int) -> bool:
     return (
         one(
@@ -269,7 +276,7 @@ def cards(
         {"gender": selected_gender, "user": user["id"]},
     )
     lowered = search.strip().lower()
-    result = [{**card, "is_own": card["user_id"] == user["id"]} for card in rows]
+    result = [{**card_for_student(card, user["id"]), "is_own": card["user_id"] == user["id"]} for card in rows]
     if lowered:
         result = [card for card in result if lowered in card["name"].lower()]
     if grade:
@@ -288,7 +295,7 @@ def card_detail(card_id: int, request: Request, db: DB) -> dict:
         raise ApiError(404, "CARD_NOT_FOUND", CARD_NOT_FOUND_MESSAGE)
     if has_block(db, user["id"], card["user_id"]):
         raise ApiError(403, "USER_BLOCKED", "无法查看该用户")
-    return {"card": card}
+    return {"card": card_for_student(card, user["id"])}
 
 
 @router.post("/roommate-cards/{card_id}/conversations")

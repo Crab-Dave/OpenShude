@@ -18,8 +18,14 @@ def test_auth_security_and_card_contract(client):
     cards = client.get("/api/roommate-cards", params={"gender": "FEMALE", "search": "林"}).json()["cards"]
     assert len(cards) == 1
     assert cards[0]["is_own"] is True
+    assert cards[0]["clothing_size"] == "L"
     card = client.get(f"/api/roommate-cards/{cards[0]['id']}").json()["card"]
     assert card["one_sentence_intro"] == "一句话介绍"
+    assert card["clothing_size"] == "L"
+    other_cards = client.get("/api/roommate-cards", params={"gender": "FEMALE"}).json()["cards"]
+    other_card = next(item for item in other_cards if not item["is_own"])
+    assert "clothing_size" not in other_card
+    assert "clothing_size" not in client.get(f"/api/roommate-cards/{other_card['id']}").json()["card"]
     invalid_origin = client.put(
         "/api/me/roommate-card", json={"name": "不可修改"}, headers={"Origin": "http://evil.example"}
     )
@@ -128,7 +134,7 @@ def test_admin_rounds_scoped_permissions_and_export(client):
     group_admin = next(user for user in users if user["login_identifier"] == "2026001")
     group = client.post("/api/admin/admin-groups", json={"code": "GRADE_2026", "name": "2026 管理"}).json()["group"]
     for section, body in (
-        ("permissions", {"permissions": ["USER_READ", "DORMITORY_READ", "DORMITORY_EXPORT"]}),
+        ("permissions", {"permissions": ["USER_READ", "CARD_READ", "DORMITORY_READ", "DORMITORY_EXPORT"]}),
         ("scopes", {"gradeIds": [1]}),
         ("members", {"userIds": [group_admin["id"]]}),
     ):
@@ -140,6 +146,9 @@ def test_admin_rounds_scoped_permissions_and_export(client):
     scoped_users = scoped.get("/api/admin/users").json()["users"]
     assert scoped_users
     assert all(user["grade_id"] == 1 for user in scoped_users)
+    scoped_cards = scoped.get("/api/admin/roommate-cards").json()["cards"]
+    assert scoped_cards
+    assert all(card["grade_id"] == 1 and card["clothing_size"] == "L" for card in scoped_cards)
     export = scoped.get("/api/admin/dormitories/export")
     assert export.status_code == 200
     assert export.content.startswith(b"PK")

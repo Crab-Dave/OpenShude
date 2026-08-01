@@ -472,7 +472,7 @@ function cardDetailMarkup(card, actions = '') {
       <div class="detail-item"><dt>年级 / 性别</dt><dd>${escapeHtml(card.grade)} / ${card.gender === 'MALE' ? '男' : '女'}</dd></div>
       <div class="detail-item"><dt>专业</dt><dd>${escapeHtml(card.major || '-')}</dd></div>
       <div class="detail-item"><dt>来自地区</dt><dd>${escapeHtml([card.origin_province, card.origin_city].filter(Boolean).join(' ') || '-')}</dd></div>
-      <div class="detail-item"><dt>院服尺码</dt><dd>${escapeHtml(card.clothing_size || '-')}</dd></div>
+      ${card.clothing_size !== undefined ? `<div class="detail-item"><dt>院服尺码</dt><dd>${escapeHtml(card.clothing_size || '-')}</dd></div>` : ''}
     </dl></div>
     <div class="section"><div class="section-heading"><h2>性格与兴趣</h2></div><dl class="detail-grid">
       <div class="detail-item"><dt>用一句话介绍自己</dt><dd>${escapeHtml(card.one_sentence_intro || '-')}</dd></div>
