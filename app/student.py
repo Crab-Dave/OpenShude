@@ -2,12 +2,11 @@ import base64
 import json
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .common import all_rows, clean_text, current_user, now, one, require_user
-from .config import get_settings
 from .database import get_db
 from .errors import ApiError
 
@@ -190,29 +189,6 @@ def get_or_create_conversation(db: Session, user_id: int, other_id: int) -> dict
         db.commit()
         conversation = one(db, "SELECT * FROM conversations WHERE id=:id", {"id": result.lastrowid})
     return conversation
-
-
-@router.post("/me/deactivate")
-def deactivate(request: Request, response: Response, body: dict, db: DB) -> dict:
-    user = current_user(request, db)
-    require_user(user)
-    if body.get("confirmation") != "注销账号":
-        raise ApiError(400, "CONFIRMATION_REQUIRED", "请输入“注销账号”确认")
-    from .dormitories import leave_dormitory
-
-    db.connection().exec_driver_sql("BEGIN IMMEDIATE")
-    leave_dormitory(db, user["id"], reason="成员注销账号")
-    timestamp = now()
-    db.execute(
-        text("UPDATE users SET status='DEACTIVATED',deactivated_at=:now,updated_at=:now WHERE id=:id"),
-        {"now": timestamp, "id": user["id"]},
-    )
-    db.execute(text("DELETE FROM sessions WHERE user_id=:id"), {"id": user["id"]})
-    db.commit()
-    response.delete_cookie(
-        "session", path="/", httponly=True, samesite="lax", secure=get_settings().session_cookie_secure
-    )
-    return {"ok": True}
 
 
 @router.get("/me/roommate-card")

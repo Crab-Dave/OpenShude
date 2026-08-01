@@ -29,7 +29,6 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, server_default=text("'PENDING_ACTIVATION'"))
     imported_by: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID))
-    deactivated_at: Mapped[str | None] = mapped_column(Text)
     last_login_at: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text)
     updated_at: Mapped[str] = mapped_column(Text)
@@ -38,7 +37,7 @@ class User(Base):
         CheckConstraint("account_type IN ('USER','SUPER_ADMIN')"),
         CheckConstraint("must_change_password IN (0,1)"),
         CheckConstraint("gender IN ('MALE','FEMALE','UNSPECIFIED')"),
-        CheckConstraint("status IN ('PENDING_ACTIVATION','ACTIVE','SUSPENDED','BANNED','DEACTIVATED')"),
+        CheckConstraint("status IN ('PENDING_ACTIVATION','ACTIVE','SUSPENDED','BANNED')"),
     )
 
 

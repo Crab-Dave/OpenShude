@@ -31,7 +31,7 @@ const labels = {
     NEGOTIABLE: '都可以，愿意与室友具体协商',
   },
   cardStatus: { DRAFT: '草稿', PUBLISHED: '已发布', HIDDEN: '已隐藏' },
-  userStatus: { PENDING_ACTIVATION: '待激活', ACTIVE: '正常', SUSPENDED: '已停用', BANNED: '已封禁', DEACTIVATED: '已注销' },
+  userStatus: { PENDING_ACTIVATION: '待激活', ACTIVE: '正常', SUSPENDED: '已停用', BANNED: '已封禁' },
   dormitoryStatus: { OPEN: '可申请', FULL: '已满员', CLOSED: '已关闭' },
   applicationStatus: { PENDING: '待审核', APPROVED: '已通过', REJECTED: '已拒绝', CANCELLED: '已取消' },
   reportStatus: { PENDING: '待处理', RESOLVED: '已处理', REJECTED: '不成立' },
@@ -896,7 +896,6 @@ async function renderSettings() {
     <section class="panel"><div class="section-heading"><div><h2>身份信息</h2><p>如需更正，请联系管理员</p></div></div><div class="form-grid"><div class="form-field"><label>姓名</label><input value="${escapeHtml(state.user.name)}" disabled></div><div class="form-field"><label>年级</label><input value="${escapeHtml(state.user.grade)}" disabled></div><div class="form-field"><label>性别</label><input value="${state.user.gender === 'MALE' ? '男' : '女'}" disabled></div><div class="form-field"><label>专业</label><input value="${escapeHtml(state.user.major || '')}" disabled></div><div class="form-field full"><label>登录标识</label><input value="${escapeHtml(state.user.loginIdentifier)}" disabled></div></div></section>
     <section class="panel"><div class="section-heading"><div><h2>修改密码</h2><p>新密码至少 8 位</p></div></div><form id="password-form" class="form-grid"><div class="form-field"><label>当前密码</label><input name="currentPassword" type="password" required></div><div class="form-field"><label>新密码</label><input name="newPassword" type="password" minlength="8" required></div><div class="full"><button class="btn btn-primary">${icon('key-round')}更新密码</button></div></form></section>
     <section class="panel"><div class="section-heading"><div><h2>拉黑列表</h2><p>解除后可以重新查看对方卡片</p></div></div>${blocks.length ? `<div class="search-field inline-person-search">${icon('search')}<input id="block-search" placeholder="按姓名搜索"></div><div class="member-list">${blocks.map((item) => `<div class="member-row" data-person-name="${escapeHtml(item.name.toLowerCase())}">${avatar(item.avatar_url, item.name, 'avatar-sm')}<div class="member-copy"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.grade)}</span></div><button class="btn btn-secondary btn-sm" data-unblock="${item.user_id}">解除</button></div>`).join('')}</div>` : `<p class="field-hint">暂无拉黑用户</p>`}</section>
-    <section class="panel" style="border-color:#eccaca"><div class="section-heading"><div><h2>注销账号</h2><p>注销后不能登录，卡片停止展示，但历史资源会继续保留</p></div></div><button class="btn btn-danger" id="deactivate-btn">${icon('user-minus')}注销账号</button></section>
   </div>`);
   document.querySelector('#password-form').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -912,16 +911,6 @@ async function renderSettings() {
     document.querySelectorAll('.member-row[data-person-name]').forEach((item) => {
       item.hidden = query && !item.dataset.personName.includes(query);
     });
-  });
-  document.querySelector('#deactivate-btn').addEventListener('click', showDeactivateModal);
-}
-
-function showDeactivateModal() {
-  const modal = openModal('注销账号', `<p>账号注销后将无法登录，室友卡片停止展示，当前宿舍组会解散。已有资源继续保留，除非管理员永久删除。</p><div class="form-field"><label>输入“注销账号”确认</label><input id="deactivate-confirm"></div><div class="modal-actions"><button class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-danger" data-confirm>${icon('user-minus')}确认注销</button></div>`);
-  modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
-  modal.querySelector('[data-confirm]').addEventListener('click', async () => {
-    try { await api('/api/me/deactivate', { method: 'POST', body: JSON.stringify({ confirmation: modal.querySelector('#deactivate-confirm').value }) }); state.user = null; state.csrfToken = ''; closeModal(); await goHome(); }
-    catch (error) { toast(error.message, 'error'); }
   });
 }
 

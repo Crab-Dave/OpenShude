@@ -294,7 +294,7 @@ input:disabled { color: #62586d; background: #f0edf4; cursor: not-allowed; }
 .status-draft, .status-forming, .status-pending { color: var(--warning); background: var(--warning-soft); }
 .status-pending_activation { color: var(--warning); background: var(--warning-soft); }
 .status-hidden, .status-banned, .status-dissolved, .status-rejected { color: var(--danger); background: var(--danger-soft); }
-.status-suspended, .status-deactivated { color: var(--muted); background: #e9edeb; }
+.status-suspended { color: var(--muted); background: #e9edeb; }
 .status-open, .status-approved { color: var(--primary-dark); background: var(--primary-soft); }
 .status-full { color: var(--info); background: var(--info-soft); }
 .status-closed, .status-cancelled { color: var(--muted); background: #e9edeb; }

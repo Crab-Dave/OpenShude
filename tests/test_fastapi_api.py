@@ -14,6 +14,7 @@ def test_auth_security_and_card_contract(client):
     assert client.post("/api/auth/login", json={"loginIdentifier": "none", "password": "bad"}).status_code == 401
     me = login(client, "2026001")
     assert me["user"]["name"] == "林夏"
+    assert client.post("/api/me/deactivate", json={"confirmation": "注销账号"}).status_code == 405
     cards = client.get("/api/roommate-cards", params={"gender": "FEMALE", "search": "林"}).json()["cards"]
     assert len(cards) == 1
     assert cards[0]["is_own"] is True

@@ -118,6 +118,10 @@ let browser;
   assert.equal((await desktop.locator('#profile-form .section-heading h2').allTextContents()).at(-1), '还想要对大家说');
   assert.equal(await desktop.locator('#profile-form').getAttribute('data-overflow'), null);
 
+  await desktop.locator('[data-view="settings"]').first().click();
+  await desktop.waitForSelector('#password-form');
+  assert.equal(await desktop.locator('#deactivate-btn').count(), 0);
+
   await desktop.locator('[data-view="dorm"]').first().click();
   await desktop.waitForSelector('.stage-banner');
   assert.match(await desktop.locator('.stage-banner').textContent(), /默认选宿舍轮次/);
