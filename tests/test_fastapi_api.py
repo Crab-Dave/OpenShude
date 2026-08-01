@@ -1,7 +1,9 @@
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
+from io import BytesIO
 
 from fastapi.testclient import TestClient
+from openpyxl import load_workbook
 from sqlalchemy import text
 
 from app.common import now
@@ -134,7 +136,10 @@ def test_admin_rounds_scoped_permissions_and_export(client):
     group_admin = next(user for user in users if user["login_identifier"] == "2026001")
     group = client.post("/api/admin/admin-groups", json={"code": "GRADE_2026", "name": "2026 管理"}).json()["group"]
     for section, body in (
-        ("permissions", {"permissions": ["USER_READ", "CARD_READ", "DORMITORY_READ", "DORMITORY_EXPORT"]}),
+        (
+            "permissions",
+            {"permissions": ["USER_READ", "USER_EXPORT", "CARD_READ", "DORMITORY_READ", "DORMITORY_EXPORT"]},
+        ),
         ("scopes", {"gradeIds": [1]}),
         ("members", {"userIds": [group_admin["id"]]}),
     ):
@@ -149,6 +154,33 @@ def test_admin_rounds_scoped_permissions_and_export(client):
     scoped_cards = scoped.get("/api/admin/roommate-cards").json()["cards"]
     assert scoped_cards
     assert all(card["grade_id"] == 1 and card["clothing_size"] == "L" for card in scoped_cards)
+    with SessionLocal.begin() as db:
+        db.execute(text("UPDATE users SET major='=1+1' WHERE id=2"))
+    user_export = scoped.get("/api/admin/users/export")
+    assert user_export.status_code == 200
+    assert user_export.headers["content-disposition"].startswith('attachment; filename="users-')
+    sheet = load_workbook(BytesIO(user_export.content), read_only=True).active
+    export_rows = list(sheet.values)
+    assert export_rows[0] == (
+        "登录标识",
+        "姓名",
+        "年级",
+        "性别",
+        "专业",
+        "院服尺码",
+        "账号状态",
+        "卡片状态",
+        "最近登录",
+        "创建时间",
+    )
+    assert all(row[2] == "2026级" and row[5] == "L" for row in export_rows[1:])
+    assert next(row for row in export_rows[1:] if row[0] == "2026001")[4] == "'=1+1"
+    assert "2026003" not in {row[0] for row in export_rows[1:]}
+    with SessionLocal() as db:
+        export_audit = db.execute(
+            text("SELECT permission_code,scope_value FROM audit_logs WHERE action='EXPORT_USERS'")
+        ).one()
+        assert export_audit == ("USER_EXPORT", "1")
     export = scoped.get("/api/admin/dormitories/export")
     assert export.status_code == 200
     assert export.content.startswith(b"PK")
@@ -283,6 +315,7 @@ def test_scoped_permissions_cannot_be_combined_across_groups(client):
 
     scoped = TestClient(client.app)
     login(scoped, "2026001")
+    assert scoped.get("/api/admin/users/export").status_code == 403
     cross_scope = scoped.patch(
         "/api/admin/users/3/identity",
         json={"name": "江晚", "grade": "2025级", "gender": "FEMALE", "major": "设计", "reason": "不能拼接"},

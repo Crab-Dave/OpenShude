@@ -216,7 +216,7 @@ function visibleAdminNav() {
   return adminNav.filter(([key]) => {
     if (key === 'overview') return true;
     if (key === 'homepage') return hasPermission('HOMEPAGE_UPDATE');
-    if (key === 'users') return hasPermission('USER_READ') || hasPermission('USER_IMPORT') || hasPermission('USER_LOGIN_IDENTIFIER_UPDATE');
+    if (key === 'users') return hasPermission('USER_READ') || hasPermission('USER_IMPORT') || hasPermission('USER_EXPORT') || hasPermission('USER_LOGIN_IDENTIFIER_UPDATE');
     if (key === 'cards') return hasPermission('CARD_READ');
     if (key === 'groups') return hasPermission('DORMITORY_READ');
     if (key === 'reports') return hasPermission('REPORT_READ');
@@ -1005,7 +1005,7 @@ async function renderAdminUsers() {
     api('/api/admin/grades'),
   ]);
   state.adminGrades = grades;
-  setPage(`<div class="toolbar"><div class="search-field">${icon('search')}<input id="admin-user-search" placeholder="按姓名搜索（也支持登录标识、年级或专业）"></div><div class="toolbar-spacer"></div>${state.user.isSuperAdmin ? `<button class="btn btn-secondary" id="manage-selection-groups">${icon('users-round')}预设学生群组</button>` : ''}${hasPermission('USER_LOGIN_IDENTIFIER_UPDATE') ? `<button class="btn btn-secondary" id="update-login-identifiers">${icon('replace')}批量换登录标识</button>` : ''}${hasPermission('USER_IMPORT') ? `<button class="btn btn-primary" id="import-users">${icon('upload')}导入账号</button>` : ''}</div>
+  setPage(`<div class="toolbar"><div class="search-field">${icon('search')}<input id="admin-user-search" placeholder="按姓名搜索（也支持登录标识、年级或专业）"></div><div class="toolbar-spacer"></div>${state.user.isSuperAdmin ? `<button class="btn btn-secondary" id="manage-selection-groups">${icon('users-round')}预设学生群组</button>` : ''}${hasPermission('USER_LOGIN_IDENTIFIER_UPDATE') ? `<button class="btn btn-secondary" id="update-login-identifiers">${icon('replace')}批量换登录标识</button>` : ''}${hasPermission('USER_EXPORT') ? `<button class="btn btn-secondary" id="export-users">${icon('file-spreadsheet')}导出用户 Excel</button>` : ''}${hasPermission('USER_IMPORT') ? `<button class="btn btn-primary" id="import-users">${icon('upload')}导入账号</button>` : ''}</div>
     <div class="table-wrap"><table class="data-table"><thead><tr><th>学生</th><th>性别</th><th>专业</th><th>登录标识</th><th>状态</th><th>卡片</th><th>最近登录</th><th></th></tr></thead><tbody id="user-rows">${users.map(userRow).join('')}</tbody></table></div>`);
   bindAdminUserRows(users);
   document.querySelector('#admin-user-search').addEventListener('input', (event) => {
@@ -1016,7 +1016,27 @@ async function renderAdminUsers() {
   });
   document.querySelector('#import-users')?.addEventListener('click', showImportModal);
   document.querySelector('#update-login-identifiers')?.addEventListener('click', showLoginIdentifierBatchModal);
+  document.querySelector('#export-users')?.addEventListener('click', downloadUserExport);
   document.querySelector('#manage-selection-groups')?.addEventListener('click', openSelectionGroupManager);
+}
+
+async function downloadUserExport() {
+  try {
+    const response = await fetch('/api/admin/users/export', { credentials: 'same-origin' });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error?.message || '导出失败，请稍后重试');
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get('content-disposition') || '';
+    const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || 'users.xlsx';
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    toast('用户信息已导出');
+  } catch (error) { toast(error.message, 'error'); }
 }
 
 function userRow(user) {

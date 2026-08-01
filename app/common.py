@@ -13,6 +13,7 @@ PERMISSIONS = {
     "HOMEPAGE_UPDATE": "更新首页内容",
     "USER_READ": "查看用户",
     "USER_IMPORT": "导入普通用户",
+    "USER_EXPORT": "导出用户信息",
     "USER_LOGIN_IDENTIFIER_UPDATE": "批量修改登录标识",
     "USER_IDENTITY_UPDATE": "修改用户身份信息",
     "USER_STATUS_UPDATE": "修改用户状态",

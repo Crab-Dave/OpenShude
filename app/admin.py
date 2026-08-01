@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -55,6 +56,11 @@ def admin_user(request: Request, db: Session) -> dict:
     user = current_user(request, db)
     require_management(db, user)
     return user
+
+
+def spreadsheet_text(value: object) -> str:
+    result = ILLEGAL_CHARACTERS_RE.sub("", str(value or ""))
+    return f"'{result}" if result.startswith(("=", "+", "-", "@")) else result
 
 
 def grade_filter(db: Session, admin: dict, rows: list[dict], permission: str, field: str = "grade_id") -> list[dict]:
@@ -428,6 +434,91 @@ def users(request: Request, db: DB, search: str = "") -> dict:
             for item in rows
         ]
     }
+
+
+@router.get("/users/export")
+def export_users(request: Request, db: DB) -> StreamingResponse:
+    admin = admin_user(request, db)
+    grade_ids = authorized_grade_ids(db, admin, "USER_EXPORT")
+    if grade_ids is not None and not grade_ids:
+        raise ApiError(403, "PERMISSION_DENIED", PERMISSION_DENIED_MESSAGE)
+    rows = all_rows(
+        db,
+        """SELECT u.login_identifier,u.name,u.grade,u.grade_id,u.gender,u.major,u.status,
+      u.last_login_at,u.created_at,c.clothing_size,c.status AS card_status FROM users u
+      LEFT JOIN roommate_cards c ON c.user_id=u.id WHERE u.account_type='USER'
+      ORDER BY u.grade,u.login_identifier""",
+    )
+    if grade_ids is not None:
+        rows = [row for row in rows if row["grade_id"] in grade_ids]
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "用户信息"
+    sheet.append(
+        ["登录标识", "姓名", "年级", "性别", "专业", "院服尺码", "账号状态", "卡片状态", "最近登录", "创建时间"]
+    )
+    gender_labels = {"MALE": "男", "FEMALE": "女", "UNSPECIFIED": "未设置"}
+    status_labels = {
+        "PENDING_ACTIVATION": "待激活",
+        "ACTIVE": "正常",
+        "SUSPENDED": "已停用",
+        "BANNED": "已封禁",
+    }
+    card_status_labels = {"DRAFT": "草稿", "PUBLISHED": "已发布", "HIDDEN": "已隐藏"}
+    for row in rows:
+        sheet.append(
+            [
+                spreadsheet_text(row["login_identifier"]),
+                spreadsheet_text(row["name"]),
+                spreadsheet_text(row["grade"]),
+                gender_labels.get(row["gender"], row["gender"]),
+                spreadsheet_text(row["major"]),
+                spreadsheet_text(row["clothing_size"]),
+                status_labels.get(row["status"], row["status"]),
+                card_status_labels.get(row["card_status"], row["card_status"] or "未创建"),
+                row["last_login_at"] or "",
+                row["created_at"],
+            ]
+        )
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+
+    if admin["account_type"] == "SUPER_ADMIN":
+        grant = {
+            "permissionCode": "USER_EXPORT",
+            "groupId": None,
+            "scopeType": "GRADE",
+            "scopeValue": ",".join(map(str, sorted({row["grade_id"] for row in rows if row["grade_id"]}))),
+        }
+        group_ids = []
+    else:
+        groups = [group for group in active_admin_groups(db, admin["id"]) if "USER_EXPORT" in group["permissions"]]
+        grant = {
+            "permissionCode": "USER_EXPORT",
+            "groupId": groups[0]["id"] if len(groups) == 1 else None,
+            "scopeType": "GRADE",
+            "scopeValue": ",".join(map(str, grade_ids)),
+        }
+        group_ids = [group["id"] for group in groups]
+    audit(
+        db,
+        admin,
+        request,
+        "EXPORT_USERS",
+        "USER_COLLECTION",
+        "all",
+        metadata={"count": len(rows), "groupIds": group_ids},
+        grant=grant,
+    )
+    db.commit()
+    filename = f"users-{date.today().isoformat()}.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/users/import")
@@ -1229,15 +1320,15 @@ def workbook_bytes(dormitories: list[dict]) -> bytes:
         member_names = [f"{member['name']}（{member['grade']}）" for member in members]
         sheet.append(
             [
-                dormitory["dormitory_code"],
-                dormitory["name"],
+                spreadsheet_text(dormitory["dormitory_code"]),
+                spreadsheet_text(dormitory["name"]),
                 "男" if dormitory["gender"] == "MALE" else "女",
-                dormitory["building"] or "待分配",
-                dormitory["room_number"] or "待分配",
+                spreadsheet_text(dormitory["building"] or "待分配"),
+                spreadsheet_text(dormitory["room_number"] or "待分配"),
                 status_labels.get(dormitory["status"], dormitory["status"]),
                 f"{dormitory['member_count']}/{dormitory['capacity']}",
-                dormitory["initiator_name"],
-                *(member_names + [""] * 4)[:4],
+                spreadsheet_text(dormitory["initiator_name"]),
+                *[spreadsheet_text(value) for value in (member_names + [""] * 4)[:4]],
                 dormitory.get("created_at", ""),
             ]
         )
