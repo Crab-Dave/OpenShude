@@ -149,7 +149,30 @@ let browser;
   await desktop.locator('.roommate-card').filter({ hasText: '苏晴' }).click();
   assert.doesNotMatch(await desktop.locator('.modal').textContent(), /院服尺码/);
   await desktop.locator('[data-message]').click();
-  await desktop.waitForSelector('.message-workspace');
+  await desktop.waitForSelector('#chat-messages');
+  const chatLayout = await desktop.locator('.message-workspace').evaluate((workspace) => {
+    const messages = workspace.querySelector('#chat-messages');
+    const compose = workspace.querySelector('#message-form');
+    for (let index = 0; index < 80; index += 1) {
+      const message = document.createElement('div');
+      message.className = `message ${index % 2 ? 'mine' : ''}`;
+      message.textContent = `布局验收消息 ${index + 1}：${'较长内容'.repeat(12)}`;
+      messages.append(message);
+    }
+    messages.scrollTop = messages.scrollHeight;
+    const workspaceBox = workspace.getBoundingClientRect();
+    const composeBox = compose.getBoundingClientRect();
+    return {
+      bodyFitsViewport: document.documentElement.scrollHeight <= window.innerHeight + 1,
+      composeVisible: composeBox.top >= workspaceBox.top && composeBox.bottom <= workspaceBox.bottom + 1,
+      messagesScrollable: messages.scrollHeight > messages.clientHeight && messages.scrollTop > 0,
+      messagesOverflow: getComputedStyle(messages).overflowY,
+    };
+  });
+  assert.equal(chatLayout.bodyFitsViewport, true);
+  assert.equal(chatLayout.composeVisible, true);
+  assert.equal(chatLayout.messagesScrollable, true);
+  assert.equal(chatLayout.messagesOverflow, 'auto');
   await desktop.locator('#logout-btn').click();
   await desktop.waitForSelector('.public-shell');
   await desktop.locator('#site-login').click();

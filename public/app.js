@@ -691,6 +691,7 @@ async function renderMessages() {
     state.selectedConversationId = conversations[0]?.id || null;
     state.applicationDormitoryId = null;
   }
+  document.querySelector('#page-content')?.classList.add('message-page');
   setPage(`<div class="message-workspace ${state.selectedConversationId ? 'chat-open' : ''}">
     <aside class="conversation-list"><div class="conversation-list-head"><strong>全部会话</strong><div class="search-field">${icon('search')}<input id="conversation-search" placeholder="按姓名搜索"></div></div>${conversations.length ? conversations.map((item) => `
       <button class="conversation-item ${state.selectedConversationId === item.id ? 'active' : ''}" data-conversation="${item.id}" data-person-name="${escapeHtml(item.other_name.toLowerCase())}">
