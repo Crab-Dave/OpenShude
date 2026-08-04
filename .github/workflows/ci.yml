@@ -74,6 +74,7 @@ jobs:
       - name: Check JavaScript and shell syntax
         run: |
           node --check public/app.js
+          node --check public/public-page.js
           node --check scripts/browser-check.js
           bash -n ops/restore-database.sh
           bash -n ops/reset-production-database.sh

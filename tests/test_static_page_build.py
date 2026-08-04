@@ -42,7 +42,7 @@ order = 10
     document = (output / "index.html").read_text(encoding="utf-8")
     assert '<meta name="description" content="合住校内室友双选系统">' in document
     assert 'src="/static-pages/home/assets/example.png"' in document
-    assert "<script" not in document
+    assert '<script src="/public-page.js"></script>' in document
     assert (asset_output / "home/assets/example.png").read_bytes() == b"example image"
     assert json.loads((output / "pages.json").read_text(encoding="utf-8"))["pages"][0]["route"] == "/"
 

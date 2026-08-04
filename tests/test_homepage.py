@@ -14,6 +14,7 @@ def test_homepage_is_a_generated_anonymous_document(client):
     assert response.headers["cache-control"] == "no-cache"
     assert "树德岛哩 - 见证你的成长" in response.text
     assert "南方科技大学树德书院" in response.text
+    assert '<script src="/public-page.js"></script>' in response.text
     assert "/app.js" not in response.text
     assert 'href="/login"' in response.text
     assert 'href="/roommates"' in response.text
