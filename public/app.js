@@ -269,6 +269,7 @@ async function renderHomepage() {
         <article class="markdown-article">${content.html}</article>
         ${content.updatedAt ? `<p class="homepage-updated">最近更新于 ${formatDate(content.updatedAt)}</p>` : ''}
       </main>
+      <footer class="site-footer"><a href="https://github.com/Crab-Dave/OpenShude" target="_blank" rel="noopener noreferrer" aria-label="在 GitHub 查看 Crab-Dave/OpenShude">${icon('github')}<span>Crab-Dave/OpenShude</span></a></footer>
     </div>`;
   document.querySelector('#site-home').addEventListener('click', goHome);
   document.querySelector('#site-home-nav').addEventListener('click', goHome);

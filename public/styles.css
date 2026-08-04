@@ -35,7 +35,7 @@ button { letter-spacing: 0; }
 a { color: inherit; }
 img { display: block; max-width: 100%; }
 
-.public-shell { min-height: 100vh; background: #fbfafc; }
+.public-shell { min-height: 100vh; display: flex; flex-direction: column; background: #fbfafc; }
 .site-header { position: sticky; top: 0; z-index: 40; height: 72px; color: white; background: #28153d; border-bottom: 1px solid #49305f; }
 .site-header-inner { width: min(1280px, 100%); height: 100%; margin: 0 auto; padding: 0 28px; display: flex; align-items: stretch; }
 .site-logo { width: 176px; padding: 10px 22px 10px 0; border: 0; background: transparent; cursor: pointer; }
@@ -59,7 +59,7 @@ img { display: block; max-width: 100%; }
 .account-menu-panel button { width: 100%; height: 38px; padding: 0 10px; border: 0; border-radius: 5px; display: flex; align-items: center; gap: 9px; color: var(--ink); background: transparent; cursor: pointer; text-align: left; }
 .account-menu-panel button:hover { background: var(--surface-soft); }
 .account-menu-panel svg { width: 17px; color: var(--muted); }
-.homepage-main { width: min(880px, calc(100% - 40px)); margin: 0 auto; padding: 56px 0 90px; }
+.homepage-main { width: min(880px, calc(100% - 40px)); margin: 0 auto; padding: 56px 0 90px; flex: 1; }
 .markdown-article { color: #2d2635; font-size: 16px; line-height: 1.82; overflow-wrap: anywhere; }
 .markdown-article h1 { margin: 0 0 32px; padding-bottom: 18px; border-bottom: 1px solid var(--line); color: #21182a; font-size: 34px; line-height: 1.3; }
 .markdown-article h2 { margin: 42px 0 16px; color: #2d1c3e; font-size: 24px; line-height: 1.4; }
@@ -79,6 +79,10 @@ img { display: block; max-width: 100%; }
 .markdown-article th { background: var(--surface-soft); }
 .markdown-article hr { margin: 36px 0; border: 0; border-top: 1px solid var(--line); }
 .homepage-updated { margin: 44px 0 0; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.site-footer { padding: 20px; border-top: 1px solid var(--line); color: var(--muted); background: white; }
+.site-footer a { width: fit-content; margin: 0 auto; display: flex; align-items: center; gap: 8px; font-size: 13px; text-decoration: none; }
+.site-footer a:hover { color: var(--primary); }
+.site-footer svg { width: 19px; height: 19px; }
 .homepage-error { padding: 70px 0; text-align: center; }
 .homepage-error h1 { border: 0; }
 .app-loading {
