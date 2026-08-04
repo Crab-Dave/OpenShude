@@ -6,3 +6,12 @@ description = "合住校内室友双选系统"
 source = "pages/home/content.md"
 show_in_navigation = true
 order = 10
+
+[[pages]]
+slug = "guide"
+route = "/guide"
+title = "使用指南"
+description = "树德书院室友双选系统使用指南"
+source = "pages/guide/content.md"
+show_in_navigation = true
+order = 20
