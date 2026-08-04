@@ -9,7 +9,8 @@ node_modules
 data
 artifacts
 tests
-scripts
+scripts/*
+!scripts/build_static_pages.py
 .gitignore
 DESIGN.md
 README.md
