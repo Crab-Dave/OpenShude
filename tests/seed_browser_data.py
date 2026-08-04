@@ -380,6 +380,30 @@ def main() -> None:
                 {"round": round_id, "user": user_id, "admin": admin_id, "now": timestamp},
             )
 
+        for index in range(1, 11):
+            password = hash_password("Student123!")
+            user_id = db.execute(
+                text("""INSERT INTO users(login_identifier,password_hash,password_salt,role,account_type,
+                  authorization_version,must_change_password,name,grade,grade_id,gender,major,status,imported_by,
+                  created_at,updated_at) VALUES(:login,:hash,:salt,'STUDENT','USER',1,0,:name,'2026级',:grade,
+                  'FEMALE','计算机科学与技术','ACTIVE',:admin,:created,:created) RETURNING id"""),
+                {
+                    "login": f"browser-page-{index:02d}",
+                    "hash": password.hash,
+                    "salt": password.salt,
+                    "name": f"分页同学{index:02d}",
+                    "grade": grade_ids["2026级"],
+                    "admin": admin_id,
+                    "created": "2020-01-01T00:00:00.000Z",
+                },
+            ).scalar_one()
+            db.execute(
+                text("""INSERT INTO roommate_cards(user_id,avatar_url,origin_city,one_sentence_intro,status,
+                  published_at,created_at,updated_at) VALUES(:user,'/assets/avatar-1.png','深圳',
+                  '用于验证查看更多功能','PUBLISHED',:created,:created,:created)"""),
+                {"user": user_id, "created": "2020-01-01T00:00:00.000Z"},
+            )
+
 
 if __name__ == "__main__":
     main()

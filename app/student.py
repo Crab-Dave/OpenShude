@@ -262,28 +262,58 @@ def unpublish_card(request: Request, db: DB) -> None:
 
 @router.get("/roommate-cards")
 def cards(
-    request: Request, db: DB, search: str = "", grade: str = "", availability: str = "", gender: str = ""
+    request: Request,
+    db: DB,
+    search: str = "",
+    grade: str = "",
+    availability: str = "",
+    gender: str = "",
+    limit: Annotated[int, Query(ge=1, le=15)] = 15,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> dict:
     user = current_user(request, db)
     require_user(user)
     selected_gender = gender if gender in ("MALE", "FEMALE") else user["gender"]
+    conditions = [
+        "u.status='ACTIVE'",
+        "u.gender=:gender",
+        "c.status='PUBLISHED'",
+        """NOT EXISTS(SELECT 1 FROM blocks b WHERE (b.blocker_id=:user AND b.blocked_id=u.id)
+        OR (b.blocker_id=u.id AND b.blocked_id=:user))""",
+    ]
+    parameters: dict = {"gender": selected_gender, "user": user["id"]}
+    lowered = search.strip().lower()
+    if lowered:
+        conditions.append("instr(lower(u.name),:search)>0")
+        parameters["search"] = lowered
+    if grade:
+        conditions.append("u.grade=:grade")
+        parameters["grade"] = grade
+    visible_cards = (
+        "SELECT * FROM ("
+        + CARD_SELECT
+        + " WHERE "
+        + " AND ".join(conditions)
+        + ") AS visible_cards"
+    )
+    if availability == "AVAILABLE":
+        visible_cards += " WHERE team_member_count<4"
+    total = one(db, f"SELECT COUNT(*) AS total FROM ({visible_cards}) AS matching_cards", parameters)["total"]
     rows = all_rows(
         db,
-        CARD_SELECT
-        + """ WHERE u.status='ACTIVE' AND u.gender=:gender AND c.status='PUBLISHED'
-      AND NOT EXISTS(SELECT 1 FROM blocks b WHERE (b.blocker_id=:user AND b.blocked_id=u.id)
-        OR (b.blocker_id=u.id AND b.blocked_id=:user)) ORDER BY c.updated_at DESC""",
-        {"gender": selected_gender, "user": user["id"]},
+        visible_cards
+        + """ ORDER BY CASE WHEN user_id=:user THEN 0 ELSE 1 END,updated_at DESC,id DESC
+      LIMIT :limit OFFSET :offset""",
+        {**parameters, "limit": limit, "offset": offset},
     )
-    lowered = search.strip().lower()
-    result = [{**card_for_student(card, user["id"]), "is_own": card["user_id"] == user["id"]} for card in rows]
-    if lowered:
-        result = [card for card in result if lowered in card["name"].lower()]
-    if grade:
-        result = [card for card in result if card["grade"] == grade]
-    if availability == "AVAILABLE":
-        result = [card for card in result if card["team_member_count"] < 4]
-    return {"cards": result, "total": len(result)}
+    grades = all_rows(
+        db,
+        "SELECT name FROM grades WHERE status='ACTIVE' ORDER BY name DESC",
+    )
+    result = [
+        {**card_for_student(card, user["id"]), "is_own": card["user_id"] == user["id"]} for card in rows
+    ]
+    return {"cards": result, "total": total, "grades": [item["name"] for item in grades]}
 
 
 @router.get("/roommate-cards/{card_id}")

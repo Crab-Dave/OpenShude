@@ -45,6 +45,39 @@ def test_auth_security_and_card_contract(client):
     assert "frame-ancestors 'none'" in headers["content-security-policy"]
 
 
+def test_roommate_cards_are_loaded_in_batches_of_fifteen(client):
+    with SessionLocal.begin() as db:
+        for index in range(20):
+            user_id = db.execute(
+                text("""INSERT INTO users(login_identifier,password_hash,password_salt,role,account_type,
+                  authorization_version,must_change_password,name,grade,grade_id,gender,major,status,created_at,updated_at)
+                  SELECT :login,password_hash,password_salt,role,account_type,authorization_version,
+                  must_change_password,:name,grade,grade_id,gender,major,status,created_at,updated_at
+                  FROM users WHERE id=3 RETURNING id"""),
+                {"login": f"page-{index:02d}", "name": f"分页用户{index:02d}"},
+            ).scalar_one()
+            db.execute(
+                text("""INSERT INTO roommate_cards(user_id,avatar_url,origin_city,one_sentence_intro,status,
+                  published_at,created_at,updated_at)
+                  VALUES(:user,'/assets/avatar-1.png','深圳','分页测试卡片','PUBLISHED',:now,:now,:now)"""),
+                {"user": user_id, "now": now()},
+            )
+
+    login(client, "2026001")
+    filters = {"gender": "FEMALE", "availability": "ALL", "search": "分页用户"}
+    first = client.get("/api/roommate-cards", params=filters).json()
+    second = client.get("/api/roommate-cards", params={**filters, "offset": 15}).json()
+
+    assert first["total"] == second["total"] == 20
+    assert len(first["cards"]) == 15
+    assert len(second["cards"]) == 5
+    assert {card["id"] for card in first["cards"]}.isdisjoint(card["id"] for card in second["cards"])
+    assert first["grades"] == ["2026级", "2025级"]
+    oversized = client.get("/api/roommate-cards", params={**filters, "limit": 16})
+    assert oversized.status_code == 400
+    assert oversized.json()["error"]["code"] == "INVALID_REQUEST"
+
+
 def test_existing_session_csrf_body_limit_host_and_login_rate_limit(client):
     raw_token = "existing-node-session-token"
     with SessionLocal.begin() as db:

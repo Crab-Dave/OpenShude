@@ -469,8 +469,10 @@ async function renderDiscover() {
   params.set('gender', state.gender);
   if (state.search) params.set('search', state.search);
   if (state.grade) params.set('grade', state.grade);
-  const { cards } = await api(`/api/roommate-cards?${params}`);
-  const grades = [...new Set(cards.map((card) => card.grade))];
+  const firstPage = await api(`/api/roommate-cards?${params}`);
+  const cards = firstPage.cards;
+  let total = firstPage.total;
+  const grades = firstPage.grades;
   setPage(`
     <div class="toolbar">
       <div class="segmented" aria-label="性别分页"><button data-gender="FEMALE" class="${state.gender === 'FEMALE' ? 'active' : ''}">女生</button><button data-gender="MALE" class="${state.gender === 'MALE' ? 'active' : ''}">男生</button></div>
@@ -478,7 +480,7 @@ async function renderDiscover() {
       <select id="grade-filter" aria-label="年级筛选"><option value="">全部年级</option>${grades.map((grade) => `<option ${state.grade === grade ? 'selected' : ''}>${escapeHtml(grade)}</option>`).join('')}</select>
       <div class="segmented"><button data-availability="AVAILABLE" class="${state.availability === 'AVAILABLE' ? 'active' : ''}">可组队</button><button data-availability="ALL" class="${state.availability === 'ALL' ? 'active' : ''}">全部</button></div>
     </div>
-    ${cards.length ? `<div class="roommate-grid">${cards.map(roommateCard).join('')}</div>` : emptyState('users-round', '没有匹配的室友卡片', '调整筛选条件后再试试')}`);
+    ${cards.length ? `<div class="roommate-grid">${cards.map(roommateCard).join('')}</div>${cards.length < total ? `<div class="load-more"><button class="btn btn-secondary" id="load-more-cards">${icon('chevrons-down')}查看更多</button></div>` : ''}` : emptyState('users-round', '没有匹配的室友卡片', '调整筛选条件后再试试')}`);
   document.querySelector('#search-form').addEventListener('submit', (event) => {
     event.preventDefault(); state.search = new FormData(event.currentTarget).get('search').trim(); renderDiscover();
   });
@@ -487,10 +489,36 @@ async function renderDiscover() {
     state.gender = button.dataset.gender; state.grade = ''; renderDiscover();
   }));
   document.querySelectorAll('[data-availability]').forEach((button) => button.addEventListener('click', () => { state.availability = button.dataset.availability; renderDiscover(); }));
-  document.querySelectorAll('[data-card-id]').forEach((card) => {
-    const open = () => showCardDetail(Number(card.dataset.cardId));
-    card.addEventListener('click', open);
-    card.addEventListener('keydown', (event) => { if (event.key === 'Enter') open(); });
+  const grid = document.querySelector('.roommate-grid');
+  grid?.addEventListener('click', (event) => {
+    const card = event.target.closest('[data-card-id]');
+    if (card) showCardDetail(Number(card.dataset.cardId));
+  });
+  grid?.addEventListener('keydown', (event) => {
+    const card = event.target.closest('[data-card-id]');
+    if (card && event.key === 'Enter') showCardDetail(Number(card.dataset.cardId));
+  });
+  document.querySelector('#load-more-cards')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.innerHTML = `${icon('loader-circle')}加载中`;
+    refreshIcons();
+    try {
+      params.set('offset', String(cards.length));
+      const nextPage = await api(`/api/roommate-cards?${params}`);
+      cards.push(...nextPage.cards);
+      total = nextPage.total;
+      grid.insertAdjacentHTML('beforeend', nextPage.cards.map(roommateCard).join(''));
+      refreshIcons();
+      if (!nextPage.cards.length || cards.length >= total) button.closest('.load-more').remove();
+      else button.innerHTML = `${icon('chevrons-down')}查看更多`;
+    } catch (error) {
+      button.innerHTML = `${icon('chevrons-down')}查看更多`;
+      toast(error.message, 'error');
+    } finally {
+      button.disabled = false;
+      refreshIcons();
+    }
   });
 }
 

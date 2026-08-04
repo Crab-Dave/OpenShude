@@ -249,6 +249,8 @@ input:disabled { color: #62586d; background: #f0edf4; cursor: not-allowed; }
 .segmented button.active { color: var(--primary-dark); background: var(--primary-soft); font-weight: 700; }
 
 .roommate-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.load-more { display: flex; justify-content: center; margin-top: 18px; }
+.load-more .btn { min-width: 112px; }
 .roommate-card {
   position: relative;
   min-width: 0;
