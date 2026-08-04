@@ -96,6 +96,20 @@ def test_static_page_migration_removes_existing_database_content(tmp_path, monke
         )
 
 
+def test_validation_reports_missing_constrained_tables_once(tmp_path, monkeypatch):
+    database_path = tmp_path / "missing-table.db"
+    monkeypatch.setenv("DB_PATH", str(database_path))
+    get_settings.cache_clear()
+    command.upgrade(Config("alembic.ini"), "head")
+    with sqlite3.connect(database_path) as database:
+        database.execute("DROP TABLE reports")
+
+    with pytest.raises(RuntimeError) as validation_error:
+        validate_database(database_path)
+    assert '"reports"' in str(validation_error.value)
+    assert "reports:" not in str(validation_error.value)
+
+
 def test_fresh_production_database_bootstrap(tmp_path, monkeypatch):
     database_path = tmp_path / "fresh-production.db"
     monkeypatch.setenv("DB_PATH", str(database_path))
