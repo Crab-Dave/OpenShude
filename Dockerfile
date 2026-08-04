@@ -21,9 +21,8 @@ COPY public ./public
 COPY scripts/build_static_pages.py ./scripts/build_static_pages.py
 COPY templates ./templates
 
-RUN python scripts/build_static_pages.py
-
-RUN groupadd --gid 1000 app && \
+RUN python scripts/build_static_pages.py && \
+    groupadd --gid 1000 app && \
     useradd --uid 1000 --gid 1000 --create-home app && \
     mkdir -p /app/data /app/backups && \
     chown -R app:app /app

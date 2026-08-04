@@ -1,6 +1,8 @@
 const app = document.querySelector('#app');
 const modalRoot = document.querySelector('#modal-root');
 const toastRoot = document.querySelector('#toast-root');
+const API_PATH_CHARACTERS = 'abcdefghijklmnopqrstuvwxyz0123456789-';
+const API_QUERY_CHARACTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~%=&+*';
 
 const state = {
   user: null,
@@ -76,10 +78,17 @@ function toast(message, kind = 'success') {
 }
 
 async function api(path, options = {}) {
+  const [pathname, query, ...extraParts] = typeof path === 'string' ? path.split('?') : [];
+  const pathSegments = pathname?.startsWith('/api/') ? pathname.slice(5).split('/') : [];
+  const validPath = pathSegments.length > 0 && pathSegments.every((segment) => segment && [...segment].every((character) => API_PATH_CHARACTERS.includes(character)));
+  const validQuery = query === undefined || [...query].every((character) => API_QUERY_CHARACTERS.includes(character));
+  if (!validPath || !validQuery || extraParts.length) throw new Error('接口地址无效');
+  const requestUrl = new URL(path, window.location.origin);
+  if (requestUrl.origin !== window.location.origin) throw new Error('接口地址无效');
   const headers = { ...(options.headers || {}) };
   if (options.body !== undefined) headers['Content-Type'] = 'application/json';
   if (state.csrfToken && !['GET', 'HEAD'].includes(options.method || 'GET')) headers['X-CSRF-Token'] = state.csrfToken;
-  const response = await fetch(path, { credentials: 'same-origin', ...options, headers });
+  const response = await fetch(requestUrl, { credentials: 'same-origin', ...options, headers });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     if (response.status === 401 && state.user) {
@@ -366,7 +375,7 @@ async function logout() {
   state.user = null;
   state.csrfToken = '';
   closeModal();
-  await goHome();
+  goHome();
 }
 
 function showRequiredPasswordChange(continueToSystem = true) {
@@ -381,7 +390,7 @@ function showRequiredPasswordChange(continueToSystem = true) {
       closeModal();
       toast('密码已更新');
       if (continueToSystem) await enterRoommateSystem();
-      else await goHome();
+      else goHome();
     } catch (error) { toast(error.message, 'error'); }
   });
 }

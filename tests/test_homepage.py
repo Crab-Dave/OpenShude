@@ -34,6 +34,8 @@ def test_application_routes_use_the_login_application_and_unknown_pages_are_404(
     login_page = client.get("/login")
     roommate_page = client.get("/roommates")
 
-    assert login_page.status_code == 200 and "/app.js" in login_page.text
-    assert roommate_page.status_code == 200 and "/app.js" in roommate_page.text
+    assert login_page.status_code == 200
+    assert "/app.js" in login_page.text
+    assert roommate_page.status_code == 200
+    assert "/app.js" in roommate_page.text
     assert client.get("/page-that-does-not-exist").status_code == 404

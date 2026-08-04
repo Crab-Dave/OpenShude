@@ -62,6 +62,14 @@ let browser;
   await desktop.locator('.site-nav a[href="/roommates"]').click();
   await desktop.waitForSelector('.app-shell');
   await desktop.waitForSelector('.roommate-card');
+  assert.equal(await desktop.evaluate(async () => {
+    try {
+      await api('https://example.com/api/users');
+      return false;
+    } catch (error) {
+      return error.message === '接口地址无效';
+    }
+  }), true);
   assert.equal(await desktop.locator('.roommate-card').count(), 6);
   assert.equal(await desktop.locator('[data-gender]').count(), 2);
   assert.match(await desktop.locator('[data-gender="FEMALE"]').getAttribute('class'), /active/);
