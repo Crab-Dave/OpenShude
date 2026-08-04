@@ -146,7 +146,7 @@ def validate_database(filename: Path) -> dict:
         "dormitory_members",
         "dormitory_result_snapshots",
         "alembic_version",
-    }
+    } | set(REQUIRED_CHECKS)
     with closing(sqlite3.connect(filename)) as database:
         database.row_factory = sqlite3.Row
         quick_check = [row[0] for row in database.execute(QUICK_CHECK)]
@@ -160,7 +160,7 @@ def validate_database(filename: Path) -> dict:
             f"{table}: {condition}"
             for table, conditions in REQUIRED_CHECKS.items()
             for condition in conditions
-            if re.sub(r"\s+", "", condition).upper() not in table_sql.get(table, "")
+            if table in tables and re.sub(r"\s+", "", condition).upper() not in table_sql[table]
         ]
         open_rounds = database.execute(
             "SELECT COUNT(*) FROM dormitory_selection_rounds WHERE status='OPEN'"
