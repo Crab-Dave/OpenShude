@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 from sqlalchemy import text
 
+from app.auth import _login_failures
 from app.common import now
 from app.database import SessionLocal
 from tests.conftest import login
@@ -109,6 +110,43 @@ def test_existing_session_csrf_body_limit_host_and_login_rate_limit(client):
     )
     limited = anonymous.post("/api/auth/login", json={"loginIdentifier": "missing", "password": "bad"})
     assert limited.status_code == 429
+
+
+def test_login_rate_limits_cover_ip_and_identifier_and_missing_users_use_scrypt(client, monkeypatch):
+    import app.auth as auth_module
+
+    real_verify = auth_module.verify_password
+    dummy_verifications = []
+
+    def tracked_verify(password, salt, expected_hash):
+        dummy_verifications.append((salt, expected_hash))
+        return real_verify(password, salt, expected_hash)
+
+    monkeypatch.setattr(auth_module, "verify_password", tracked_verify)
+    missing = TestClient(client.app, client=("198.51.100.1", 50000))
+    assert missing.post("/api/auth/login", json={"loginIdentifier": "missing", "password": "bad"}).status_code == 401
+    assert dummy_verifications[-1] == (auth_module._dummy_password.salt, auth_module._dummy_password.hash)
+
+    _login_failures.clear()
+    shared_ip = TestClient(client.app, client=("198.51.100.2", 50000))
+    for index in range(30):
+        response = shared_ip.post("/api/auth/login", json={"loginIdentifier": f"missing-{index}", "password": "bad"})
+        assert response.status_code == 401
+    blocked_ip = shared_ip.post("/api/auth/login", json={"loginIdentifier": "2026001", "password": "Student123!"})
+    assert blocked_ip.status_code == 429
+
+    _login_failures.clear()
+    for index in range(10):
+        source = TestClient(client.app, client=(f"203.0.113.{index + 1}", 50000))
+        assert (
+            source.post("/api/auth/login", json={"loginIdentifier": "2026001", "password": "incorrect"}).status_code
+            == 401
+        )
+    new_source = TestClient(client.app, client=("203.0.113.100", 50000))
+    blocked_identifier = new_source.post(
+        "/api/auth/login", json={"loginIdentifier": "2026001", "password": "Student123!"}
+    )
+    assert blocked_identifier.status_code == 429
 
 
 def test_messaging_blocking_and_reports(client):
