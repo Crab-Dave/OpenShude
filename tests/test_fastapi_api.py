@@ -1,4 +1,5 @@
 import hashlib
+import json
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
@@ -161,6 +162,36 @@ def test_dormitory_workflow_and_same_gender(client):
     assert client.post("/api/me/dormitory/leave").status_code == 200
     with SessionLocal() as db:
         assert db.execute(text("SELECT COUNT(*) FROM dormitories")).scalar_one() == 0
+
+
+def test_student_round_results_only_include_own_dormitory(client):
+    login(client, "2026001")
+    own_dormitory = client.post("/api/dormitories", json={"name": "我的宿舍"}).json()["dormitory"]
+    other_student = TestClient(client.app)
+    login(other_student, "2026002")
+    other_dormitory = other_student.post("/api/dormitories", json={"name": "其他宿舍"}).json()["dormitory"]
+
+    current_results = client.get("/api/dormitory-rounds/1/results")
+    assert current_results.status_code == 200
+    assert [item["id"] for item in current_results.json()["dormitories"]] == [own_dormitory["id"]]
+    assert other_dormitory["id"] not in {item["id"] for item in current_results.json()["dormitories"]}
+
+    admin = TestClient(client.app)
+    login(admin, "admin", "Admin123!")
+    assert admin.post("/api/admin/dormitory-rounds/1/close", json={"reason": "测试归档"}).status_code == 200
+    assert admin.post("/api/admin/dormitory-rounds/1/archive", json={"reason": "测试归档"}).status_code == 200
+
+    archived_results = client.get("/api/dormitory-rounds/1/results")
+    assert archived_results.status_code == 200
+    payload = archived_results.json()
+    assert [item["id"] for item in payload["dormitories"]] == [own_dormitory["id"]]
+    assert "login_identifier" not in json.dumps(payload)
+
+    with SessionLocal.begin() as db:
+        db.execute(text("DELETE FROM dormitory_round_participants WHERE round_id=1 AND user_id=8"))
+    nonparticipant = TestClient(client.app)
+    login(nonparticipant, "2026007")
+    assert nonparticipant.get("/api/dormitory-rounds/1/results").status_code == 404
 
 
 def test_admin_rounds_scoped_permissions_and_export(client):

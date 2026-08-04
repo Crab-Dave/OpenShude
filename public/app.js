@@ -861,7 +861,7 @@ async function renderDormitoryHistory() {
   document.querySelectorAll('[data-view-round-result]').forEach((button) => button.addEventListener('click', async () => {
     try {
       const { round, dormitories } = await api(`/api/dormitory-rounds/${button.dataset.viewRoundResult}/results`);
-      const ownDormitory = dormitories.find((dormitory) => dormitory.members.some((member) => member.user_id === state.user.id || member.login_identifier === state.user.loginIdentifier));
+      const ownDormitory = dormitories[0] || null;
       const target = document.querySelector('#round-result');
       target.innerHTML = `<div class="section-heading history-result-heading"><div><h2>${escapeHtml(round.name)}的结果</h2><p>${round.status === 'ARCHIVED' ? '以下内容来自归档时生成的不可变快照' : '该轮次尚未归档，展示当前结果'}</p></div></div>${ownDormitory ? dormitoryListMarkup([ownDormitory], ownDormitory, false) : emptyState('bed-double', '本轮没有宿舍结果', '你在该轮次中没有加入宿舍')}`;
       refreshIcons();

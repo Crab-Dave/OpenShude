@@ -136,6 +136,55 @@ def archived_results(db: Session, round_id: int) -> list[dict]:
     return dormitories
 
 
+def archived_result_for_student(db: Session, round_id: int, user_id: int) -> list[dict]:
+    dormitory = one(
+        db,
+        """SELECT s.source_dormitory_id AS id,s.dormitory_code,s.dormitory_name AS name,
+      s.building,s.room_number,s.capacity,s.dormitory_status AS status,
+      s.initiator_user_id AS initiator_id,s.initiator_name_snapshot AS initiator_name,
+      viewer.member_role AS current_user_role,
+      (SELECT COUNT(*) FROM dormitory_result_members WHERE snapshot_id=s.id) AS member_count,
+      s.id AS snapshot_id FROM dormitory_result_snapshots s
+      JOIN dormitory_result_members viewer ON viewer.snapshot_id=s.id
+      WHERE s.selection_round_id=:round AND viewer.source_user_id=:user""",
+        {"round": round_id, "user": user_id},
+    )
+    if not dormitory:
+        return []
+    dormitory["members"] = all_rows(
+        db,
+        """SELECT source_user_id AS user_id,name_snapshot AS name,grade_snapshot AS grade,
+      member_role AS role,joined_at FROM dormitory_result_members
+      WHERE snapshot_id=:snapshot ORDER BY joined_at,source_user_id""",
+        {"snapshot": dormitory.pop("snapshot_id")},
+    )
+    return [dormitory]
+
+
+def current_result_for_student(db: Session, round_id: int, user_id: int) -> list[dict]:
+    dormitory = one(
+        db,
+        """SELECT d.id,d.dormitory_code,d.name,d.building,d.room_number,d.capacity,d.status,
+      d.initiator_id,u.name AS initiator_name,viewer.role AS current_user_role,
+      (SELECT COUNT(*) FROM dormitory_members WHERE dormitory_id=d.id) AS member_count
+      FROM dormitories d JOIN dormitory_members viewer ON viewer.dormitory_id=d.id
+      JOIN users u ON u.id=d.initiator_id
+      WHERE d.selection_round_id=:round AND viewer.user_id=:user""",
+        {"round": round_id, "user": user_id},
+    )
+    if not dormitory:
+        return []
+    dormitory["members"] = all_rows(
+        db,
+        """SELECT dm.user_id,u.name,u.grade,dm.role,dm.joined_at,c.avatar_url
+      FROM dormitory_members dm JOIN users u ON u.id=dm.user_id
+      LEFT JOIN roommate_cards c ON c.user_id=u.id
+      WHERE dm.dormitory_id=:dormitory ORDER BY dm.joined_at,dm.user_id""",
+        {"dormitory": dormitory["id"]},
+    )
+    return [dormitory]
+
+
 def generate_snapshot(db: Session, round_id: int) -> int:
     timestamp = now()
     db.execute(text("DELETE FROM dormitory_result_snapshots WHERE selection_round_id=:round"), {"round": round_id})
@@ -297,14 +346,9 @@ def round_results(round_id: int, request: Request, db: DB) -> dict:
     require_user(user)
     round_row = student_round(db, user["id"], round_id)
     dormitories = (
-        archived_results(db, round_id)
+        archived_result_for_student(db, round_id, user["id"])
         if round_row["status"] == "ARCHIVED"
-        else [
-            dormitory_details(db, row["id"], user["id"])
-            for row in all_rows(
-                db, "SELECT id FROM dormitories WHERE selection_round_id=:round ORDER BY id", {"round": round_id}
-            )
-        ]
+        else current_result_for_student(db, round_id, user["id"])
     )
     return {"round": round_row, "dormitories": dormitories}
 
