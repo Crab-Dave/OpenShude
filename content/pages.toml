@@ -2,7 +2,7 @@
 slug = "home"
 route = "/"
 title = "首页"
-description = "合住校内室友双选系统"
+description = "树德岛哩 - 南方科技大学树德书院的赛博小天地"
 source = "pages/home/content.md"
 show_in_navigation = true
 order = 10
