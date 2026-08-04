@@ -284,6 +284,80 @@ def test_imported_user_must_change_temporary_password(client):
     assert student.get("/api/roommate-cards", params={"gender": "FEMALE"}).status_code == 200
 
 
+def test_super_admin_password_reset_revokes_sessions_and_requires_password_change(client):
+    student = TestClient(client.app)
+    login(student, "2026002")
+    login(client, "admin", "Admin123!")
+
+    missing_reason = client.post("/api/admin/users/3/password-reset", json={})
+    assert missing_reason.status_code == 400
+    assert missing_reason.json()["error"]["code"] == "FIELD_REQUIRED"
+    own_account = client.post("/api/admin/users/1/password-reset", json={"reason": "不能重置自己"})
+    assert own_account.status_code == 403
+    assert own_account.json()["error"]["code"] == "SELF_PASSWORD_RESET_FORBIDDEN"
+
+    reset = client.post("/api/admin/users/3/password-reset", json={"reason": "学生忘记密码"})
+    assert reset.status_code == 200
+    assert reset.json() == {"ok": True}
+    assert student.get("/api/me").status_code == 401
+    assert (
+        student.post("/api/auth/login", json={"loginIdentifier": "2026002", "password": "Student123!"}).status_code
+        == 401
+    )
+    session = login(student, "2026002", "2026002")
+    assert session["user"]["mustChangePassword"] is True
+    assert student.get("/api/roommate-cards", params={"gender": "FEMALE"}).status_code == 403
+    changed = student.patch(
+        "/api/me/password",
+        json={"currentPassword": "2026002", "newPassword": "ResetPassword123!"},
+    )
+    assert changed.status_code == 200
+
+    with SessionLocal() as db:
+        audit_row = db.execute(
+            text("""SELECT reason,permission_code,scope_type,metadata,before_snapshot,after_snapshot
+              FROM audit_logs WHERE action='RESET_USER_PASSWORD'""")
+        ).one()
+        assert audit_row[0:3] == ("学生忘记密码", "SUPER_ADMIN", "")
+        audit_snapshots = "".join(audit_row[3:])
+        assert "2026002" not in audit_snapshots
+        assert "Student123!" not in audit_snapshots
+        assert "password_hash" not in audit_snapshots
+
+
+def test_scoped_admin_can_only_reset_passwords_in_authorized_grades(client):
+    login(client, "admin", "Admin123!")
+    group = client.post("/api/admin/admin-groups", json={"code": "PASSWORD_2026", "name": "2026 密码重置"}).json()[
+        "group"
+    ]
+    for section, body in (
+        ("permissions", {"permissions": ["USER_READ", "USER_PASSWORD_RESET"]}),
+        ("scopes", {"gradeIds": [1]}),
+        ("members", {"userIds": [2, 7]}),
+    ):
+        assert client.put(f"/api/admin/admin-groups/{group['id']}/{section}", json=body).status_code == 200
+
+    scoped = TestClient(client.app)
+    login(scoped, "2026001")
+    self_reset = scoped.post("/api/admin/users/2/password-reset", json={"reason": "不能重置自己"})
+    assert self_reset.status_code == 403
+    assert self_reset.json()["error"]["code"] == "SELF_PASSWORD_RESET_FORBIDDEN"
+    protected_admin = scoped.post("/api/admin/users/7/password-reset", json={"reason": "不能重置其他管理员"})
+    assert protected_admin.status_code == 403
+    assert protected_admin.json()["error"]["code"] == "PROTECTED_ADMIN_ACCOUNT"
+    assert scoped.post("/api/admin/users/4/password-reset", json={"reason": "超出年级"}).status_code == 404
+    assert scoped.post("/api/admin/users/3/password-reset", json={"reason": "授权范围内"}).status_code == 200
+
+    student = TestClient(client.app)
+    assert login(student, "2026002", "2026002")["user"]["mustChangePassword"] is True
+    with SessionLocal() as db:
+        grant = db.execute(
+            text("""SELECT permission_code,scope_type,scope_value FROM audit_logs
+              WHERE action='RESET_USER_PASSWORD'""")
+        ).one()
+        assert grant == ("USER_PASSWORD_RESET", "GRADE", "1")
+
+
 def test_batch_update_login_identifiers_is_atomic_and_revokes_sessions(client):
     first_student = TestClient(client.app)
     login(first_student, "2026001")

@@ -14,6 +14,7 @@ PERMISSIONS = {
     "USER_IMPORT": "导入普通用户",
     "USER_EXPORT": "导出用户信息",
     "USER_LOGIN_IDENTIFIER_UPDATE": "批量修改登录标识",
+    "USER_PASSWORD_RESET": "重置用户密码",
     "USER_IDENTITY_UPDATE": "修改用户身份信息",
     "USER_STATUS_UPDATE": "修改用户状态",
     "CARD_READ": "查看卡片",

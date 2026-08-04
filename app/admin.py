@@ -607,6 +607,46 @@ def protected_account(db: Session, admin: dict, account: dict) -> None:
         raise ApiError(403, "PROTECTED_ADMIN_ACCOUNT", "组管理员不能修改自己或其他管理员账号")
 
 
+@router.post("/users/{user_id}/password-reset")
+def reset_user_password(user_id: int, request: Request, body: dict, db: DB) -> dict:
+    admin = admin_user(request, db)
+    reason = clean_text(body.get("reason"), 200, True)
+    begin_immediate(db)
+    account = one(db, USER_BY_ID, {"id": user_id})
+    if not account:
+        raise ApiError(404, "USER_NOT_FOUND", USER_NOT_FOUND_MESSAGE)
+    if account["id"] == admin["id"]:
+        raise ApiError(403, "SELF_PASSWORD_RESET_FORBIDDEN", "请在账号设置中修改自己的密码")
+    protected_account(db, admin, account)
+    grant = (
+        require_super_admin(admin)
+        if admin["account_type"] == "SUPER_ADMIN"
+        else authorize(db, admin, "USER_PASSWORD_RESET", account["grade_id"])
+    )
+    password = hash_password(account["login_identifier"])
+    db.execute(
+        text("""UPDATE users SET password_hash=:hash,password_salt=:salt,must_change_password=1,
+      updated_at=:now WHERE id=:id"""),
+        {"hash": password.hash, "salt": password.salt, "now": now(), "id": account["id"]},
+    )
+    revoked_sessions = db.execute(text("DELETE FROM sessions WHERE user_id=:id"), {"id": account["id"]}).rowcount
+    audit(
+        db,
+        admin,
+        request,
+        "RESET_USER_PASSWORD",
+        "USER",
+        account["id"],
+        reason,
+        metadata={"sessionsRevoked": revoked_sessions},
+        grant=grant,
+        before={"mustChangePassword": bool(account["must_change_password"])},
+        after={"mustChangePassword": True},
+    )
+    db.commit()
+    return {"ok": True}
+
+
 @router.patch("/users/login-identifiers")
 def update_login_identifiers(request: Request, body: dict, db: DB) -> dict:
     admin = admin_user(request, db)
