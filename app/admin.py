@@ -259,44 +259,6 @@ def create_admin_group(request: Request, body: dict, db: DB) -> dict:
     return {"group": group_details(db, one(db, ADMIN_GROUP_BY_ID, {"id": result.lastrowid}))}
 
 
-@router.patch("/admin-groups/{group_id}")
-def update_admin_group(group_id: int, request: Request, body: dict, db: DB) -> dict:
-    admin = admin_user(request, db)
-    grant = require_super_admin(admin)
-    before = one(db, ADMIN_GROUP_BY_ID, {"id": group_id})
-    if not before:
-        raise ApiError(404, "ADMIN_GROUP_NOT_FOUND", "管理员组不存在")
-    name = clean_text(body.get("name"), 80, True)
-    description = clean_text(body.get("description"), 500)
-    status = body.get("status")
-    if status not in ("ACTIVE", "DISABLED"):
-        raise ApiError(400, "INVALID_GROUP_STATUS", "管理员组状态无效")
-    db.execute(
-        text("UPDATE admin_groups SET name=:name,description=:description,status=:status,updated_at=:now WHERE id=:id"),
-        {"name": name, "description": description, "status": status, "now": now(), "id": group_id},
-    )
-    db.execute(
-        text("""UPDATE users SET authorization_version=authorization_version+1
-      WHERE id IN(SELECT user_id FROM admin_group_members WHERE group_id=:id)"""),
-        {"id": group_id},
-    )
-    after = one(db, ADMIN_GROUP_BY_ID, {"id": group_id})
-    audit(
-        db,
-        admin,
-        request,
-        "UPDATE_ADMIN_GROUP",
-        "ADMIN_GROUP",
-        group_id,
-        clean_text(body.get("reason"), 200),
-        grant=grant,
-        before=before,
-        after=after,
-    )
-    db.commit()
-    return {"group": group_details(db, after)}
-
-
 def configure_group_permissions(db: Session, group_id: int, body: dict, admin_id: int) -> tuple[list, list]:
     supplied = body.get("permissions")
     values = sorted(set(supplied)) if isinstance(supplied, list) else []
@@ -378,41 +340,43 @@ def configure_group_members(db: Session, group_id: int, body: dict, admin_id: in
     return before, values
 
 
-@router.put("/admin-groups/{group_id}/{section}")
-def configure_admin_group(group_id: int, section: str, request: Request, body: dict, db: DB) -> dict:
-    if section not in ("permissions", "scopes", "members"):
-        raise ApiError(404, "NOT_FOUND", NOT_FOUND_MESSAGE)
+@router.put("/admin-groups/{group_id}")
+def configure_admin_group(group_id: int, request: Request, body: dict, db: DB) -> dict:
     admin = admin_user(request, db)
     grant = require_super_admin(admin)
-    if not one(db, "SELECT 1 AS found FROM admin_groups WHERE id=:id", {"id": group_id}):
-        raise ApiError(404, "ADMIN_GROUP_NOT_FOUND", "管理员组不存在")
+    name = clean_text(body.get("name"), 80, True)
+    description = clean_text(body.get("description"), 500)
+    status = body.get("status")
+    reason = clean_text(body.get("reason"), 200, True)
+    if status not in ("ACTIVE", "DISABLED"):
+        raise ApiError(400, "INVALID_GROUP_STATUS", "管理员组状态无效")
     begin_immediate(db)
-    if section == "permissions":
-        before, values = configure_group_permissions(db, group_id, body, admin["id"])
-    elif section == "scopes":
-        before, values = configure_group_scopes(db, group_id, body, admin["id"])
-    else:
-        before, values = configure_group_members(db, group_id, body, admin["id"])
-    if section != "members":
-        db.execute(
-            text("""UPDATE users SET authorization_version=authorization_version+1
-          WHERE id IN(SELECT user_id FROM admin_group_members WHERE group_id=:id)"""),
-            {"id": group_id},
-        )
+    group = one(db, ADMIN_GROUP_BY_ID, {"id": group_id})
+    if not group:
+        raise ApiError(404, "ADMIN_GROUP_NOT_FOUND", "管理员组不存在")
+    before = group_details(db, group)
+    configure_group_permissions(db, group_id, body, admin["id"])
+    configure_group_scopes(db, group_id, body, admin["id"])
+    configure_group_members(db, group_id, body, admin["id"])
+    db.execute(
+        text("UPDATE admin_groups SET name=:name,description=:description,status=:status,updated_at=:now WHERE id=:id"),
+        {"name": name, "description": description, "status": status, "now": now(), "id": group_id},
+    )
+    after = group_details(db, one(db, ADMIN_GROUP_BY_ID, {"id": group_id}))
     audit(
         db,
         admin,
         request,
-        f"UPDATE_ADMIN_GROUP_{section.upper()}",
+        "UPDATE_ADMIN_GROUP",
         "ADMIN_GROUP",
         group_id,
-        clean_text(body.get("reason"), 200),
+        reason,
         grant=grant,
-        before={"values": before},
-        after={"values": values},
+        before=before,
+        after=after,
     )
     db.commit()
-    return {"group": group_details(db, one(db, ADMIN_GROUP_BY_ID, {"id": group_id}))}
+    return {"group": after}
 
 
 @router.get("/users")

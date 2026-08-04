@@ -1368,10 +1368,15 @@ function showConfigureAdminGroup(group) {
     const reason = form.reason.value;
     const selected = (name) => [...form.querySelectorAll(`[name="${name}"]:checked`)].map((item) => item.value);
     try {
-      await api(`/api/admin/admin-groups/${group.id}`, { method: 'PATCH', body: JSON.stringify({ name: form.name.value, description: form.description.value, status: form.status.value, reason }) });
-      await api(`/api/admin/admin-groups/${group.id}/scopes`, { method: 'PUT', body: JSON.stringify({ gradeIds: selected('gradeIds').map(Number), reason }) });
-      await api(`/api/admin/admin-groups/${group.id}/permissions`, { method: 'PUT', body: JSON.stringify({ permissions: selected('permissions'), reason }) });
-      await api(`/api/admin/admin-groups/${group.id}/members`, { method: 'PUT', body: JSON.stringify({ userIds: selected('userIds').map(Number), reason }) });
+      await api(`/api/admin/admin-groups/${group.id}`, { method: 'PUT', body: JSON.stringify({
+        name: form.name.value,
+        description: form.description.value,
+        status: form.status.value,
+        gradeIds: selected('gradeIds').map(Number),
+        permissions: selected('permissions'),
+        userIds: selected('userIds').map(Number),
+        reason,
+      }) });
       closeModal(); toast('管理员组配置已更新'); await renderAdminAccess();
     } catch (error) { toast(error.message, 'error'); }
   });
