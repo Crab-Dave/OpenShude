@@ -357,16 +357,19 @@ def test_admin_rounds_scoped_permissions_and_export(client):
     users = client.get("/api/admin/users").json()["users"]
     group_admin = next(user for user in users if user["login_identifier"] == "2026001")
     group = client.post("/api/admin/admin-groups", json={"code": "GRADE_2026", "name": "2026 管理"}).json()["group"]
-    for section, body in (
-        (
-            "permissions",
-            {"permissions": ["USER_READ", "USER_EXPORT", "CARD_READ", "DORMITORY_READ", "DORMITORY_EXPORT"]},
-        ),
-        ("scopes", {"gradeIds": [1]}),
-        ("members", {"userIds": [group_admin["id"]]}),
-    ):
-        response = client.put(f"/api/admin/admin-groups/{group['id']}/{section}", json=body)
-        assert response.status_code == 200, response.text
+    response = client.put(
+        f"/api/admin/admin-groups/{group['id']}",
+        json={
+            "name": group["name"],
+            "description": group["description"],
+            "status": "ACTIVE",
+            "permissions": ["USER_READ", "USER_EXPORT", "CARD_READ", "DORMITORY_READ", "DORMITORY_EXPORT"],
+            "gradeIds": [1],
+            "userIds": [group_admin["id"]],
+            "reason": "配置年级管理员",
+        },
+    )
+    assert response.status_code == 200, response.text
 
     scoped = TestClient(client.app)
     login(scoped, "2026001")
@@ -535,12 +538,19 @@ def test_scoped_admin_can_only_reset_passwords_in_authorized_grades(client):
     group = client.post("/api/admin/admin-groups", json={"code": "PASSWORD_2026", "name": "2026 密码重置"}).json()[
         "group"
     ]
-    for section, body in (
-        ("permissions", {"permissions": ["USER_READ", "USER_PASSWORD_RESET"]}),
-        ("scopes", {"gradeIds": [1]}),
-        ("members", {"userIds": [2, 7]}),
-    ):
-        assert client.put(f"/api/admin/admin-groups/{group['id']}/{section}", json=body).status_code == 200
+    configured = client.put(
+        f"/api/admin/admin-groups/{group['id']}",
+        json={
+            "name": group["name"],
+            "description": group["description"],
+            "status": "ACTIVE",
+            "permissions": ["USER_READ", "USER_PASSWORD_RESET"],
+            "gradeIds": [1],
+            "userIds": [2, 7],
+            "reason": "配置密码重置管理员",
+        },
+    )
+    assert configured.status_code == 200
 
     scoped = TestClient(client.app)
     login(scoped, "2026001")
@@ -561,6 +571,66 @@ def test_scoped_admin_can_only_reset_passwords_in_authorized_grades(client):
               WHERE action='RESET_USER_PASSWORD'""")
         ).one()
         assert grant == ("USER_PASSWORD_RESET", "GRADE", "1")
+
+
+def test_admin_group_configuration_is_atomic(client):
+    login(client, "admin", "Admin123!")
+    group = client.post("/api/admin/admin-groups", json={"code": "ATOMIC_GROUP", "name": "原名称"}).json()["group"]
+    endpoint = f"/api/admin/admin-groups/{group['id']}"
+    initial = {
+        "name": "原名称",
+        "description": "原说明",
+        "status": "ACTIVE",
+        "permissions": ["USER_READ"],
+        "gradeIds": [1],
+        "userIds": [2],
+        "reason": "初始配置",
+    }
+    assert client.put(endpoint, json=initial).status_code == 200
+    with SessionLocal() as db:
+        versions_before = dict(db.execute(text("SELECT id,authorization_version FROM users WHERE id IN(2,3)")).all())
+        audits_before = db.execute(
+            text("SELECT COUNT(*) FROM audit_logs WHERE action='UPDATE_ADMIN_GROUP' AND target_id=:target"),
+            {"target": str(group["id"])},
+        ).scalar_one()
+
+    invalid = client.put(
+        endpoint,
+        json={
+            **initial,
+            "name": "不应保存",
+            "permissions": ["USER_EXPORT"],
+            "gradeIds": [9999],
+            "userIds": [3],
+            "reason": "验证整批回滚",
+        },
+    )
+    assert invalid.status_code == 400
+    current = next(item for item in client.get("/api/admin/admin-groups").json()["groups"] if item["id"] == group["id"])
+    assert current["name"] == "原名称"
+    assert current["permissions"] == ["USER_READ"]
+    assert [scope["scope_value"] for scope in current["scopes"]] == ["1"]
+    assert [member["id"] for member in current["members"]] == [2]
+    with SessionLocal() as db:
+        assert (
+            dict(db.execute(text("SELECT id,authorization_version FROM users WHERE id IN(2,3)")).all())
+            == versions_before
+        )
+        assert (
+            db.execute(
+                text("SELECT COUNT(*) FROM audit_logs WHERE action='UPDATE_ADMIN_GROUP' AND target_id=:target"),
+                {"target": str(group["id"])},
+            ).scalar_one()
+            == audits_before
+        )
+
+    updated = client.put(endpoint, json={**initial, "userIds": [3], "reason": "原子替换成员"})
+    assert updated.status_code == 200
+    assert [member["id"] for member in updated.json()["group"]["members"]] == [3]
+    with SessionLocal() as db:
+        versions_after = dict(db.execute(text("SELECT id,authorization_version FROM users WHERE id IN(2,3)")).all())
+        assert versions_after[2] == versions_before[2] + 1
+        assert versions_after[3] == versions_before[3] + 1
 
 
 def test_batch_update_login_identifiers_is_atomic_and_revokes_sessions(client):
@@ -618,12 +688,19 @@ def test_scoped_permissions_cannot_be_combined_across_groups(client):
         group = client.post("/api/admin/admin-groups", json={"code": code, "name": code}).json()["group"]
         assert (
             client.put(
-                f"/api/admin/admin-groups/{group['id']}/permissions", json={"permissions": permissions}
+                f"/api/admin/admin-groups/{group['id']}",
+                json={
+                    "name": group["name"],
+                    "description": group["description"],
+                    "status": "ACTIVE",
+                    "permissions": permissions,
+                    "gradeIds": grades,
+                    "userIds": [2],
+                    "reason": "测试权限不可跨组拼接",
+                },
             ).status_code
             == 200
         )
-        assert client.put(f"/api/admin/admin-groups/{group['id']}/scopes", json={"gradeIds": grades}).status_code == 200
-        assert client.put(f"/api/admin/admin-groups/{group['id']}/members", json={"userIds": [2]}).status_code == 200
 
     scoped = TestClient(client.app)
     login(scoped, "2026001")
