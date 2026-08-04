@@ -705,10 +705,11 @@ async function renderMessages() {
 async function chatMarkup(conversationId, conversations) {
   const conversation = conversations.find((item) => item.id === conversationId);
   if (!conversation) return emptyState('message-circle', '会话不存在', '请选择其他会话');
-  let messages;
+  let messagePage;
   try {
-    ({ messages } = await api(`/api/conversations/${conversationId}/messages`));
-    await api(`/api/conversations/${conversationId}/read`, { method: 'POST', body: '{}' });
+    messagePage = await api(`/api/conversations/${conversationId}/messages`);
+    const lastMessageId = messagePage.messages.at(-1)?.id;
+    if (lastMessageId) await api(`/api/conversations/${conversationId}/read`, { method: 'POST', body: JSON.stringify({ lastMessageId }) });
   } catch (error) {
     if (error.code === 'CONVERSATION_NOT_FOUND' || error.status === 404) {
       state.selectedConversationId = null;
@@ -717,9 +718,10 @@ async function chatMarkup(conversationId, conversations) {
     }
     throw error;
   }
+  const { messages, hasMore, nextBeforeId } = messagePage;
   return `
     <header class="chat-head"><button class="btn btn-quiet icon-btn only-mobile" data-chat-back>${icon('arrow-left')}</button>${avatar(conversation.other_avatar, conversation.other_name, 'avatar-sm')}<div><strong>${escapeHtml(conversation.other_name)}</strong><div class="field-hint">${escapeHtml(conversation.other_grade)}</div></div></header>
-    <div class="chat-messages" id="chat-messages">${state.applicationDormitoryId ? `<div class="application-compose"><div><strong>申请加入宿舍</strong><span>申请将以卡片形式发送给宿舍发起人</span></div><button class="btn btn-primary btn-sm" data-send-application>${icon('send')}填写申请</button></div>` : ''}${messages.length ? messages.map(messageMarkup).join('') : emptyState('message-circle', '开始交流', '说说你的作息习惯或对宿舍生活的期待')}</div>
+    <div class="chat-messages" id="chat-messages">${hasMore ? `<button class="btn btn-quiet btn-sm" data-load-earlier data-before-id="${nextBeforeId}">加载更早消息</button>` : ''}${state.applicationDormitoryId ? `<div class="application-compose"><div><strong>申请加入宿舍</strong><span>申请将以卡片形式发送给宿舍发起人</span></div><button class="btn btn-primary btn-sm" data-send-application>${icon('send')}填写申请</button></div>` : ''}${messages.length ? messages.map(messageMarkup).join('') : emptyState('message-circle', '开始交流', '说说你的作息习惯或对宿舍生活的期待')}</div>
     <form class="chat-compose" id="message-form"><textarea name="body" maxlength="2000" placeholder="输入消息" required></textarea><button class="btn btn-primary icon-btn" title="发送消息">${icon('send')}</button></form>`;
 }
 
@@ -740,6 +742,18 @@ function messageMarkup(message) {
 function bindChat() {
   const messages = document.querySelector('#chat-messages');
   if (messages) messages.scrollTop = messages.scrollHeight;
+  document.querySelector('[data-load-earlier]')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    const previousHeight = messages.scrollHeight;
+    try {
+      const page = await api(`/api/conversations/${state.selectedConversationId}/messages?beforeId=${button.dataset.beforeId}`);
+      button.insertAdjacentHTML('afterend', page.messages.map(messageMarkup).join(''));
+      if (page.hasMore) button.dataset.beforeId = page.nextBeforeId;
+      else button.remove();
+      messages.scrollTop += messages.scrollHeight - previousHeight;
+      refreshIcons();
+    } catch (error) { toast(error.message, 'error'); }
+  });
   document.querySelector('[data-chat-back]')?.addEventListener('click', () => {
     state.selectedConversationId = null;
     state.applicationDormitoryId = null;

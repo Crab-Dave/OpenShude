@@ -117,7 +117,12 @@ def test_messaging_blocking_and_reports(client):
     sent = client.post(f"/api/conversations/{conversation['id']}/messages", json={"body": "你好"})
     assert sent.status_code == 201
     assert client.get(f"/api/conversations/{conversation['id']}/messages").json()["messages"][0]["body"] == "你好"
-    assert client.post(f"/api/conversations/{conversation['id']}/read").status_code == 200
+    assert (
+        client.post(
+            f"/api/conversations/{conversation['id']}/read", json={"lastMessageId": sent.json()["message"]["id"]}
+        ).status_code
+        == 200
+    )
     assert client.post("/api/users/3/blocks").status_code == 200
     assert (
         client.post(f"/api/conversations/{conversation['id']}/messages", json={"body": "不可发送"}).status_code == 403
@@ -127,6 +132,44 @@ def test_messaging_blocking_and_reports(client):
         "/api/reports", json={"targetType": "MESSAGE", "targetId": sent.json()["message"]["id"], "reason": "测试"}
     )
     assert report.status_code == 201
+
+
+def test_message_pagination_does_not_mark_concurrent_messages_read(client):
+    login(client, "2026001")
+    conversation = client.post("/api/users/3/conversations").json()["conversation"]
+    with SessionLocal.begin() as db:
+        for index in range(202):
+            db.execute(
+                text("""INSERT INTO messages(conversation_id,sender_id,body,created_at)
+                  VALUES(:conversation,3,:body,:now)"""),
+                {"conversation": conversation["id"], "body": f"消息 {index}", "now": now()},
+            )
+
+    latest = client.get(f"/api/conversations/{conversation['id']}/messages").json()
+    assert len(latest["messages"]) == 50
+    assert latest["hasMore"] is True
+    assert latest["messages"][0]["body"] == "消息 152"
+    earlier = client.get(
+        f"/api/conversations/{conversation['id']}/messages", params={"beforeId": latest["nextBeforeId"]}
+    ).json()
+    assert len(earlier["messages"]) == 50
+    assert earlier["messages"][-1]["body"] == "消息 151"
+
+    with SessionLocal.begin() as db:
+        concurrent_message_id = db.execute(
+            text("""INSERT INTO messages(conversation_id,sender_id,body,created_at)
+              VALUES(:conversation,3,'并发新消息',:now) RETURNING id"""),
+            {"conversation": conversation["id"], "now": now()},
+        ).scalar_one()
+    last_displayed_id = latest["messages"][-1]["id"]
+    read = client.post(f"/api/conversations/{conversation['id']}/read", json={"lastMessageId": last_displayed_id})
+    assert read.status_code == 200
+    assert read.json()["lastReadMessageId"] == last_displayed_id
+    assert concurrent_message_id > last_displayed_id
+    assert client.get("/api/conversations").json()["conversations"][0]["unread_count"] == 1
+    invalid = client.post(f"/api/conversations/{conversation['id']}/read", json={"lastMessageId": 999999})
+    assert invalid.status_code == 400
+    assert invalid.json()["error"]["code"] == "INVALID_READ_CURSOR"
 
 
 def test_dormitory_workflow_and_same_gender(client):

@@ -12,6 +12,7 @@ from .errors import ApiError
 
 router = APIRouter(prefix="/api")
 DB = Annotated[Session, Depends(get_db)]
+MESSAGE_PAGE_SIZE = 50
 CARD_NOT_FOUND_MESSAGE = "室友卡片不存在"
 AVATAR_SIGNATURES = {
     "data:image/png;base64": lambda data: data.startswith(b"\x89PNG\r\n\x1a\n"),
@@ -368,7 +369,12 @@ def conversations(request: Request, db: DB, search: Annotated[str, Query()] = ""
 
 
 @router.get("/conversations/{conversation_id}/messages")
-def messages(conversation_id: int, request: Request, db: DB) -> dict:
+def messages(
+    conversation_id: int,
+    request: Request,
+    db: DB,
+    before_id: Annotated[int | None, Query(alias="beforeId", gt=0)] = None,
+) -> dict:
     user = current_user(request, db)
     require_user(user)
     conversation = conversation_for_user(db, conversation_id, user["id"])
@@ -380,10 +386,18 @@ def messages(conversation_id: int, request: Request, db: DB) -> dict:
       (SELECT COUNT(*) FROM dormitory_members WHERE dormitory_id=d.id) AS dormitory_member_count
       FROM messages m JOIN users u ON u.id=m.sender_id LEFT JOIN dormitory_applications a ON a.id=m.application_id
       LEFT JOIN dormitories d ON d.id=a.dormitory_id LEFT JOIN dormitory_selection_rounds r ON r.id=a.selection_round_id
-      WHERE m.conversation_id=:id ORDER BY m.id ASC LIMIT 200""",
-        {"id": conversation_id},
+      WHERE m.conversation_id=:id AND (:before IS NULL OR m.id<:before)
+      ORDER BY m.id DESC LIMIT :limit""",
+        {"id": conversation_id, "before": before_id, "limit": MESSAGE_PAGE_SIZE + 1},
     )
-    return {"conversation": conversation, "messages": rows}
+    has_more = len(rows) > MESSAGE_PAGE_SIZE
+    rows = list(reversed(rows[:MESSAGE_PAGE_SIZE]))
+    return {
+        "conversation": conversation,
+        "messages": rows,
+        "hasMore": has_more,
+        "nextBeforeId": rows[0]["id"] if has_more else None,
+    }
 
 
 @router.post("/conversations/{conversation_id}/messages", status_code=201)
@@ -420,21 +434,29 @@ def send_message(conversation_id: int, request: Request, body: dict, db: DB) -> 
 
 
 @router.post("/conversations/{conversation_id}/read")
-def mark_read(conversation_id: int, request: Request, db: DB) -> dict:
+def mark_read(conversation_id: int, request: Request, body: dict, db: DB) -> dict:
     user = current_user(request, db)
     require_user(user)
     conversation_for_user(db, conversation_id, user["id"])
-    last = one(db, "SELECT COALESCE(MAX(id),0) AS id FROM messages WHERE conversation_id=:id", {"id": conversation_id})[
-        "id"
-    ]
+    try:
+        last_message_id = int(body.get("lastMessageId"))
+    except (TypeError, ValueError):
+        raise ApiError(400, "INVALID_READ_CURSOR", "已读位置无效") from None
+    if not one(
+        db,
+        "SELECT 1 AS found FROM messages WHERE id=:message AND conversation_id=:conversation",
+        {"message": last_message_id, "conversation": conversation_id},
+    ):
+        raise ApiError(400, "INVALID_READ_CURSOR", "已读位置无效")
     db.execute(
         text("""INSERT INTO conversation_reads(conversation_id,user_id,last_read_message_id,updated_at)
       VALUES(:conversation,:user,:message,:now) ON CONFLICT(conversation_id,user_id) DO UPDATE SET
-      last_read_message_id=excluded.last_read_message_id,updated_at=excluded.updated_at"""),
-        {"conversation": conversation_id, "user": user["id"], "message": last, "now": now()},
+      last_read_message_id=MAX(COALESCE(conversation_reads.last_read_message_id,0),excluded.last_read_message_id),
+      updated_at=excluded.updated_at"""),
+        {"conversation": conversation_id, "user": user["id"], "message": last_message_id, "now": now()},
     )
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "lastReadMessageId": last_message_id}
 
 
 @router.post("/users/{blocked_id}/blocks")
