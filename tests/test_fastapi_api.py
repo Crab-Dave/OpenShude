@@ -47,6 +47,22 @@ def test_auth_security_and_card_contract(client):
     assert "frame-ancestors 'none'" in headers["content-security-policy"]
 
 
+def test_only_published_cards_can_start_conversations(client):
+    with SessionLocal.begin() as db:
+        db.execute(text("UPDATE roommate_cards SET status='HIDDEN' WHERE user_id=4"))
+        db.execute(text("UPDATE roommate_cards SET status='DRAFT' WHERE user_id=7"))
+    login(client, "2026001")
+
+    published = client.post("/api/roommate-cards/2/conversations")
+    assert published.status_code == 200
+    for card_id in (3, 6):
+        unavailable = client.post(f"/api/roommate-cards/{card_id}/conversations")
+        assert unavailable.status_code == 404
+        assert unavailable.json()["error"]["code"] == "CARD_NOT_FOUND"
+    with SessionLocal() as db:
+        assert db.execute(text("SELECT COUNT(*) FROM conversations")).scalar_one() == 1
+
+
 def test_roommate_cards_are_loaded_in_batches_of_fifteen(client):
     with SessionLocal.begin() as db:
         for index in range(20):
