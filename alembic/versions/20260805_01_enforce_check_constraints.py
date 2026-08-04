@@ -2,8 +2,6 @@
 
 import re
 
-import sqlalchemy as sa
-
 from alembic import op
 
 revision = "20260805_01"
@@ -60,12 +58,9 @@ def upgrade() -> None:
             missing = [(name, condition) for name, condition in checks if normalized(condition) not in current_sql]
             if not missing:
                 continue
-            with op.batch_alter_table(
-                table,
-                recreate="always",
-                table_args=tuple(sa.CheckConstraint(condition, name=name) for name, condition in missing),
-            ):
-                pass
+            with op.batch_alter_table(table, recreate="always") as batch:
+                for name, condition in missing:
+                    batch.create_check_constraint(name, condition)
         violations = bind.exec_driver_sql("PRAGMA foreign_key_check").all()
         if violations:
             raise RuntimeError(f"Foreign key violations after rebuilding constrained tables: {violations}")
