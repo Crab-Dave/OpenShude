@@ -16,7 +16,12 @@ RUN uv sync --frozen --no-build --no-dev --no-install-project
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
+COPY content ./content
 COPY public ./public
+COPY scripts/build_static_pages.py ./scripts/build_static_pages.py
+COPY templates ./templates
+
+RUN python scripts/build_static_pages.py
 
 RUN groupadd --gid 1000 app && \
     useradd --uid 1000 --gid 1000 --create-home app && \

@@ -40,6 +40,9 @@ jobs:
           .venv/bin/ruff format --check .
           .venv/bin/ruff check .
 
+      - name: Build repository-backed public pages
+        run: .venv/bin/python scripts/build_static_pages.py
+
       - name: Validate Alembic revision chain and model alignment
         run: |
           test "$(.venv/bin/alembic heads | wc -l)" -eq 1
