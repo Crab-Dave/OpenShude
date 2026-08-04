@@ -188,6 +188,22 @@ def test_messaging_blocking_and_reports(client):
     assert report.status_code == 201
 
 
+def test_blocking_requires_an_active_student_target_and_is_idempotent(client):
+    login(client, "2026001")
+    for target_id in (999999, 1):
+        response = client.post(f"/api/users/{target_id}/blocks")
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "USER_NOT_FOUND"
+    with SessionLocal.begin() as db:
+        db.execute(text("UPDATE users SET status='SUSPENDED' WHERE id=4"))
+    assert client.post("/api/users/4/blocks").status_code == 404
+
+    assert client.post("/api/users/3/blocks").status_code == 200
+    assert client.post("/api/users/3/blocks").status_code == 200
+    with SessionLocal() as db:
+        assert db.execute(text("SELECT COUNT(*) FROM blocks WHERE blocker_id=2 AND blocked_id=3")).scalar_one() == 1
+
+
 def test_message_pagination_does_not_mark_concurrent_messages_read(client):
     login(client, "2026001")
     conversation = client.post("/api/users/3/conversations").json()["conversation"]
