@@ -1,98 +1,39 @@
-from fastapi.testclient import TestClient
-from sqlalchemy import text
+import subprocess
+import sys
 
-from app.database import SessionLocal
 from tests.conftest import login
 
 
-def test_public_homepage_is_anonymous_and_does_not_expose_source_or_updater(client):
-    response = client.get("/api/public/homepage")
+def test_homepage_is_a_generated_anonymous_document(client):
+    subprocess.run([sys.executable, "scripts/build_static_pages.py"], check=True)
+
+    response = client.get("/")
+
     assert response.status_code == 200
-    content = response.json()
-    assert set(content) == {"html", "updatedAt", "revision"}
-    assert "欢迎来到合住" in content["html"]
-    assert "markdown" not in content
-    assert "updatedBy" not in content
+    assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["cache-control"] == "no-cache"
+    assert "欢迎来到合住" in response.text
+    assert "首页占位内容" in response.text
+    assert "/app.js" not in response.text
+    assert 'href="/login"' in response.text
+    assert 'href="/roommates"' in response.text
 
 
-def test_homepage_permissions_preview_publish_conflict_and_revocation(client):
+def test_removed_homepage_apis_and_permission_are_not_available(client):
     login(client, "admin", "Admin123!")
-    group = client.post("/api/admin/admin-groups", json={"code": "HOME_EDITORS", "name": "首页编辑"}).json()["group"]
-    assert (
-        client.put(
-            f"/api/admin/admin-groups/{group['id']}/permissions", json={"permissions": ["HOMEPAGE_UPDATE"]}
-        ).status_code
-        == 200
-    )
-    assert client.put(f"/api/admin/admin-groups/{group['id']}/members", json={"userIds": [2]}).status_code == 200
 
-    editor = TestClient(client.app)
-    login(editor, "2026001")
-    initial = editor.get("/api/admin/homepage")
-    assert initial.status_code == 200
-    assert initial.json()["revision"] == 0
-
-    source = "# 新首页\n\n<script>alert(1)</script>\n\n[危险链接](javascript:alert(1))\n\n**正文**"
-    preview = editor.post("/api/admin/homepage/preview", json={"markdown": source})
-    assert preview.status_code == 200
-    assert "<script" not in preview.json()["html"]
-    assert 'href="javascript:' not in preview.json()["html"]
-    assert editor.get("/api/public/homepage").json()["revision"] == 0
-
-    published = editor.put(
-        "/api/admin/homepage",
-        json={"markdown": source, "reason": "更新迎新通知", "expectedRevision": 0},
-    )
-    assert published.status_code == 200
-    assert published.json()["revision"] == 1
-    public = editor.get("/api/public/homepage").json()
-    assert "markdown" not in public
-    assert "<script" not in public["html"]
-    assert 'href="javascript:' not in public["html"]
-    stale = editor.put(
-        "/api/admin/homepage",
-        json={"markdown": "# 旧内容", "reason": "并发测试", "expectedRevision": 0},
-    )
-    assert stale.status_code == 409
-    assert stale.json()["error"]["code"] == "CONTENT_VERSION_CONFLICT"
-
-    with SessionLocal() as db:
-        audit = (
-            db.execute(
-                text("""SELECT permission_code,scope_type,scope_value,before_snapshot,after_snapshot
-            FROM audit_logs WHERE action='UPDATE_HOMEPAGE'""")
-            )
-            .mappings()
-            .one()
-        )
-        assert audit["permission_code"] == "HOMEPAGE_UPDATE"
-        assert (audit["scope_type"], audit["scope_value"]) == ("GLOBAL", "HOMEPAGE")
-        assert "新首页" not in audit["after_snapshot"]
-        assert "sha256" in audit["before_snapshot"]
-
-    assert client.put(f"/api/admin/admin-groups/{group['id']}/permissions", json={"permissions": []}).status_code == 200
-    assert editor.get("/api/admin/homepage").status_code == 403
+    assert client.get("/api/public/homepage").status_code == 404
+    assert client.get("/api/admin/homepage").status_code == 404
+    assert client.post("/api/admin/homepage/preview", json={"markdown": "# 内容"}).status_code in (404, 405)
+    assert client.put("/api/admin/homepage", json={"markdown": "# 内容"}).status_code in (404, 405)
+    permissions = client.get("/api/admin/permissions").json()["permissions"]
+    assert "HOMEPAGE_UPDATE" not in {permission["code"] for permission in permissions}
 
 
-def test_homepage_rejects_unauthorized_csrf_and_oversized_content(client):
-    login(client, "2026002")
-    assert client.get("/api/admin/homepage").status_code == 403
+def test_application_routes_use_the_login_application_and_unknown_pages_are_404(client):
+    login_page = client.get("/login")
+    roommate_page = client.get("/roommates")
 
-    admin = TestClient(client.app)
-    login(admin, "admin", "Admin123!")
-    csrf = admin.headers.pop("x-csrf-token")
-    assert admin.post("/api/admin/homepage/preview", json={"markdown": "# 预览"}).status_code == 403
-    admin.headers["x-csrf-token"] = csrf
-    oversized = admin.post("/api/admin/homepage/preview", json={"markdown": "字" * 100_001})
-    assert oversized.status_code == 400
-    assert oversized.json()["error"]["code"] == "FIELD_TOO_LONG"
-
-
-def test_super_admin_can_publish_homepage(client):
-    login(client, "admin", "Admin123!")
-    result = client.put(
-        "/api/admin/homepage",
-        json={"markdown": "# 管理员公告", "reason": "发布公告", "expectedRevision": 0},
-    )
-    assert result.status_code == 200
-    assert result.json()["revision"] == 1
+    assert login_page.status_code == 200 and "/app.js" in login_page.text
+    assert roommate_page.status_code == 200 and "/app.js" in roommate_page.text
+    assert client.get("/page-that-does-not-exist").status_code == 404

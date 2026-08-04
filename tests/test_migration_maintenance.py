@@ -47,14 +47,16 @@ def test_alembic_upgrades_a_legacy_database(tmp_path, monkeypatch):
             database.execute("SELECT account_type FROM users WHERE login_identifier='admin'").fetchone()[0]
             == "SUPER_ADMIN"
         )
-        assert database.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "20260801_02"
-        homepage = database.execute(
-            "SELECT value,revision FROM system_settings WHERE key='homepage_markdown'"
-        ).fetchone()
-        assert homepage and homepage[0].startswith("# 欢迎来到合住") and homepage[1] == 1
+        assert database.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "20260804_01"
+        assert (
+            database.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='system_settings'"
+            ).fetchone()[0]
+            == 0
+        )
 
 
-def test_homepage_migration_preserves_existing_content(tmp_path, monkeypatch):
+def test_static_page_migration_removes_existing_database_content(tmp_path, monkeypatch):
     database_path = tmp_path / "homepage.db"
     monkeypatch.setenv("DB_PATH", str(database_path))
     get_settings.cache_clear()
@@ -67,9 +69,12 @@ def test_homepage_migration_preserves_existing_content(tmp_path, monkeypatch):
     command.upgrade(config, "head")
     get_settings.cache_clear()
     with sqlite3.connect(database_path) as database:
-        assert database.execute(
-            "SELECT value,revision FROM system_settings WHERE key='homepage_markdown'"
-        ).fetchone() == ("保留正文", 1)
+        assert (
+            database.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='system_settings'"
+            ).fetchone()[0]
+            == 0
+        )
 
 
 def test_fresh_production_database_bootstrap(tmp_path, monkeypatch):
@@ -112,11 +117,16 @@ def test_fresh_production_database_bootstrap(tmp_path, monkeypatch):
         assert user[:4] == ("admin", "SUPER_ADMIN", 1, "ACTIVE")
         assert verify_password("OneTimeAdminPassword123!", user[4], user[5])
         assert all(database.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0] == 0 for table in empty_tables)
-        assert database.execute("SELECT COUNT(*) FROM system_settings WHERE key='homepage_markdown'").fetchone()[0] == 1
+        assert (
+            database.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='system_settings'"
+            ).fetchone()[0]
+            == 0
+        )
 
 
 def test_models_map_all_current_tables():
-    assert len(Base.metadata.tables) == 24
+    assert len(Base.metadata.tables) == 23
     database_engine = create_database_engine()
     try:
         tables = set(inspect(database_engine).get_table_names())

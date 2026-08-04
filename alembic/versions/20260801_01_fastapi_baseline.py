@@ -30,6 +30,14 @@ def upgrade() -> None:
     bind = op.get_bind()
     original_tables = set(sa.inspect(bind).get_table_names())
     Base.metadata.create_all(bind, checkfirst=True)
+    if "system_settings" not in sa.inspect(bind).get_table_names():
+        op.create_table(
+            "system_settings",
+            sa.Column("key", sa.Text(), primary_key=True),
+            sa.Column("value", sa.Text(), nullable=False),
+            sa.Column("updated_by", sa.Integer(), sa.ForeignKey("users.id")),
+            sa.Column("updated_at", sa.Text(), nullable=False),
+        )
     if "users" not in original_tables:
         return
 

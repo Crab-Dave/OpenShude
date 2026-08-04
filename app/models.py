@@ -185,15 +185,6 @@ class LoginSession(Base):
     created_at: Mapped[str] = mapped_column(Text)
 
 
-class SystemSetting(Base):
-    __tablename__ = "system_settings"
-    key: Mapped[str] = mapped_column(Text, primary_key=True)
-    value: Mapped[str] = mapped_column(Text)
-    updated_by: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID))
-    updated_at: Mapped[str] = mapped_column(Text)
-    revision: Mapped[int] = mapped_column(server_default=text("1"))
-
-
 class DormitorySelectionRound(Base):
     __tablename__ = "dormitory_selection_rounds"
     id: Mapped[int] = mapped_column(primary_key=True)

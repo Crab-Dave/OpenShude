@@ -10,7 +10,6 @@ from .errors import ApiError
 from .security import token_hash
 
 PERMISSIONS = {
-    "HOMEPAGE_UPDATE": "更新首页内容",
     "USER_READ": "查看用户",
     "USER_IMPORT": "导入普通用户",
     "USER_EXPORT": "导出用户信息",
