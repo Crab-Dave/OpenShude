@@ -442,6 +442,8 @@ def dormitory_detail(dormitory_id: int, request: Request, db: DB) -> dict:
     dormitory = dormitory_details(db, dormitory_id, user["id"])
     if not dormitory:
         raise ApiError(404, "DORMITORY_NOT_FOUND", "宿舍不存在")
+    if dormitory["gender"] != user["gender"]:
+        raise ApiError(404, "DORMITORY_NOT_FOUND", "宿舍不存在")
     round_row = student_round(db, user["id"], dormitory["selection_round_id"])
     return {"open": round_row["status"] == "OPEN", "round": round_row, "dormitory": dormitory}
 
