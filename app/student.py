@@ -289,13 +289,7 @@ def cards(
     if grade:
         conditions.append("u.grade=:grade")
         parameters["grade"] = grade
-    visible_cards = (
-        "SELECT * FROM ("
-        + CARD_SELECT
-        + " WHERE "
-        + " AND ".join(conditions)
-        + ") AS visible_cards"
-    )
+    visible_cards = "SELECT * FROM (" + CARD_SELECT + " WHERE " + " AND ".join(conditions) + ") AS visible_cards"
     if availability == "AVAILABLE":
         visible_cards += " WHERE team_member_count<4"
     total = one(db, f"SELECT COUNT(*) AS total FROM ({visible_cards}) AS matching_cards", parameters)["total"]
@@ -310,9 +304,7 @@ def cards(
         db,
         "SELECT name FROM grades WHERE status='ACTIVE' ORDER BY name DESC",
     )
-    result = [
-        {**card_for_student(card, user["id"]), "is_own": card["user_id"] == user["id"]} for card in rows
-    ]
+    result = [{**card_for_student(card, user["id"]), "is_own": card["user_id"] == user["id"]} for card in rows]
     return {"cards": result, "total": total, "grades": [item["name"] for item in grades]}
 
 
