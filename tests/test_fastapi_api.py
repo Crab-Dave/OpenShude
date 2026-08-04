@@ -226,6 +226,63 @@ def test_message_pagination_does_not_mark_concurrent_messages_read(client):
     assert invalid.json()["error"]["code"] == "INVALID_READ_CURSOR"
 
 
+def test_message_rate_limit_recovers_after_window(client, monkeypatch):
+    import app.rate_limit as rate_limit_module
+
+    current = 1000.0
+    monkeypatch.setattr(rate_limit_module.time, "monotonic", lambda: current)
+    login(client, "2026001")
+    conversation = client.post("/api/users/3/conversations").json()["conversation"]
+    for index in range(10):
+        assert (
+            client.post(f"/api/conversations/{conversation['id']}/messages", json={"body": f"消息 {index}"}).status_code
+            == 201
+        )
+    limited = client.post(f"/api/conversations/{conversation['id']}/messages", json={"body": "过快"})
+    assert limited.status_code == 429
+    assert limited.json()["error"]["code"] == "MESSAGE_RATE_LIMITED"
+    current += 11
+    assert client.post(f"/api/conversations/{conversation['id']}/messages", json={"body": "恢复"}).status_code == 201
+
+
+def test_report_daily_quota_and_dormitory_application_burst_limit(client):
+    with SessionLocal.begin() as db:
+        for _ in range(10):
+            db.execute(
+                text("""INSERT INTO reports(reporter_id,target_type,target_id,reason,description,snapshot,created_at)
+                  VALUES(2,'ROOMMATE_CARD',2,'测试','','{}',:now)"""),
+                {"now": now()},
+            )
+    login(client, "2026001")
+    daily_limit = client.post(
+        "/api/reports", json={"targetType": "ROOMMATE_CARD", "targetId": 2, "reason": "超过每日额度"}
+    )
+    assert daily_limit.status_code == 429
+    assert daily_limit.json()["error"]["code"] == "REPORT_DAILY_LIMIT_REACHED"
+
+    initiator = TestClient(client.app)
+    login(initiator, "2026002")
+    dormitory = initiator.post("/api/dormitories", json={"name": "限流测试宿舍"}).json()["dormitory"]
+    conversation = client.post("/api/users/3/conversations").json()["conversation"]
+    first = client.post(
+        f"/api/conversations/{conversation['id']}/dormitory-applications", json={"dormitoryId": dormitory["id"]}
+    )
+    assert first.status_code == 201
+    for _ in range(2):
+        assert (
+            client.post(
+                f"/api/conversations/{conversation['id']}/dormitory-applications",
+                json={"dormitoryId": dormitory["id"]},
+            ).status_code
+            == 409
+        )
+    limited = client.post(
+        f"/api/conversations/{conversation['id']}/dormitory-applications", json={"dormitoryId": dormitory["id"]}
+    )
+    assert limited.status_code == 429
+    assert limited.json()["error"]["code"] == "DORMITORY_APPLICATION_RATE_LIMITED"
+
+
 def test_dormitory_workflow_and_same_gender(client):
     login(client, "2026001")
     created = client.post("/api/dormitories", json={"name": "女生测试宿舍"})
