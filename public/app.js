@@ -708,7 +708,7 @@ async function chatMarkup(conversationId, conversations) {
   let messagePage;
   try {
     messagePage = await api(`/api/conversations/${conversationId}/messages`);
-    const lastMessageId = messagePage.messages.at(-1)?.id;
+    const lastMessageId = messagePage.messages[messagePage.messages.length - 1]?.id;
     if (lastMessageId) await api(`/api/conversations/${conversationId}/read`, { method: 'POST', body: JSON.stringify({ lastMessageId }) });
   } catch (error) {
     if (error.code === 'CONVERSATION_NOT_FOUND' || error.status === 404) {
