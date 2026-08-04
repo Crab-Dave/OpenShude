@@ -47,7 +47,17 @@ jobs:
           DB_PATH="$RUNNER_TEMP/alembic-check.db" .venv/bin/alembic check
 
       - name: Run FastAPI tests
-        run: .venv/bin/pytest
+        run: .venv/bin/pytest --cov=app --cov-branch --cov-report=term-missing
+
+      - name: Add coverage to job summary
+        if: always()
+        run: |
+          echo "### Python coverage" >> "$GITHUB_STEP_SUMMARY"
+          if [[ -f .coverage ]]; then
+            .venv/bin/coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY" || true
+          else
+            echo "Coverage data was not generated." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
