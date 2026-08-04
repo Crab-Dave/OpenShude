@@ -17,7 +17,6 @@ from .config import get_settings
 from .database import SessionLocal
 from .dormitories import router as dormitories_router
 from .errors import ApiError, api_error_handler, validation_error_handler
-from .homepage import router as homepage_router
 from .student import router as student_router
 
 settings = get_settings()
@@ -153,7 +152,6 @@ app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(student_router)
 app.include_router(dormitories_router)
-app.include_router(homepage_router)
 
 
 @app.get("/api/health")
@@ -177,7 +175,12 @@ def static_file(path: str) -> FileResponse:
     requested = (public / path).resolve()
     if path and requested.is_file() and requested.is_relative_to(public):
         return FileResponse(requested)
-    index = public / "index.html"
-    if not index.is_file():
-        raise ApiError(404, "NOT_FOUND", "页面不存在")
-    return FileResponse(index)
+    generated = public / "generated"
+    generated_page = (generated / path / "index.html").resolve() if path else generated / "index.html"
+    if generated_page.is_file() and generated_page.is_relative_to(generated):
+        return FileResponse(generated_page)
+    if path in ("login", "roommates"):
+        application = public / "app.html"
+        if application.is_file():
+            return FileResponse(application)
+    raise ApiError(404, "NOT_FOUND", "页面不存在")

@@ -142,7 +142,10 @@ def build(config_path: Path, template_path: Path, output_dir: Path, asset_output
             navigation=navigation,
             content="\n".join(f"        {line}" for line in rendered.splitlines()),
         )
-        (output_dir / f"{page['slug']}.html").write_text(document, encoding="utf-8", newline="\n")
+        route_parts = PurePosixPath(page["route"].lstrip("/")).parts
+        page_output = output_dir.joinpath(*route_parts, "index.html") if route_parts else output_dir / "index.html"
+        page_output.parent.mkdir(parents=True, exist_ok=True)
+        page_output.write_text(document, encoding="utf-8", newline="\n")
         manifest.append(
             {key: page[key] for key in ("slug", "route", "title", "description", "show_in_navigation", "order")}
         )

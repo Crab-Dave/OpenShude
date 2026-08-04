@@ -878,7 +878,6 @@ def delete_user(user_id: int, request: Request, body: dict, db: DB) -> dict:
     leave_dormitory(db, user_id, reason="管理员永久删除账号")
     nullable = (
         ("users", "imported_by"),
-        ("system_settings", "updated_by"),
         ("admin_groups", "created_by"),
         ("admin_group_members", "created_by"),
         ("admin_group_permissions", "created_by"),

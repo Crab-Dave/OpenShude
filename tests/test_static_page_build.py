@@ -43,7 +43,7 @@ order = 10
     )
 
     assert result.returncode == 0, result.stderr
-    document = (output / "home.html").read_text(encoding="utf-8")
+    document = (output / "index.html").read_text(encoding="utf-8")
     assert '<meta name="description" content="合住校内室友双选系统">' in document
     assert 'src="/static-pages/home/assets/example.png"' in document
     assert "<script" not in document
