@@ -233,6 +233,10 @@ def test_dormitory_workflow_and_same_gender(client):
 
     male = TestClient(client.app)
     login(male, "2026004")
+    assert applicant.get(f"/api/dormitories/{dormitory['id']}").status_code == 200
+    hidden_detail = male.get(f"/api/dormitories/{dormitory['id']}")
+    assert hidden_detail.status_code == 404
+    assert hidden_detail.json()["error"]["code"] == "DORMITORY_NOT_FOUND"
     male_conversation = male.post("/api/users/2/conversations").json()["conversation"]
     denied = male.post(
         f"/api/conversations/{male_conversation['id']}/dormitory-applications",
