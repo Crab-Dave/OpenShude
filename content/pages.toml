@@ -1,0 +1,8 @@
+[[pages]]
+slug = "home"
+route = "/"
+title = "首页"
+description = "合住校内室友双选系统"
+source = "pages/home/content.md"
+show_in_navigation = true
+order = 10

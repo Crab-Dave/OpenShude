@@ -15,5 +15,7 @@ __pycache__/
 coverage.xml
 htmlcov/
 artifacts/
+public/generated/
+public/static-pages/
 .DS_Store
 npm-debug.log*
