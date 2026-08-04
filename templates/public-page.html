@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#6f42c1">
+  <meta name="description" content="$description">
+  <title>$document_title</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="public-shell">
+    <header class="site-header">
+      <div class="site-header-inner">
+        <a class="site-logo" href="/" aria-label="返回首页"><img src="/assets/logo/透明底白色字.png" alt="合住"></a>
+        <nav class="site-nav" aria-label="主要导航">
+$navigation
+          <a href="/roommates">室友双选系统</a>
+        </nav>
+        <div class="site-account">
+          <a class="site-login" href="/login">登录</a>
+        </div>
+      </div>
+    </header>
+    <main class="homepage-main">
+      <article class="markdown-article">
+$content
+      </article>
+    </main>
+    <footer class="site-footer">
+      <a href="https://github.com/Crab-Dave/OpenShude" target="_blank" rel="noopener noreferrer" aria-label="在 GitHub 查看 Crab-Dave/OpenShude">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3.3-.4 6.8-1.6 6.8-7A5.4 5.4 0 0 0 19.4 4 5 5 0 0 0 19.3.5S18.2.1 15 1.8a13.4 13.4 0 0 0-7 0C4.8.1 3.7.5 3.7.5A5 5 0 0 0 3.6 4a5.4 5.4 0 0 0-1.4 3.7c0 5.4 3.5 6.6 6.8 7A4.8 4.8 0 0 0 8 18v4"/><path d="M8 19c-3 .9-3-1.5-4-2"/></svg>
+        <span>Crab-Dave/OpenShude</span>
+      </a>
+    </footer>
+  </div>
+</body>
+</html>
