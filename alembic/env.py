@@ -27,6 +27,10 @@ def run_migrations_online() -> None:
             context.configure(connection=connection, target_metadata=target_metadata, render_as_batch=True)
             with context.begin_transaction():
                 context.run_migrations()
+            if connection.dialect.name == "sqlite":
+                connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+                if connection.exec_driver_sql("PRAGMA foreign_keys").scalar() != 1:
+                    raise RuntimeError("Foreign keys could not be enabled after migrations")
     finally:
         migration_engine.dispose()
 

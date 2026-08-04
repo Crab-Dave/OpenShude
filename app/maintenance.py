@@ -14,6 +14,24 @@ from .security import hash_password
 QUICK_CHECK = "PRAGMA quick_check"
 FOREIGN_KEY_CHECK = "PRAGMA foreign_key_check"
 BACKUP_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\.db")
+REQUIRED_CHECKS = {
+    "users": (
+        "role IN ('STUDENT','ADMIN')",
+        "account_type IN ('USER','SUPER_ADMIN')",
+        "must_change_password IN (0,1)",
+        "gender IN ('MALE','FEMALE','UNSPECIFIED')",
+        "status IN ('PENDING_ACTIVATION','ACTIVE','SUSPENDED','BANNED')",
+    ),
+    "roommate_cards": ("status IN ('DRAFT','PUBLISHED','HIDDEN')",),
+    "conversations": ("student_a_id < student_b_id",),
+    "reports": ("target_type IN ('ROOMMATE_CARD','MESSAGE')", "status IN ('PENDING','RESOLVED','REJECTED')"),
+    "dormitory_selection_rounds": ("status IN ('DRAFT','OPEN','CLOSED','ARCHIVED')",),
+    "dormitories": ("capacity = 4", "gender IN ('MALE','FEMALE')", "status IN ('OPEN','FULL','CLOSED')"),
+    "dormitory_members": ("role IN ('INITIATOR','MEMBER')",),
+    "dormitory_applications": ("status IN ('PENDING','APPROVED','REJECTED','CANCELLED')",),
+    "grades": ("status IN ('ACTIVE','DISABLED')",),
+    "admin_groups": ("status IN ('ACTIVE','DISABLED')",),
+}
 
 
 def configured_backup_path(directory: Path, filename: str) -> Path:
@@ -134,6 +152,16 @@ def validate_database(filename: Path) -> dict:
         quick_check = [row[0] for row in database.execute(QUICK_CHECK)]
         foreign_keys = database.execute(FOREIGN_KEY_CHECK).fetchall()
         tables = {row[0] for row in database.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        table_sql = {
+            row[0]: re.sub(r"\s+", "", row[1]).upper()
+            for row in database.execute("SELECT name,sql FROM sqlite_master WHERE type='table' AND sql IS NOT NULL")
+        }
+        missing_checks = [
+            f"{table}: {condition}"
+            for table, conditions in REQUIRED_CHECKS.items()
+            for condition in conditions
+            if re.sub(r"\s+", "", condition).upper() not in table_sql.get(table, "")
+        ]
         open_rounds = database.execute(
             "SELECT COUNT(*) FROM dormitory_selection_rounds WHERE status='OPEN'"
         ).fetchone()[0]
@@ -142,7 +170,15 @@ def validate_database(filename: Path) -> dict:
         duplicate_memberships = database.execute("""SELECT COUNT(*) FROM (SELECT selection_round_id,user_id
           FROM dormitory_members GROUP BY selection_round_id,user_id HAVING COUNT(*)>1)""").fetchone()[0]
     missing = sorted(required - tables)
-    if quick_check != ["ok"] or foreign_keys or missing or open_rounds > 1 or oversized or duplicate_memberships:
+    if (
+        quick_check != ["ok"]
+        or foreign_keys
+        or missing
+        or missing_checks
+        or open_rounds > 1
+        or oversized
+        or duplicate_memberships
+    ):
         raise RuntimeError(
             "Database validation failed: "
             + json.dumps(
@@ -150,6 +186,7 @@ def validate_database(filename: Path) -> dict:
                     "quickCheck": quick_check,
                     "foreignKeyErrors": len(foreign_keys),
                     "missingTables": missing,
+                    "missingChecks": missing_checks,
                     "openRounds": open_rounds,
                     "oversizedDormitories": oversized,
                     "duplicateMemberships": duplicate_memberships,

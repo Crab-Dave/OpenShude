@@ -28,7 +28,7 @@ def reset_database():
     timestamp = now()
     with SessionLocal.begin() as db:
         db.execute(text("CREATE TABLE alembic_version(version_num VARCHAR(32) NOT NULL PRIMARY KEY)"))
-        db.execute(text("INSERT INTO alembic_version VALUES('20260804_01')"))
+        db.execute(text("INSERT INTO alembic_version VALUES('20260805_01')"))
         db.execute(
             text(
                 "INSERT INTO grades(id,code,name,status,created_at,updated_at) VALUES(1,'2026级','2026级','ACTIVE',:now,:now),(2,'2025级','2025级','ACTIVE',:now,:now)"
