@@ -326,7 +326,7 @@ def conversation_from_card(card_id: int, request: Request, db: DB) -> dict:
     user = current_user(request, db)
     require_user(user)
     card = card_by_id(db, card_id)
-    if not card or card["user_id"] == user["id"] or card["user_status"] != "ACTIVE":
+    if not card or card["user_id"] == user["id"] or card["user_status"] != "ACTIVE" or card["status"] != "PUBLISHED":
         raise ApiError(404, "CARD_NOT_FOUND", CARD_NOT_FOUND_MESSAGE)
     if has_block(db, user["id"], card["user_id"]):
         raise ApiError(403, "USER_BLOCKED", "无法与该用户联系")
