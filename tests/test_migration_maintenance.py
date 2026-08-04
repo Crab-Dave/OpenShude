@@ -36,6 +36,19 @@ def test_alembic_upgrades_a_legacy_database(tmp_path, monkeypatch):
           '2026-01-01Z','UNSPECIFIED','')""",
             (password.hash, password.salt),
         )
+        database.execute(
+            """INSERT INTO users(login_identifier,password_hash,password_salt,role,name,grade,status,
+          created_at,updated_at,gender,major) VALUES('legacy-student',?,?,'STUDENT','旧学生','2026级','ACTIVE',
+          '2026-01-01Z','2026-01-01Z','FEMALE','计算机')""",
+            (password.hash, password.salt),
+        )
+        database.executescript("""CREATE TABLE dormitories(
+          id INTEGER PRIMARY KEY,dormitory_code TEXT NOT NULL UNIQUE,name TEXT NOT NULL,
+          building TEXT NOT NULL DEFAULT '',room_number TEXT NOT NULL DEFAULT '',capacity INTEGER NOT NULL DEFAULT 4,
+          initiator_id INTEGER NOT NULL REFERENCES users(id),status TEXT NOT NULL DEFAULT 'OPEN',
+          created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+          INSERT INTO dormitories(dormitory_code,name,capacity,initiator_id,status,created_at,updated_at)
+          VALUES('LEGACY-DORM','旧宿舍',6,2,'OPEN','2026-01-01Z','2026-01-01Z');""")
     monkeypatch.setenv("DB_PATH", str(legacy))
     get_settings.cache_clear()
     command.upgrade(Config("alembic.ini"), "head")
@@ -47,13 +60,19 @@ def test_alembic_upgrades_a_legacy_database(tmp_path, monkeypatch):
             database.execute("SELECT account_type FROM users WHERE login_identifier='admin'").fetchone()[0]
             == "SUPER_ADMIN"
         )
-        assert database.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "20260804_01"
+        assert database.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "20260805_01"
         assert (
             database.execute(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='system_settings'"
             ).fetchone()[0]
             == 0
         )
+        assert database.execute("SELECT capacity FROM dormitories WHERE id=1").fetchone()[0] == 4
+        with pytest.raises(sqlite3.IntegrityError):
+            database.execute("UPDATE users SET account_type='UNSUPPORTED' WHERE id=2")
+        with pytest.raises(sqlite3.IntegrityError):
+            database.execute("UPDATE dormitories SET capacity=5 WHERE id=1")
+        assert validate_database(legacy)["status"] == "ok"
 
 
 def test_static_page_migration_removes_existing_database_content(tmp_path, monkeypatch):
