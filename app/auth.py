@@ -17,8 +17,39 @@ from .security import hash_password, new_csrf_token, new_session_token, token_ha
 
 router = APIRouter(prefix="/api")
 DB = Annotated[Session, Depends(get_db)]
+LOGIN_WINDOW_SECONDS = 300
+LOGIN_LIMITS = {"ip": 30, "identifier": 10, "pair": 10}
 _login_failures: dict[tuple[str, str], deque[float]] = defaultdict(deque)
 _login_failures_lock = Lock()
+_dummy_password = hash_password(new_session_token())
+
+
+def login_rate_keys(ip_address: str, identifier: str) -> tuple[tuple[str, str], ...]:
+    return (("ip", ip_address), ("identifier", identifier), ("pair", f"{ip_address}\0{identifier}"))
+
+
+def check_login_rate_limit(ip_address: str, identifier: str, current: float) -> None:
+    with _login_failures_lock:
+        for key in login_rate_keys(ip_address, identifier):
+            failures = _login_failures[key]
+            while failures and failures[0] < current - LOGIN_WINDOW_SECONDS:
+                failures.popleft()
+            if len(failures) >= LOGIN_LIMITS[key[0]]:
+                raise ApiError(429, "LOGIN_RATE_LIMITED", "登录尝试过于频繁，请稍后再试")
+
+
+def record_login_failure(ip_address: str, identifier: str, current: float) -> None:
+    with _login_failures_lock:
+        for key in login_rate_keys(ip_address, identifier):
+            _login_failures[key].append(current)
+        while len(_login_failures) > 10_000:
+            _login_failures.pop(next(iter(_login_failures)))
+
+
+def clear_login_success(ip_address: str, identifier: str) -> None:
+    with _login_failures_lock:
+        _login_failures.pop(("identifier", identifier), None)
+        _login_failures.pop(("pair", f"{ip_address}\0{identifier}"), None)
 
 
 def user_payload(db: Session, user: dict, include_identifier: bool = False) -> dict:
@@ -43,23 +74,16 @@ def user_payload(db: Session, user: dict, include_identifier: bool = False) -> d
 def login(request: Request, response: Response, body: dict, db: DB) -> dict:
     identifier = clean_text(body.get("loginIdentifier"), 100, True)
     password = body.get("password") if isinstance(body.get("password"), str) else ""
-    key = (request.client.host if request.client else "unknown", identifier)
+    ip_address = request.client.host if request.client else "unknown"
     current = time.monotonic()
-    with _login_failures_lock:
-        failures = _login_failures[key]
-        while failures and failures[0] < current - 300:
-            failures.popleft()
-        if len(failures) >= 10:
-            raise ApiError(429, "LOGIN_RATE_LIMITED", "登录尝试过于频繁，请稍后再试")
+    check_login_rate_limit(ip_address, identifier, current)
     user = one(db, "SELECT * FROM users WHERE login_identifier=:identifier", {"identifier": identifier})
-    if not user or not verify_password(password, user["password_salt"], user["password_hash"]):
-        with _login_failures_lock:
-            _login_failures[key].append(time.monotonic())
-            if len(_login_failures) > 10_000:
-                _login_failures.pop(next(iter(_login_failures)))
+    password_record = user or {"password_salt": _dummy_password.salt, "password_hash": _dummy_password.hash}
+    password_valid = verify_password(password, password_record["password_salt"], password_record["password_hash"])
+    if not user or not password_valid:
+        record_login_failure(ip_address, identifier, time.monotonic())
         raise ApiError(401, "INVALID_CREDENTIALS", "账号或密码错误")
-    with _login_failures_lock:
-        _login_failures.pop(key, None)
+    clear_login_success(ip_address, identifier)
     if user["status"] not in ("ACTIVE", "PENDING_ACTIVATION"):
         raise ApiError(403, "ACCOUNT_UNAVAILABLE", "账号当前不可用，请联系管理员")
     token = new_session_token()
