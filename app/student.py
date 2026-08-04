@@ -471,6 +471,13 @@ def block_user(blocked_id: int, request: Request, db: DB) -> dict:
     require_user(user)
     if blocked_id == user["id"]:
         raise ApiError(400, "INVALID_TARGET", "不能拉黑自己")
+    target = one(
+        db,
+        "SELECT id FROM users WHERE id=:id AND account_type='USER' AND status='ACTIVE'",
+        {"id": blocked_id},
+    )
+    if not target:
+        raise ApiError(404, "USER_NOT_FOUND", "学生账号不存在")
     timestamp = now()
     db.execute(
         text("INSERT OR IGNORE INTO blocks(blocker_id,blocked_id,created_at) VALUES(:user,:blocked,:now)"),
