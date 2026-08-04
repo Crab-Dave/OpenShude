@@ -14,6 +14,7 @@ from app.auth import _login_failures
 from app.common import now
 from app.database import Base, SessionLocal, engine
 from app.main import app
+from app.rate_limit import _rate_windows
 from app.security import hash_password
 
 
@@ -90,6 +91,7 @@ def reset_database():
             )
     yield
     _login_failures.clear()
+    _rate_windows.clear()
     engine.dispose()
 
 

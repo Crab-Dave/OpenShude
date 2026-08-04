@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from .common import all_rows, clean_text, current_user, now, one, require_user
 from .database import get_db
 from .errors import ApiError
+from .rate_limit import enforce_rate_limit
 from .student import conversation_for_user, has_block
 
 router = APIRouter(prefix="/api")
@@ -458,6 +459,12 @@ def apply_dormitory(conversation_id: int, request: Request, body: dict, db: DB) 
         dormitory_id = int(body.get("dormitoryId"))
     except (TypeError, ValueError):
         dormitory_id = 0
+    ip_address = request.client.host if request.client else "unknown"
+    enforce_rate_limit(
+        "dormitory-application", f"{user['id']}:{dormitory_id}", 3, 60, "DORMITORY_APPLICATION_RATE_LIMITED"
+    )
+    enforce_rate_limit("dormitory-application-user", str(user["id"]), 10, 60, "DORMITORY_APPLICATION_RATE_LIMITED")
+    enforce_rate_limit("dormitory-application-ip", ip_address, 30, 60, "DORMITORY_APPLICATION_RATE_LIMITED")
     begin_immediate(db)
     round_row = require_open_round(db, user["id"])
     if current_dormitory(db, user["id"], round_row["id"]):

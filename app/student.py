@@ -1,5 +1,6 @@
 import base64
 import json
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 from .common import all_rows, clean_text, current_user, now, one, require_user
 from .database import get_db
 from .errors import ApiError
+from .rate_limit import enforce_rate_limit
 
 router = APIRouter(prefix="/api")
 DB = Annotated[Session, Depends(get_db)]
@@ -410,6 +412,10 @@ def send_message(conversation_id: int, request: Request, body: dict, db: DB) -> 
     )
     if has_block(db, user["id"], other_id):
         raise ApiError(403, "USER_BLOCKED", "当前无法发送消息")
+    ip_address = request.client.host if request.client else "unknown"
+    enforce_rate_limit("message-conversation", f"{user['id']}:{conversation_id}", 10, 10, "MESSAGE_RATE_LIMITED")
+    enforce_rate_limit("message-user", str(user["id"]), 30, 60, "MESSAGE_RATE_LIMITED")
+    enforce_rate_limit("message-ip", ip_address, 120, 60, "MESSAGE_RATE_LIMITED")
     message_body = clean_text(body.get("body"), 2000, True)
     timestamp = now()
     result = db.execute(
@@ -512,6 +518,17 @@ def blocks(request: Request, db: DB, search: str = "") -> dict:
 def report(request: Request, body: dict, db: DB) -> dict:
     user = current_user(request, db)
     require_user(user)
+    ip_address = request.client.host if request.client else "unknown"
+    enforce_rate_limit("report-user", str(user["id"]), 5, 60, "REPORT_RATE_LIMITED")
+    enforce_rate_limit("report-ip", ip_address, 30, 60, "REPORT_RATE_LIMITED")
+    today = datetime.now(UTC).date().isoformat()
+    submitted_today = one(
+        db,
+        "SELECT COUNT(*) AS total FROM reports WHERE reporter_id=:user AND created_at>=:today",
+        {"user": user["id"], "today": today},
+    )["total"]
+    if submitted_today >= 10:
+        raise ApiError(429, "REPORT_DAILY_LIMIT_REACHED", "今日举报次数已达上限")
     target_type = body.get("targetType")
     try:
         target_id = int(body.get("targetId"))
