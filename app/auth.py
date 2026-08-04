@@ -134,5 +134,9 @@ def change_password(request: Request, body: dict, db: DB) -> dict:
             }
         )
     )
+    db.execute(
+        text("DELETE FROM sessions WHERE user_id=:user_id AND token_hash<>:current_token_hash"),
+        {"user_id": user["id"], "current_token_hash": token_hash(request.cookies["session"])},
+    )
     db.commit()
     return {"ok": True}

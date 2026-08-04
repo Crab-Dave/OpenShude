@@ -284,6 +284,22 @@ def test_imported_user_must_change_temporary_password(client):
     assert student.get("/api/roommate-cards", params={"gender": "FEMALE"}).status_code == 200
 
 
+def test_password_change_revokes_other_sessions(client):
+    current_device = TestClient(client.app)
+    other_device = TestClient(client.app)
+    login(current_device, "2026001")
+    login(other_device, "2026001")
+
+    changed = current_device.patch(
+        "/api/me/password",
+        json={"currentPassword": "Student123!", "newPassword": "UpdatedPassword123!"},
+    )
+
+    assert changed.status_code == 200
+    assert current_device.get("/api/me").status_code == 200
+    assert other_device.get("/api/me").status_code == 401
+
+
 def test_super_admin_password_reset_revokes_sessions_and_requires_password_change(client):
     student = TestClient(client.app)
     login(student, "2026002")
