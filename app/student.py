@@ -186,7 +186,10 @@ def avatar_file(filename: str, request: Request, db: DB) -> FileResponse:
     match = AVATAR_URL_PATTERN.fullmatch(f"/api/avatars/{filename}")
     if not match:
         raise ApiError(404, "AVATAR_NOT_FOUND", "头像不存在")
-    target = Path(get_settings().avatar_dir) / filename
+    avatar_root = Path(get_settings().avatar_dir).resolve()
+    target = (avatar_root / filename).resolve()
+    if not target.is_relative_to(avatar_root):
+        raise ApiError(404, "AVATAR_NOT_FOUND", "头像不存在")
     if not target.is_file():
         raise ApiError(404, "AVATAR_NOT_FOUND", "头像不存在")
     return FileResponse(target, media_type=AVATAR_MIME_TYPES[match["extension"]])

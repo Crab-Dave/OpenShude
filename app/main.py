@@ -29,19 +29,17 @@ CSP = (
 
 
 def response_security_headers(api_request: bool | str, request_id: str) -> list[tuple[bytes, bytes]]:
+    cache_control = b"no-cache"
+    if api_request:
+        cache_control = b"no-store"
+    if api_request == "avatar":
+        cache_control = b"private, max-age=31536000, immutable"
     return [
         (b"x-content-type-options", b"nosniff"),
         (b"referrer-policy", b"no-referrer"),
         (b"permissions-policy", b"camera=(), microphone=(), geolocation=()"),
         (b"content-security-policy", CSP),
-        (
-            b"cache-control",
-            b"private, max-age=31536000, immutable"
-            if api_request == "avatar"
-            else b"no-store"
-            if api_request
-            else b"no-cache",
-        ),
+        (b"cache-control", cache_control),
         (b"x-request-id", request_id.encode("ascii")),
     ]
 
@@ -88,6 +86,15 @@ class SecurityMiddleware:
         self.app = app
         self.request_slots = asyncio.Semaphore(settings.max_concurrent_requests)
 
+    async def acquire_request_slot(self, path: str) -> bool | None:
+        if path == "/api/health":
+            return False
+        try:
+            await asyncio.wait_for(self.request_slots.acquire(), timeout=settings.request_queue_timeout_seconds)
+            return True
+        except TimeoutError:
+            return None
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
@@ -125,18 +132,14 @@ class SecurityMiddleware:
             await rejection(scope, receive, security_send)
             return
 
-        slot_acquired = False
-        if request.url.path != "/api/health":
-            try:
-                await asyncio.wait_for(self.request_slots.acquire(), timeout=settings.request_queue_timeout_seconds)
-                slot_acquired = True
-            except TimeoutError:
-                await JSONResponse(
-                    status_code=503,
-                    headers={"Retry-After": "1"},
-                    content={"error": {"code": "SERVER_BUSY", "message": "服务器繁忙，请稍后重试"}},
-                )(scope, receive, security_send)
-                return
+        slot_acquired = await self.acquire_request_slot(request.url.path)
+        if slot_acquired is None:
+            await JSONResponse(
+                status_code=503,
+                headers={"Retry-After": "1"},
+                content={"error": {"code": "SERVER_BUSY", "message": "服务器繁忙，请稍后重试"}},
+            )(scope, receive, security_send)
+            return
 
         try:
             await self.app(scope, limited_receive, security_send)
