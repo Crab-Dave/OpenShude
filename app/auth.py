@@ -1,7 +1,7 @@
 import time
 from collections import defaultdict, deque
 from datetime import UTC, datetime, timedelta
-from threading import Lock
+from threading import BoundedSemaphore, Lock
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -22,6 +22,7 @@ LOGIN_LIMITS = {"ip": 30, "identifier": 10, "pair": 10}
 _login_failures: dict[tuple[str, str], deque[float]] = defaultdict(deque)
 _login_failures_lock = Lock()
 _dummy_password = hash_password(new_session_token())
+_password_verification_slots = BoundedSemaphore(get_settings().login_password_concurrency)
 
 
 def login_rate_keys(ip_address: str, identifier: str) -> tuple[tuple[str, str], ...]:
@@ -79,7 +80,12 @@ def login(request: Request, response: Response, body: dict, db: DB) -> dict:
     check_login_rate_limit(ip_address, identifier, current)
     user = one(db, "SELECT * FROM users WHERE login_identifier=:identifier", {"identifier": identifier})
     password_record = user or {"password_salt": _dummy_password.salt, "password_hash": _dummy_password.hash}
-    password_valid = verify_password(password, password_record["password_salt"], password_record["password_hash"])
+    if not _password_verification_slots.acquire(blocking=False):
+        raise ApiError(503, "LOGIN_BUSY", "登录请求较多，请稍后重试")
+    try:
+        password_valid = verify_password(password, password_record["password_salt"], password_record["password_hash"])
+    finally:
+        _password_verification_slots.release()
     if not user or not password_valid:
         record_login_failure(ip_address, identifier, time.monotonic())
         raise ApiError(401, "INVALID_CREDENTIALS", "账号或密码错误")

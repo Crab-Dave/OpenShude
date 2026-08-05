@@ -3,6 +3,7 @@ import asyncio
 from fastapi.responses import PlainTextResponse
 from fastapi.testclient import TestClient
 
+from app.auth import _password_verification_slots
 from app.main import SecurityMiddleware, settings
 
 
@@ -26,3 +27,15 @@ def test_global_concurrency_limit_fails_fast_and_exempts_health(monkeypatch):
     finally:
         client.close()
         middleware.request_slots.release()
+
+
+def test_login_password_verification_gate_returns_busy(client):
+    assert _password_verification_slots.acquire(blocking=False)
+    assert _password_verification_slots.acquire(blocking=False)
+    try:
+        response = client.post("/api/auth/login", json={"loginIdentifier": "2026001", "password": "Student123!"})
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "LOGIN_BUSY"
+    finally:
+        _password_verification_slots.release()
+        _password_verification_slots.release()
