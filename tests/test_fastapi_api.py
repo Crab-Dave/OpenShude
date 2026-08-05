@@ -5,11 +5,11 @@ from io import BytesIO
 
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
-from sqlalchemy import text
+from sqlalchemy import event, text
 
 from app.auth import _login_failures
 from app.common import now
-from app.database import SessionLocal
+from app.database import SessionLocal, engine
 from tests.conftest import login
 
 
@@ -94,6 +94,66 @@ def test_roommate_cards_are_loaded_in_batches_of_fifteen(client):
     oversized = client.get("/api/roommate-cards", params={**filters, "limit": 16})
     assert oversized.status_code == 400
     assert oversized.json()["error"]["code"] == "INVALID_REQUEST"
+
+
+def test_dormitories_are_batched_paginated_and_searched_on_the_server(client):
+    created_dormitories = []
+    with SessionLocal.begin() as db:
+        for index in range(20):
+            user_id = db.execute(
+                text("""INSERT INTO users(login_identifier,password_hash,password_salt,role,account_type,
+                  authorization_version,must_change_password,name,grade,grade_id,gender,major,status,created_at,updated_at)
+                  SELECT :login,password_hash,password_salt,role,account_type,authorization_version,
+                  must_change_password,:name,grade,grade_id,gender,major,status,created_at,updated_at
+                  FROM users WHERE id=3 RETURNING id"""),
+                {"login": f"dorm-page-{index:02d}", "name": f"宿舍成员{index:02d}"},
+            ).scalar_one()
+            db.execute(
+                text("INSERT INTO dormitory_round_participants VALUES(1,:user,1,:now)"),
+                {"user": user_id, "now": now()},
+            )
+            dormitory_id = db.execute(
+                text("""INSERT INTO dormitories(selection_round_id,dormitory_code,name,building,room_number,
+                  capacity,initiator_id,management_grade_id,gender,status,created_at,updated_at)
+                  VALUES(1,:code,:name,'','',4,:user,1,'FEMALE','OPEN',:now,:now) RETURNING id"""),
+                {"code": f"PAGE-{index:02d}", "name": f"分页宿舍{index:02d}", "user": user_id, "now": now()},
+            ).scalar_one()
+            created_dormitories.append(dormitory_id)
+            db.execute(
+                text("INSERT INTO dormitory_members VALUES(1,:dormitory,:user,'INITIATOR',:now)"),
+                {"dormitory": dormitory_id, "user": user_id, "now": now()},
+            )
+        db.execute(
+            text("INSERT INTO dormitory_members VALUES(1,:dormitory,2,'MEMBER',:now)"),
+            {"dormitory": created_dormitories[0], "now": now()},
+        )
+
+    login(client, "2026001")
+    statements = []
+
+    def record_statement(_connection, _cursor, statement, _parameters, _context, _executemany):
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record_statement)
+    try:
+        first = client.get("/api/dormitories").json()
+    finally:
+        event.remove(engine, "before_cursor_execute", record_statement)
+    second = client.get("/api/dormitories", params={"offset": 15}).json()
+    searched = client.get("/api/dormitories", params={"search": "宿舍成员03"}).json()
+
+    assert first["total"] == second["total"] == 20
+    assert len(first["dormitories"]) == 15
+    assert len(second["dormitories"]) == 5
+    assert first["dormitories"][0]["id"] == created_dormitories[0]
+    assert first["dormitories"][0]["current_user_role"] == "MEMBER"
+    assert {item["id"] for item in first["dormitories"]}.isdisjoint(item["id"] for item in second["dormitories"])
+    assert searched["total"] == 1
+    assert searched["dormitories"][0]["members"][0]["name"] == "宿舍成员03"
+    assert len(statements) <= 8
+    oversized = client.get("/api/dormitories", params={"limit": 16})
+    assert oversized.status_code == 400
 
 
 def test_existing_session_csrf_body_limit_host_and_login_rate_limit(client):
