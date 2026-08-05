@@ -38,6 +38,7 @@ class User(Base):
         CheckConstraint("must_change_password IN (0,1)"),
         CheckConstraint("gender IN ('MALE','FEMALE','UNSPECIFIED')"),
         CheckConstraint("status IN ('PENDING_ACTIVATION','ACTIVE','SUSPENDED','BANNED')"),
+        Index("idx_users_gender_status", "gender", "status"),
     )
 
 
@@ -93,7 +94,10 @@ class RoommateCard(Base):
     published_at: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text)
     updated_at: Mapped[str] = mapped_column(Text)
-    __table_args__ = (CheckConstraint("status IN ('DRAFT','PUBLISHED','HIDDEN')"),)
+    __table_args__ = (
+        CheckConstraint("status IN ('DRAFT','PUBLISHED','HIDDEN')"),
+        Index("idx_roommate_cards_status_updated", "status", "updated_at", "id"),
+    )
 
 
 class Conversation(Base):
@@ -103,7 +107,12 @@ class Conversation(Base):
     student_b_id: Mapped[int] = mapped_column(ForeignKey(USERS_ID, ondelete="CASCADE"))
     last_message_at: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text)
-    __table_args__ = (UniqueConstraint("student_a_id", "student_b_id"), CheckConstraint("student_a_id < student_b_id"))
+    __table_args__ = (
+        UniqueConstraint("student_a_id", "student_b_id"),
+        CheckConstraint("student_a_id < student_b_id"),
+        Index("idx_conversations_student_a_activity", "student_a_id", "last_message_at", "id"),
+        Index("idx_conversations_student_b_activity", "student_b_id", "last_message_at", "id"),
+    )
 
 
 class Message(Base):
@@ -115,7 +124,7 @@ class Message(Base):
     created_at: Mapped[str] = mapped_column(Text)
     message_type: Mapped[str] = mapped_column(Text, server_default=text("'TEXT'"))
     application_id: Mapped[int | None]
-    __table_args__ = (Index("idx_messages_conversation", "conversation_id", "created_at", "id"),)
+    __table_args__ = (Index("idx_messages_conversation", "conversation_id", "id"),)
 
 
 class ConversationRead(Base):
@@ -131,6 +140,7 @@ class Block(Base):
     blocker_id: Mapped[int] = mapped_column(ForeignKey(USERS_ID, ondelete="CASCADE"), primary_key=True)
     blocked_id: Mapped[int] = mapped_column(ForeignKey(USERS_ID, ondelete="CASCADE"), primary_key=True)
     created_at: Mapped[str] = mapped_column(Text)
+    __table_args__ = (Index("idx_blocks_blocked_blocker", "blocked_id", "blocker_id"),)
 
 
 class Report(Base):
@@ -150,6 +160,7 @@ class Report(Base):
     __table_args__ = (
         CheckConstraint("target_type IN ('ROOMMATE_CARD','MESSAGE')"),
         CheckConstraint("status IN ('PENDING','RESOLVED','REJECTED')"),
+        Index("idx_reports_reporter_created", "reporter_id", "created_at"),
     )
 
 
@@ -183,6 +194,7 @@ class LoginSession(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey(USERS_ID, ondelete="CASCADE"))
     expires_at: Mapped[str] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text)
+    __table_args__ = (Index("idx_sessions_user", "user_id"),)
 
 
 class DormitorySelectionRound(Base):
@@ -254,6 +266,14 @@ class Dormitory(Base):
         CheckConstraint("capacity = 4"),
         CheckConstraint("gender IN ('MALE','FEMALE')"),
         CheckConstraint("status IN ('OPEN','FULL','CLOSED')"),
+        Index(
+            "idx_dormitories_round_gender_status_created",
+            "selection_round_id",
+            "gender",
+            "status",
+            "created_at",
+            "id",
+        ),
     )
 
 
@@ -293,6 +313,12 @@ class DormitoryApplication(Base):
             unique=True,
             sqlite_where=text("status = 'PENDING'"),
         ),
+        Index(
+            "idx_dormitory_applications_applicant_round_created",
+            "applicant_id",
+            "selection_round_id",
+            "created_at",
+        ),
     )
 
 
@@ -328,6 +354,7 @@ class DormitoryResultMember(Base):
     major_snapshot: Mapped[str] = mapped_column(Text)
     member_role: Mapped[str] = mapped_column(Text)
     joined_at: Mapped[str] = mapped_column(Text)
+    __table_args__ = (Index("idx_dormitory_result_members_source", "source_user_id", "snapshot_id"),)
 
 
 class Grade(Base):
