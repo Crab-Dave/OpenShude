@@ -28,13 +28,20 @@ CSP = (
 )
 
 
-def response_security_headers(api_request: bool, request_id: str) -> list[tuple[bytes, bytes]]:
+def response_security_headers(api_request: bool | str, request_id: str) -> list[tuple[bytes, bytes]]:
     return [
         (b"x-content-type-options", b"nosniff"),
         (b"referrer-policy", b"no-referrer"),
         (b"permissions-policy", b"camera=(), microphone=(), geolocation=()"),
         (b"content-security-policy", CSP),
-        (b"cache-control", b"no-store" if api_request else b"no-cache"),
+        (
+            b"cache-control",
+            b"private, max-age=31536000, immutable"
+            if api_request == "avatar"
+            else b"no-store"
+            if api_request
+            else b"no-cache",
+        ),
         (b"x-request-id", request_id.encode("ascii")),
     ]
 
@@ -106,7 +113,10 @@ class SecurityMiddleware:
             if message["type"] == "http.response.start":
                 response_status = message["status"]
                 response_headers = list(message.get("headers", []))
-                response_headers.extend(response_security_headers(request.url.path.startswith("/api/"), request_id))
+                api_request = (
+                    "avatar" if request.url.path.startswith("/api/avatars/") else request.url.path.startswith("/api/")
+                )
+                response_headers.extend(response_security_headers(api_request, request_id))
                 message["headers"] = response_headers
             await send(message)
 

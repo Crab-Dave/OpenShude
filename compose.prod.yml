@@ -16,6 +16,7 @@ services:
       HOST: 0.0.0.0
       PORT: 4173
       DB_PATH: /app/data/app.db
+      AVATAR_DIR: /app/data/avatars
       BACKUP_DIR: /app/backups
       APP_VERSION: "${IMAGE_TAG:?IMAGE_TAG is required}"
       DOCS_ENABLED: "false"

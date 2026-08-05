@@ -1,13 +1,18 @@
 import base64
+import hashlib
 import json
+import re
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import FileResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .common import all_rows, clean_text, current_user, now, one, require_user
+from .config import get_settings
 from .database import get_db
 from .errors import ApiError
 from .rate_limit import enforce_rate_limit
@@ -21,6 +26,8 @@ AVATAR_SIGNATURES = {
     "data:image/jpeg;base64": lambda data: data.startswith(b"\xff\xd8\xff"),
     "data:image/webp;base64": lambda data: data.startswith(b"RIFF") and data[8:12] == b"WEBP",
 }
+AVATAR_URL_PATTERN = re.compile(r"^/api/avatars/(?P<digest>[0-9a-f]{64})\.(?P<extension>png|jpg|webp)$")
+AVATAR_MIME_TYPES = {"png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}
 
 CARD_SELECT = """
 SELECT c.id,c.user_id,c.avatar_url,c.origin_province,c.origin_city,c.clothing_size,
@@ -89,7 +96,7 @@ def number(value: object) -> int | float | None:
 
 def validated_avatar(value: object) -> str:
     avatar = clean_text(value, 3_000_000)
-    if not avatar or avatar.startswith("/assets/"):
+    if not avatar or avatar.startswith("/assets/") or AVATAR_URL_PATTERN.fullmatch(avatar):
         return avatar
     header, separator, encoded = avatar.partition(",")
     mime = header.lower()
@@ -102,6 +109,27 @@ def validated_avatar(value: object) -> str:
     if len(decoded) > 2 * 1024 * 1024:
         raise ApiError(413, "AVATAR_TOO_LARGE", "头像不能超过 2 MB")
     return avatar
+
+
+def store_avatar(avatar: str) -> str:
+    header, _, encoded = avatar.partition(",")
+    decoded = base64.b64decode(encoded, validate=True)
+    extension = {
+        "data:image/png;base64": "png",
+        "data:image/jpeg;base64": "jpg",
+        "data:image/webp;base64": "webp",
+    }[header.lower()]
+    digest = hashlib.sha256(decoded).hexdigest()
+    directory = Path(get_settings().avatar_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / f"{digest}.{extension}"
+    if not target.exists():
+        try:
+            with target.open("xb") as output:
+                output.write(decoded)
+        except FileExistsError:
+            pass
+    return f"/api/avatars/{digest}.{extension}"
 
 
 def card_input(body: dict) -> dict:
@@ -150,6 +178,18 @@ def card_input(body: dict) -> dict:
     for field in ("summer_temp_min", "summer_temp_max", "winter_temp_min", "winter_temp_max"):
         result[field] = number(body.get(field))
     return result
+
+
+@router.get("/avatars/{filename}")
+def avatar_file(filename: str, request: Request, db: DB) -> FileResponse:
+    require_user(current_user(request, db))
+    match = AVATAR_URL_PATTERN.fullmatch(f"/api/avatars/{filename}")
+    if not match:
+        raise ApiError(404, "AVATAR_NOT_FOUND", "头像不存在")
+    target = Path(get_settings().avatar_dir) / filename
+    if not target.is_file():
+        raise ApiError(404, "AVATAR_NOT_FOUND", "头像不存在")
+    return FileResponse(target, media_type=AVATAR_MIME_TYPES[match["extension"]])
 
 
 def validate_publish(card: dict) -> None:
@@ -216,6 +256,8 @@ def save_card(request: Request, body: dict, db: DB) -> dict:
     existing = one(db, "SELECT * FROM roommate_cards WHERE user_id=:id", {"id": user["id"]})
     if existing and existing["status"] == "PUBLISHED":
         validate_publish({**values, "major": user["major"]})
+    if values["avatar_url"].startswith("data:"):
+        values["avatar_url"] = store_avatar(values["avatar_url"])
     timestamp = now()
     if existing:
         assignments = ",".join(f"{field}=:{field}" for field in values)

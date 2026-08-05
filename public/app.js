@@ -593,7 +593,7 @@ async function renderProfile() {
             <div class="form-field full"><details class="size-guide"><summary>查看院服尺码表</summary><div class="size-table-wrap"><table class="size-table"><thead><tr><th>尺码</th><th>衣长</th><th>胸围 1/2</th><th>肩宽</th><th>建议身高</th><th>建议体重</th></tr></thead><tbody>${[
               ['S', 64, 47, 43, '155-160', '80-90'], ['M', 66, 49, 44, '160-165', '90-100'], ['L', 68, 51, 45, '165-170', '100-120'], ['XL', 70, 53, 46, '170-175', '120-140'], ['XXL', 72, 55, 47, '175-180', '140-160'], ['XXXL', 74, 57, 48, '180-185', '160-180'], ['XXXXL', 76, 59, 49, '185-190', '180-200'],
             ].map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('')}</tbody></table></div></details></div>
-            <div class="form-field full"><label class="required">头像</label><div class="avatar-upload">${avatar(current.avatar_url, state.user.name, 'avatar-lg')}<label class="btn btn-secondary" for="avatar-file">${icon('upload')}上传头像</label><input id="avatar-file" type="file" accept="image/png,image/jpeg,image/webp"><input type="hidden" name="avatar_url" value="${value(current, 'avatar_url')}"></div><span class="field-hint">PNG、JPG 或 WebP，建议使用正方形图片，文件不超过 2.5 MB</span></div>
+            <div class="form-field full"><label class="required">头像</label><div class="avatar-upload">${avatar(current.avatar_url, state.user.name, 'avatar-lg')}<label class="btn btn-secondary" for="avatar-file">${icon('upload')}上传头像</label><input id="avatar-file" type="file" accept="image/png,image/jpeg,image/webp"><input type="hidden" name="avatar_url" value="${value(current, 'avatar_url')}"></div><span class="field-hint">PNG、JPG 或 WebP，建议使用正方形图片，文件不超过 2 MB</span></div>
           </div>
         </div>
         <div class="section">
@@ -651,7 +651,7 @@ async function renderProfile() {
   document.querySelector('#avatar-file').addEventListener('change', (event) => {
     const file = event.target.files[0];
     if (!file) return;
-    if (file.size > 2.5 * 1024 * 1024) return toast('头像不能超过 2.5 MB', 'error');
+    if (file.size > 2 * 1024 * 1024) return toast('头像不能超过 2 MB', 'error');
     const reader = new FileReader();
     reader.onload = () => { form.avatar_url.value = reader.result; form.querySelector('.avatar-lg').src = reader.result; };
     reader.readAsDataURL(file);
