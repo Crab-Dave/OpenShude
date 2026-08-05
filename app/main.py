@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import time
@@ -78,6 +79,7 @@ def request_rejection(request: Request) -> JSONResponse | None:
 class SecurityMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
+        self.request_slots = asyncio.Semaphore(settings.max_concurrent_requests)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -113,6 +115,19 @@ class SecurityMiddleware:
             await rejection(scope, receive, security_send)
             return
 
+        slot_acquired = False
+        if request.url.path != "/api/health":
+            try:
+                await asyncio.wait_for(self.request_slots.acquire(), timeout=settings.request_queue_timeout_seconds)
+                slot_acquired = True
+            except TimeoutError:
+                await JSONResponse(
+                    status_code=503,
+                    headers={"Retry-After": "1"},
+                    content={"error": {"code": "SERVER_BUSY", "message": "服务器繁忙，请稍后重试"}},
+                )(scope, receive, security_send)
+                return
+
         try:
             await self.app(scope, limited_receive, security_send)
         except ApiError as error:
@@ -120,6 +135,8 @@ class SecurityMiddleware:
                 status_code=error.status, content={"error": {"code": error.code, "message": error.message}}
             )(scope, receive, security_send)
         finally:
+            if slot_acquired:
+                self.request_slots.release()
             if request.url.path != "/api/health":
                 logger.info(
                     json.dumps(

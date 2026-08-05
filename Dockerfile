@@ -31,4 +31,4 @@ USER app
 EXPOSE 4173
 VOLUME ["/app/data", "/app/backups"]
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "4173", "--workers", "1", "--no-server-header", "--proxy-headers", "--forwarded-allow-ips", "127.0.0.1,172.16.0.0/12"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "4173", "--workers", "1", "--limit-concurrency", "50", "--backlog", "128", "--timeout-keep-alive", "5", "--limit-max-requests", "10000", "--no-server-header", "--proxy-headers", "--forwarded-allow-ips", "127.0.0.1,172.16.0.0/12"]
