@@ -855,7 +855,7 @@ function dormitoryStageLabel(open, status) {
 }
 
 function pendingReviewMarkup(dormitory) {
-  if (!dormitory || dormitory.current_user_role !== 'INITIATOR') return '';
+  if (dormitory?.current_user_role !== 'INITIATOR') return '';
   const applications = dormitory.pending_applications.map((application) => `<div class="member-row">${avatar(application.applicant_avatar, application.applicant_name, 'avatar-sm')}<div class="member-copy"><strong>${escapeHtml(application.applicant_name)}</strong><span>${escapeHtml(application.note || '未填写申请说明')}</span></div><button class="btn btn-secondary btn-sm" data-review-dorm="${application.id}" data-action="reject">拒绝</button><button class="btn btn-primary btn-sm" data-review-dorm="${application.id}" data-action="approve">通过</button></div>`).join('');
   const content = applications || '<p class="field-hint">暂无待审核申请</p>';
   return `<div class="panel dorm-applications"><div class="section-heading"><div><h2>待审核申请</h2><p>也可以直接在私信申请卡片中处理</p></div></div>${content}</div>`;

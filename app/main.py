@@ -95,6 +95,34 @@ class SecurityMiddleware:
         except TimeoutError:
             return None
 
+    async def send_busy_response(self, scope: Scope, receive: Receive, send: Send) -> None:
+        await JSONResponse(
+            status_code=503,
+            headers={"Retry-After": "1"},
+            content={"error": {"code": "SERVER_BUSY", "message": "服务器繁忙，请稍后重试"}},
+        )(scope, receive, send)
+
+    def finish_request(
+        self, request: Request, request_id: str, started: float, response_status: int, acquired: bool
+    ) -> None:
+        if acquired:
+            self.request_slots.release()
+        if request.url.path == "/api/health":
+            return
+        logger.info(
+            json.dumps(
+                {
+                    "requestId": request_id,
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status": response_status,
+                    "durationMs": round((time.perf_counter() - started) * 1000, 2),
+                    "clientIp": request.client.host if request.client else "",
+                },
+                ensure_ascii=False,
+            )
+        )
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
@@ -134,11 +162,7 @@ class SecurityMiddleware:
 
         slot_acquired = await self.acquire_request_slot(request.url.path)
         if slot_acquired is None:
-            await JSONResponse(
-                status_code=503,
-                headers={"Retry-After": "1"},
-                content={"error": {"code": "SERVER_BUSY", "message": "服务器繁忙，请稍后重试"}},
-            )(scope, receive, security_send)
+            await self.send_busy_response(scope, receive, security_send)
             return
 
         try:
@@ -148,22 +172,7 @@ class SecurityMiddleware:
                 status_code=error.status, content={"error": {"code": error.code, "message": error.message}}
             )(scope, receive, security_send)
         finally:
-            if slot_acquired:
-                self.request_slots.release()
-            if request.url.path != "/api/health":
-                logger.info(
-                    json.dumps(
-                        {
-                            "requestId": request_id,
-                            "method": request.method,
-                            "path": request.url.path,
-                            "status": response_status,
-                            "durationMs": round((time.perf_counter() - started) * 1000, 2),
-                            "clientIp": request.client.host if request.client else "",
-                        },
-                        ensure_ascii=False,
-                    )
-                )
+            self.finish_request(request, request_id, started, response_status, slot_acquired)
 
 
 app = FastAPI(
