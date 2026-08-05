@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     public_dir: Path = Path("public")
     max_body_bytes: int = 4 * 1024 * 1024
     docs_enabled: bool = True
+    max_concurrent_requests: int = Field(default=50, ge=1, le=1000)
+    request_queue_timeout_seconds: float = Field(default=0.1, gt=0, le=10)
+    database_pool_size: int = Field(default=5, ge=1, le=100)
+    database_pool_timeout_seconds: float = Field(default=2, gt=0, le=30)
 
     @field_validator("allowed_hosts", "allowed_origins", mode="before")
     @classmethod

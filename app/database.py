@@ -18,6 +18,9 @@ def create_database_engine(settings: Settings | None = None) -> Engine:
         current.database_url,
         connect_args={"check_same_thread": False, "timeout": 5},
         pool_pre_ping=True,
+        pool_size=current.database_pool_size,
+        max_overflow=0,
+        pool_timeout=current.database_pool_timeout_seconds,
     )
 
     @event.listens_for(engine, "connect")

@@ -6,6 +6,11 @@ services:
 
     restart: unless-stopped
 
+    cpus: 1.5
+    mem_limit: 1200m
+    mem_reservation: 768m
+    pids_limit: 128
+
     environment:
       ENVIRONMENT: production
       HOST: 0.0.0.0
@@ -14,6 +19,10 @@ services:
       BACKUP_DIR: /app/backups
       APP_VERSION: "${IMAGE_TAG:?IMAGE_TAG is required}"
       DOCS_ENABLED: "false"
+      MAX_CONCURRENT_REQUESTS: "50"
+      REQUEST_QUEUE_TIMEOUT_SECONDS: "0.1"
+      DATABASE_POOL_SIZE: "5"
+      DATABASE_POOL_TIMEOUT_SECONDS: "2"
       SESSION_COOKIE_SECURE: "false"
       ALLOWED_HOSTS: '["39.96.36.207","127.0.0.1","localhost"]'
       ALLOWED_ORIGINS: '["http://39.96.36.207"]'
