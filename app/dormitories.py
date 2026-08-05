@@ -82,38 +82,60 @@ def current_dormitory(db: Session, user_id: int, round_id: int | None = None) ->
 
 
 def dormitory_details(db: Session, dormitory_id: int, viewer_id: int | None = None) -> dict | None:
-    dormitory = one(
+    dormitories = dormitory_details_many(db, [dormitory_id], viewer_id)
+    return dormitories[0] if dormitories else None
+
+
+def dormitory_details_many(db: Session, dormitory_ids: list[int], viewer_id: int | None = None) -> list[dict]:
+    if not dormitory_ids:
+        return []
+    unique_ids = list(dict.fromkeys(dormitory_ids))
+    id_params = {f"id_{index}": value for index, value in enumerate(unique_ids)}
+    placeholders = ",".join(f":{name}" for name in id_params)
+    dormitories = all_rows(
         db,
         """SELECT d.*,u.name AS initiator_name,
-      (SELECT COUNT(*) FROM dormitory_members WHERE dormitory_id=d.id) AS member_count
-      FROM dormitories d JOIN users u ON u.id=d.initiator_id WHERE d.id=:id""",
-        {"id": dormitory_id},
+      COUNT(dm.user_id) AS member_count,
+      MAX(CASE WHEN dm.user_id=:viewer THEN dm.role END) AS current_user_role
+      FROM dormitories d JOIN users u ON u.id=d.initiator_id
+      LEFT JOIN dormitory_members dm ON dm.dormitory_id=d.id
+      WHERE d.id IN ("""
+        + placeholders
+        + ") GROUP BY d.id",
+        {**id_params, "viewer": viewer_id},
     )
-    if not dormitory:
-        return None
-    dormitory["members"] = all_rows(
+    members = all_rows(
         db,
-        """SELECT dm.user_id,dm.role,dm.joined_at,u.name,u.grade,c.avatar_url
+        """SELECT dm.dormitory_id,dm.user_id,dm.role,dm.joined_at,u.name,u.grade,c.avatar_url
       FROM dormitory_members dm JOIN users u ON u.id=dm.user_id LEFT JOIN roommate_cards c ON c.user_id=u.id
-      WHERE dm.dormitory_id=:id ORDER BY dm.joined_at,dm.user_id""",
-        {"id": dormitory_id},
+      WHERE dm.dormitory_id IN ("""
+        + placeholders
+        + ") ORDER BY dm.dormitory_id,dm.joined_at,dm.user_id",
+        id_params,
     )
-    dormitory["current_user_role"] = next(
-        (member["role"] for member in dormitory["members"] if member["user_id"] == viewer_id), None
-    )
-    dormitory["pending_applications"] = (
+    applications = (
         all_rows(
             db,
             """SELECT a.*,u.name AS applicant_name,
       u.grade AS applicant_grade,c.avatar_url AS applicant_avatar FROM dormitory_applications a
-      JOIN users u ON u.id=a.applicant_id LEFT JOIN roommate_cards c ON c.user_id=u.id
-      WHERE a.dormitory_id=:id AND a.status='PENDING' ORDER BY a.created_at""",
-            {"id": dormitory_id},
+      JOIN dormitories d ON d.id=a.dormitory_id JOIN users u ON u.id=a.applicant_id
+      LEFT JOIN roommate_cards c ON c.user_id=u.id WHERE a.dormitory_id IN ("""
+            + placeholders
+            + ") AND d.initiator_id=:viewer AND a.status='PENDING' ORDER BY a.dormitory_id,a.created_at",
+            {**id_params, "viewer": viewer_id},
         )
-        if viewer_id == dormitory["initiator_id"]
+        if viewer_id is not None
         else []
     )
-    return dormitory
+    by_id = {item["id"]: item for item in dormitories}
+    for dormitory in dormitories:
+        dormitory["members"] = []
+        dormitory["pending_applications"] = []
+    for member in members:
+        by_id[member.pop("dormitory_id")]["members"].append(member)
+    for application in applications:
+        by_id[application["dormitory_id"]]["pending_applications"].append(application)
+    return [by_id[dormitory_id] for dormitory_id in dormitory_ids if dormitory_id in by_id]
 
 
 def archived_results(db: Session, round_id: int) -> list[dict]:
@@ -125,15 +147,25 @@ def archived_results(db: Session, round_id: int) -> list[dict]:
       FROM dormitory_result_snapshots s WHERE s.selection_round_id=:round ORDER BY s.id""",
         {"round": round_id},
     )
+    if not dormitories:
+        return []
+    snapshot_params = {f"snapshot_{index}": item["snapshot_id"] for index, item in enumerate(dormitories)}
+    placeholders = ",".join(f":{name}" for name in snapshot_params)
+    members = all_rows(
+        db,
+        """SELECT snapshot_id,source_user_id AS user_id,
+      login_identifier_snapshot AS login_identifier,name_snapshot AS name,grade_snapshot AS grade,
+      gender_snapshot AS gender,major_snapshot AS major,member_role AS role,joined_at
+      FROM dormitory_result_members WHERE snapshot_id IN ("""
+        + placeholders
+        + ") ORDER BY snapshot_id,joined_at,login_identifier_snapshot",
+        snapshot_params,
+    )
+    by_snapshot = {item["snapshot_id"]: item for item in dormitories}
     for dormitory in dormitories:
-        dormitory["members"] = all_rows(
-            db,
-            """SELECT source_user_id AS user_id,
-          login_identifier_snapshot AS login_identifier,name_snapshot AS name,grade_snapshot AS grade,
-          gender_snapshot AS gender,major_snapshot AS major,member_role AS role,joined_at
-          FROM dormitory_result_members WHERE snapshot_id=:id ORDER BY joined_at,login_identifier_snapshot""",
-            {"id": dormitory["snapshot_id"]},
-        )
+        dormitory["members"] = []
+    for member in members:
+        by_snapshot[member.pop("snapshot_id")]["members"].append(member)
     return dormitories
 
 
@@ -355,21 +387,49 @@ def round_results(round_id: int, request: Request, db: DB) -> dict:
 
 
 @router.get("/dormitories")
-def dormitories(request: Request, db: DB, round_id: Annotated[int | None, Query(alias="roundId")] = None) -> dict:
+def dormitories(
+    request: Request,
+    db: DB,
+    round_id: Annotated[int | None, Query(alias="roundId")] = None,
+    search: Annotated[str, Query(max_length=100)] = "",
+    limit: Annotated[int, Query(ge=1, le=15)] = 15,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict:
     user = current_user(request, db)
     require_user(user)
     round_row = student_round(db, user["id"], round_id, False)
     if not round_row:
-        return {"open": False, "round": None, "dormitories": []}
+        return {"open": False, "round": None, "dormitories": [], "total": 0}
+    conditions = [
+        "d.selection_round_id=:round",
+        "d.gender=:gender",
+        "d.status IN('OPEN','FULL','CLOSED')",
+    ]
+    parameters = {"round": round_row["id"], "gender": user["gender"], "viewer": user["id"]}
+    if search.strip():
+        conditions.append(
+            """EXISTS(SELECT 1 FROM dormitory_members searched_members
+            JOIN users searched_users ON searched_users.id=searched_members.user_id
+            WHERE searched_members.dormitory_id=d.id AND instr(lower(searched_users.name),:search)>0)"""
+        )
+        parameters["search"] = search.strip().lower()
+    where = " AND ".join(conditions)
+    total = one(db, f"SELECT COUNT(*) AS total FROM dormitories d WHERE {where}", parameters)["total"]
     rows = all_rows(
         db,
-        """SELECT id FROM dormitories WHERE selection_round_id=:round AND gender=:gender
-      AND status IN('OPEN','FULL','CLOSED') ORDER BY created_at DESC""",
-        {"round": round_row["id"], "gender": user["gender"]},
+        f"""SELECT d.id FROM dormitories d LEFT JOIN dormitory_members viewer
+      ON viewer.dormitory_id=d.id AND viewer.user_id=:viewer WHERE {where}
+      ORDER BY CASE WHEN viewer.user_id IS NULL THEN 1 ELSE 0 END,d.created_at DESC,d.id DESC
+      LIMIT :limit OFFSET :offset""",
+        {**parameters, "limit": limit, "offset": offset},
     )
-    result = [dormitory_details(db, row["id"], user["id"]) for row in rows]
-    result.sort(key=lambda item: bool(item["current_user_role"]), reverse=True)
-    return {"open": round_row["status"] == "OPEN", "round": round_row, "dormitories": result}
+    result = dormitory_details_many(db, [row["id"] for row in rows], user["id"])
+    return {
+        "open": round_row["status"] == "OPEN",
+        "round": round_row,
+        "dormitories": result,
+        "total": total,
+    }
 
 
 @router.get("/me/dormitory")

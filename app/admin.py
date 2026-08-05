@@ -33,6 +33,7 @@ from .dormitories import (
     begin_immediate,
     current_dormitory,
     dormitory_details,
+    dormitory_details_many,
     generate_snapshot,
     leave_dormitory,
 )
@@ -1270,14 +1271,12 @@ def selected_admin_round(db: Session, round_id: int | None) -> dict:
 def dormitories_for_round(db: Session, round_row: dict) -> list[dict]:
     if round_row["status"] == "ARCHIVED":
         return archived_results(db, round_row["id"])
-    return [
-        dormitory_details(db, row["id"])
-        for row in all_rows(
-            db,
-            "SELECT id FROM dormitories WHERE selection_round_id=:round ORDER BY id DESC",
-            {"round": round_row["id"]},
-        )
-    ]
+    rows = all_rows(
+        db,
+        "SELECT id FROM dormitories WHERE selection_round_id=:round ORDER BY id DESC",
+        {"round": round_row["id"]},
+    )
+    return dormitory_details_many(db, [row["id"] for row in rows])
 
 
 @router.get("/dormitories")
