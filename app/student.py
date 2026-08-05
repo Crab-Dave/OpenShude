@@ -21,6 +21,7 @@ router = APIRouter(prefix="/api")
 DB = Annotated[Session, Depends(get_db)]
 MESSAGE_PAGE_SIZE = 50
 CARD_NOT_FOUND_MESSAGE = "室友卡片不存在"
+AVATAR_NOT_FOUND_MESSAGE = "头像不存在"
 AVATAR_SIGNATURES = {
     "data:image/png;base64": lambda data: data.startswith(b"\x89PNG\r\n\x1a\n"),
     "data:image/jpeg;base64": lambda data: data.startswith(b"\xff\xd8\xff"),
@@ -185,13 +186,13 @@ def avatar_file(filename: str, request: Request, db: DB) -> FileResponse:
     require_user(current_user(request, db))
     match = AVATAR_URL_PATTERN.fullmatch(f"/api/avatars/{filename}")
     if not match:
-        raise ApiError(404, "AVATAR_NOT_FOUND", "头像不存在")
+        raise ApiError(404, "AVATAR_NOT_FOUND", AVATAR_NOT_FOUND_MESSAGE)
     avatar_root = Path(get_settings().avatar_dir).resolve()
     target = (avatar_root / filename).resolve()
     if not target.is_relative_to(avatar_root):
-        raise ApiError(404, "AVATAR_NOT_FOUND", "头像不存在")
+        raise ApiError(404, "AVATAR_NOT_FOUND", AVATAR_NOT_FOUND_MESSAGE)
     if target.is_symlink() or not target.is_file():
-        raise ApiError(404, "AVATAR_NOT_FOUND", "头像不存在")
+        raise ApiError(404, "AVATAR_NOT_FOUND", AVATAR_NOT_FOUND_MESSAGE)
     return FileResponse(target, media_type=AVATAR_MIME_TYPES[match["extension"]])
 
 
