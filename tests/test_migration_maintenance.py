@@ -61,7 +61,7 @@ def test_alembic_upgrades_a_legacy_database(tmp_path, monkeypatch):
             database.execute("SELECT account_type FROM users WHERE login_identifier='admin'").fetchone()[0]
             == "SUPER_ADMIN"
         )
-        assert database.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "20260806_01"
+        assert database.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "20260806_02"
         assert (
             database.execute(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='system_settings'"
@@ -140,6 +140,38 @@ def test_validation_reports_missing_constrained_tables_once(tmp_path, monkeypatc
         validate_database(database_path)
     assert '"reports"' in str(validation_error.value)
     assert "reports:" not in str(validation_error.value)
+
+
+def test_hot_path_indexes_are_created_and_used(tmp_path, monkeypatch):
+    database_path = tmp_path / "indexes.db"
+    monkeypatch.setenv("DB_PATH", str(database_path))
+    get_settings.cache_clear()
+    command.upgrade(Config("alembic.ini"), "head")
+    get_settings.cache_clear()
+    expected = {
+        "idx_users_gender_status",
+        "idx_roommate_cards_status_updated",
+        "idx_conversations_student_a_activity",
+        "idx_conversations_student_b_activity",
+        "idx_messages_conversation",
+        "idx_blocks_blocked_blocker",
+        "idx_reports_reporter_created",
+        "idx_sessions_user",
+        "idx_dormitories_round_gender_status_created",
+        "idx_dormitory_applications_applicant_round_created",
+        "idx_dormitory_result_members_source",
+    }
+    with sqlite3.connect(database_path) as database:
+        indexes = {row[0] for row in database.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+        plan = " ".join(
+            row[3]
+            for row in database.execute(
+                """EXPLAIN QUERY PLAN SELECT id FROM dormitories WHERE selection_round_id=1
+                AND gender='FEMALE' AND status IN('OPEN','FULL','CLOSED') ORDER BY created_at DESC"""
+            )
+        )
+    assert expected <= indexes
+    assert "idx_dormitories_round_gender_status_created" in plan
 
 
 def test_fresh_production_database_bootstrap(tmp_path, monkeypatch):
