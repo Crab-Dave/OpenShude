@@ -794,21 +794,32 @@ function showApplicationModal() {
   });
 }
 
+function dormitoryActionMarkup(item, mine, currentDormitory, open) {
+  if (mine) return `<button class="btn btn-danger" data-leave-dorm ${open ? '' : 'disabled'}>${icon('log-out')}退出宿舍</button>`;
+  if (currentDormitory) return `<button class="btn btn-secondary" disabled>${icon('check')}已加入其他宿舍</button>`;
+  if (item.status === 'FULL') return `<button class="btn btn-secondary" disabled>${icon('users')}已满员</button>`;
+  return `<button class="btn btn-primary" data-apply-dorm="${item.id}" data-initiator-id="${item.initiator_id}" ${open ? '' : 'disabled'}>${icon('message-circle')}联系并申请</button>`;
+}
+
+function dormitoryMemberMarkup(member, isInitiator, open) {
+  let removeAction = '';
+  if (isInitiator && member.user_id !== state.user.id && open) {
+    removeAction = `<button class="btn btn-danger btn-sm" data-remove-member="${member.user_id}">${icon('user-minus')}移除</button>`;
+  }
+  const role = member.role === 'INITIATOR' ? ' · 发起人' : '';
+  return `<div class="dormitory-member">${avatar(member.avatar_url, member.name, 'avatar-sm')}<div><b>${escapeHtml(member.name)}${role}</b><span>${escapeHtml(member.grade)}</span></div>${removeAction}</div>`;
+}
+
 function dormitoryCardMarkup(item, currentDormitory, open) {
   const mine = item.id === currentDormitory?.id;
   const isInitiator = mine && item.current_user_role === 'INITIATOR';
-  const action = mine
-    ? `<button class="btn btn-danger" data-leave-dorm ${open ? '' : 'disabled'}>${icon('log-out')}退出宿舍</button>`
-    : currentDormitory
-      ? `<button class="btn btn-secondary" disabled>${icon('check')}已加入其他宿舍</button>`
-      : item.status === 'FULL'
-        ? `<button class="btn btn-secondary" disabled>${icon('users')}已满员</button>`
-        : `<button class="btn btn-primary" data-apply-dorm="${item.id}" data-initiator-id="${item.initiator_id}" ${open ? '' : 'disabled'}>${icon('message-circle')}联系并申请</button>`;
+  const action = dormitoryActionMarkup(item, mine, currentDormitory, open);
+  const members = item.members.map((member) => dormitoryMemberMarkup(member, isInitiator, open)).join('');
   return `<article class="dormitory-card ${mine ? 'current' : ''}" data-dorm-id="${item.id}" data-dorm-status="${item.status}">
       <div class="dormitory-card-head"><div><span>${escapeHtml(item.dormitory_code)}</span><h2>${escapeHtml(item.name)}</h2></div><div class="dormitory-badges">${mine ? statusBadge('我的宿舍', 'open', 'home') : ''}${statusBadge(`${item.member_count}/4 人`, item.status.toLowerCase(), 'users')}</div></div>
       <p>${item.building && item.room_number ? `${escapeHtml(item.building)} ${escapeHtml(item.room_number)}` : '等待管理员分配房间'}</p>
       <div class="dormitory-owner">${icon('crown')}发起人：${escapeHtml(item.initiator_name)}</div>
-      <div class="dormitory-members"><strong>已加入成员</strong>${item.members.map((member) => `<div class="dormitory-member">${avatar(member.avatar_url, member.name, 'avatar-sm')}<div><b>${escapeHtml(member.name)}${member.role === 'INITIATOR' ? ' · 发起人' : ''}</b><span>${escapeHtml(member.grade)}</span></div>${isInitiator && member.user_id !== state.user.id && open ? `<button class="btn btn-danger btn-sm" data-remove-member="${member.user_id}">${icon('user-minus')}移除</button>` : ''}</div>`).join('')}</div>
+      <div class="dormitory-members"><strong>已加入成员</strong>${members}</div>
       <div class="dormitory-card-action">${action}</div>
     </article>`;
 }
@@ -837,6 +848,77 @@ function bindDormitoryCardActions(root, currentDormitory) {
   }));
 }
 
+function dormitoryStageLabel(open, status) {
+  if (open) return '进行中';
+  if (status === 'ARCHIVED') return '已归档';
+  return '已截止';
+}
+
+function pendingReviewMarkup(dormitory) {
+  if (!dormitory || dormitory.current_user_role !== 'INITIATOR') return '';
+  const applications = dormitory.pending_applications.map((application) => `<div class="member-row">${avatar(application.applicant_avatar, application.applicant_name, 'avatar-sm')}<div class="member-copy"><strong>${escapeHtml(application.applicant_name)}</strong><span>${escapeHtml(application.note || '未填写申请说明')}</span></div><button class="btn btn-secondary btn-sm" data-review-dorm="${application.id}" data-action="reject">拒绝</button><button class="btn btn-primary btn-sm" data-review-dorm="${application.id}" data-action="approve">通过</button></div>`).join('');
+  const content = applications || '<p class="field-hint">暂无待审核申请</p>';
+  return `<div class="panel dorm-applications"><div class="section-heading"><div><h2>待审核申请</h2><p>也可以直接在私信申请卡片中处理</p></div></div>${content}</div>`;
+}
+
+function ownApplicationsMarkup(dormitory, applications) {
+  if (dormitory) return '';
+  const pending = applications.filter((item) => item.status === 'PENDING');
+  if (!pending.length) return '';
+  const items = pending.map((item) => `<p class="field-hint">${escapeHtml(item.dormitory_name)} · ${formatDate(item.created_at)}</p>`).join('');
+  return `<div class="panel"><strong>待审核申请</strong>${items}</div>`;
+}
+
+function dormitoryToolbarAction(dormitory, open) {
+  if (dormitory) return '<span class="field-hint">你的宿舍已置顶展示</span>';
+  return `<button class="btn btn-primary" id="create-dorm" ${open ? '' : 'disabled'}>${icon('plus')}新建宿舍并加入</button>`;
+}
+
+function bindDormitorySearch() {
+  document.querySelector('#dormitory-search-form')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    state.dormitorySearch = new FormData(event.currentTarget).get('search').trim();
+    renderDorm();
+  });
+}
+
+function bindDormitoryReviews() {
+  document.querySelectorAll('[data-review-dorm]').forEach((button) => button.addEventListener('click', async () => {
+    try {
+      await api(`/api/dormitory-applications/${button.dataset.reviewDorm}/${button.dataset.action}`, { method: 'POST', body: '{}' });
+      toast(button.dataset.action === 'approve' ? '申请已通过' : '申请已拒绝');
+      await renderDorm();
+    } catch (error) { toast(error.message, 'error'); }
+  }));
+}
+
+async function loadMoreDormitories(button, params, dormitories, total, currentDormitory, open) {
+  button.disabled = true;
+  button.innerHTML = `${icon('loader-circle')}加载中`;
+  try {
+    params.set('offset', String(dormitories.length));
+    const nextPage = await api(`/api/dormitories?${params}`);
+    dormitories.push(...nextPage.dormitories);
+    const template = document.createElement('template');
+    template.innerHTML = nextPage.dormitories.map((item) => dormitoryCardMarkup(item, currentDormitory, open)).join('');
+    bindDormitoryCardActions(template.content, currentDormitory);
+    document.querySelector('.dormitory-grid').append(template.content);
+    refreshIcons();
+    if (!nextPage.dormitories.length || dormitories.length >= nextPage.total) button.closest('.load-more').remove();
+    else button.innerHTML = `${icon('chevrons-down')}查看更多`;
+  } catch (error) {
+    button.innerHTML = `${icon('chevrons-down')}查看更多`;
+    toast(error.message, 'error');
+  } finally {
+    button.disabled = false;
+    refreshIcons();
+  }
+}
+
+function bindDormitoryPagination(params, dormitories, total, currentDormitory, open) {
+  document.querySelector('#load-more-dormitories')?.addEventListener('click', (event) => loadMoreDormitories(event.currentTarget, params, dormitories, total, currentDormitory, open));
+}
+
 async function renderDorm() {
   const params = new URLSearchParams({ limit: '15' });
   if (state.dormitorySearch) params.set('search', state.dormitorySearch);
@@ -848,44 +930,18 @@ async function renderDorm() {
   }
   const dormitories = firstPage.dormitories;
   const total = firstPage.total;
-  const stageBanner = `<div class="stage-banner ${open ? 'open' : 'closed'}">${icon(open ? 'door-open' : 'lock-keyhole')}<div><strong>${escapeHtml(round.name)} · ${open ? '进行中' : round.status === 'ARCHIVED' ? '已归档' : '已截止'}</strong><span>${open ? '可以创建宿舍、发送加入申请或退出当前宿舍' : '本轮已停止学生变更；历史结果可在“历史结果”中查看'}</span></div></div>`;
-  const pendingReview = dormitory?.current_user_role === 'INITIATOR' ? `<div class="panel dorm-applications"><div class="section-heading"><div><h2>待审核申请</h2><p>也可以直接在私信申请卡片中处理</p></div></div>${dormitory.pending_applications.length ? `<div class="member-list">${dormitory.pending_applications.map((application) => `<div class="member-row">${avatar(application.applicant_avatar, application.applicant_name, 'avatar-sm')}<div class="member-copy"><strong>${escapeHtml(application.applicant_name)}</strong><span>${escapeHtml(application.note || '未填写申请说明')}</span></div><button class="btn btn-secondary btn-sm" data-review-dorm="${application.id}" data-action="reject">拒绝</button><button class="btn btn-primary btn-sm" data-review-dorm="${application.id}" data-action="approve">通过</button></div>`).join('')}</div>` : '<p class="field-hint">暂无待审核申请</p>'}</div>` : '';
-  const ownApplications = !dormitory && applications.some((item) => item.status === 'PENDING') ? `<div class="panel"><strong>待审核申请</strong>${applications.filter((item) => item.status === 'PENDING').map((item) => `<p class="field-hint">${escapeHtml(item.dormitory_name)} · ${formatDate(item.created_at)}</p>`).join('')}</div>` : '';
-  const toolbarAction = dormitory ? '<span class="field-hint">你的宿舍已置顶展示</span>' : `<button class="btn btn-primary" id="create-dorm" ${open ? '' : 'disabled'}>${icon('plus')}新建宿舍并加入</button>`;
+  const stageLabel = dormitoryStageLabel(open, round.status);
+  const stageBanner = `<div class="stage-banner ${open ? 'open' : 'closed'}">${icon(open ? 'door-open' : 'lock-keyhole')}<div><strong>${escapeHtml(round.name)} · ${stageLabel}</strong><span>${open ? '可以创建宿舍、发送加入申请或退出当前宿舍' : '本轮已停止学生变更；历史结果可在“历史结果”中查看'}</span></div></div>`;
+  const pendingReview = pendingReviewMarkup(dormitory);
+  const ownApplications = ownApplicationsMarkup(dormitory, applications);
+  const toolbarAction = dormitoryToolbarAction(dormitory, open);
   const loadMore = dormitories.length < total ? `<div class="load-more"><button class="btn btn-secondary" id="load-more-dormitories">${icon('chevrons-down')}查看更多</button></div>` : '';
   setPage(`${stageBanner}<div class="toolbar"><form class="search-field" id="dormitory-search-form">${icon('search')}<input name="search" value="${escapeHtml(state.dormitorySearch)}" placeholder="按宿舍成员姓名搜索"></form><div class="toolbar-spacer"></div>${toolbarAction}</div>${pendingReview}${ownApplications}${dormitoryListMarkup(dormitories, dormitory, open)}${loadMore}`);
-  document.querySelector('#dormitory-search-form').addEventListener('submit', (event) => {
-    event.preventDefault(); state.dormitorySearch = new FormData(event.currentTarget).get('search').trim(); renderDorm();
-  });
-  document.querySelectorAll('[data-review-dorm]').forEach((button) => button.addEventListener('click', async () => {
-    try { await api(`/api/dormitory-applications/${button.dataset.reviewDorm}/${button.dataset.action}`, { method: 'POST', body: '{}' }); toast(button.dataset.action === 'approve' ? '申请已通过' : '申请已拒绝'); await renderDorm(); }
-    catch (error) { toast(error.message, 'error'); }
-  }));
+  bindDormitorySearch();
+  bindDormitoryReviews();
   document.querySelector('#create-dorm')?.addEventListener('click', showCreateDormitoryModal);
   bindDormitoryCardActions(document, dormitory);
-  document.querySelector('#load-more-dormitories')?.addEventListener('click', async (event) => {
-    const button = event.currentTarget;
-    button.disabled = true;
-    button.innerHTML = `${icon('loader-circle')}加载中`;
-    try {
-      params.set('offset', String(dormitories.length));
-      const nextPage = await api(`/api/dormitories?${params}`);
-      dormitories.push(...nextPage.dormitories);
-      const template = document.createElement('template');
-      template.innerHTML = nextPage.dormitories.map((item) => dormitoryCardMarkup(item, dormitory, open)).join('');
-      bindDormitoryCardActions(template.content, dormitory);
-      document.querySelector('.dormitory-grid').append(template.content);
-      refreshIcons();
-      if (!nextPage.dormitories.length || dormitories.length >= nextPage.total) button.closest('.load-more').remove();
-      else button.innerHTML = `${icon('chevrons-down')}查看更多`;
-    } catch (error) {
-      button.innerHTML = `${icon('chevrons-down')}查看更多`;
-      toast(error.message, 'error');
-    } finally {
-      button.disabled = false;
-      refreshIcons();
-    }
-  });
+  bindDormitoryPagination(params, dormitories, total, dormitory, open);
 }
 
 async function renderDormitoryHistory() {
