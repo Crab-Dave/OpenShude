@@ -1,3 +1,4 @@
+import base64
 import sqlite3
 
 import pytest
@@ -60,7 +61,7 @@ def test_alembic_upgrades_a_legacy_database(tmp_path, monkeypatch):
             database.execute("SELECT account_type FROM users WHERE login_identifier='admin'").fetchone()[0]
             == "SUPER_ADMIN"
         )
-        assert database.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "20260805_01"
+        assert database.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "20260806_01"
         assert (
             database.execute(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='system_settings'"
@@ -94,6 +95,37 @@ def test_static_page_migration_removes_existing_database_content(tmp_path, monke
             ).fetchone()[0]
             == 0
         )
+
+
+def test_avatar_migration_externalizes_valid_base64_content(tmp_path, monkeypatch):
+    database_path = tmp_path / "avatars.db"
+    avatar_dir = tmp_path / "avatars"
+    monkeypatch.setenv("DB_PATH", str(database_path))
+    monkeypatch.setenv("AVATAR_DIR", str(avatar_dir))
+    get_settings.cache_clear()
+    config = Config("alembic.ini")
+    command.upgrade(config, "20260805_01")
+    image = b"\x89PNG\r\n\x1a\n" + b"migrated-avatar"
+    encoded = base64.b64encode(image).decode()
+    with sqlite3.connect(database_path) as database:
+        database.execute(
+            """INSERT INTO users(login_identifier,password_hash,password_salt,role,account_type,name,grade,
+            gender,major,status,created_at,updated_at) VALUES('avatar-user','hash','salt','STUDENT','USER',
+            '头像用户','2026级','FEMALE','计算机','ACTIVE','2026-01-01Z','2026-01-01Z')"""
+        )
+        user_id = database.execute("SELECT id FROM users WHERE login_identifier='avatar-user'").fetchone()[0]
+        database.execute(
+            """INSERT INTO roommate_cards(user_id,avatar_url,status,created_at,updated_at)
+            VALUES(?,?,'DRAFT','2026-01-01Z','2026-01-01Z')""",
+            (user_id, f"data:image/png;base64,{encoded}"),
+        )
+
+    command.upgrade(config, "head")
+    get_settings.cache_clear()
+    with sqlite3.connect(database_path) as database:
+        avatar_url = database.execute("SELECT avatar_url FROM roommate_cards").fetchone()[0]
+    assert avatar_url.startswith("/api/avatars/")
+    assert (avatar_dir / avatar_url.rsplit("/", 1)[1]).read_bytes() == image
 
 
 def test_validation_reports_missing_constrained_tables_once(tmp_path, monkeypatch):

@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     allowed_hosts: list[str] = ["127.0.0.1", "localhost", "testserver"]
     allowed_origins: list[str] = []
     public_dir: Path = Path("public")
+    avatar_dir: Path = Path("data/avatars")
     max_body_bytes: int = 4 * 1024 * 1024
     docs_enabled: bool = True
     max_concurrent_requests: int = Field(default=50, ge=1, le=1000)
