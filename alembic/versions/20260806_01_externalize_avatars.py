@@ -23,7 +23,7 @@ def upgrade() -> None:
     bind = op.get_bind()
     directory = Path(get_settings().avatar_dir)
     directory.mkdir(parents=True, exist_ok=True)
-    rows = bind.exec_driver_sql("SELECT id,avatar_url FROM roommate_cards").mappings().all()
+    rows = bind.exec_driver_sql("SELECT id,avatar_url FROM roommate_cards").mappings()
     for row in rows:
         value = row["avatar_url"] or ""
         header, separator, encoded = value.partition(",")
@@ -41,8 +41,11 @@ def upgrade() -> None:
             continue
         digest = hashlib.sha256(decoded).hexdigest()
         target = directory / f"{digest}.{extension}"
-        if not target.exists():
-            target.write_bytes(decoded)
+        try:
+            with target.open("xb") as output:
+                output.write(decoded)
+        except FileExistsError:
+            pass
         bind.exec_driver_sql(
             "UPDATE roommate_cards SET avatar_url=? WHERE id=?",
             (f"/api/avatars/{digest}.{extension}", row["id"]),

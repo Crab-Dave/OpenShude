@@ -190,7 +190,7 @@ def avatar_file(filename: str, request: Request, db: DB) -> FileResponse:
     target = (avatar_root / filename).resolve()
     if not target.is_relative_to(avatar_root):
         raise ApiError(404, "AVATAR_NOT_FOUND", "头像不存在")
-    if not target.is_file():
+    if target.is_symlink() or not target.is_file():
         raise ApiError(404, "AVATAR_NOT_FOUND", "头像不存在")
     return FileResponse(target, media_type=AVATAR_MIME_TYPES[match["extension"]])
 
