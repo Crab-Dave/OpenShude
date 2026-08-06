@@ -358,6 +358,7 @@ let browser;
   await mobile.locator('[data-message]').click();
   await mobile.locator('[data-chat-back]').waitFor();
   await mobile.locator('[data-chat-back]').click();
+  await mobile.waitForFunction(() => !document.querySelector('.chat-head'));
   assert.equal(await mobile.locator('.conversation-list').isVisible(), true);
   assert.equal(await mobile.locator('.chat-head').count(), 0);
   await mobile.screenshot({ path: path.join(outputDir, 'student-mobile.png'), fullPage: true });

@@ -760,10 +760,10 @@ function bindChat() {
       refreshIcons();
     } catch (error) { toast(error.message, 'error'); }
   });
-  document.querySelector('[data-chat-back]')?.addEventListener('click', () => {
+  document.querySelector('[data-chat-back]')?.addEventListener('click', async () => {
     state.selectedConversationId = null;
     state.applicationDormitoryId = null;
-    renderMessages({ preserveSelection: true });
+    await renderMessages({ preserveSelection: true });
   });
   document.querySelector('#message-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
