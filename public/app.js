@@ -473,6 +473,8 @@ async function renderDiscover() {
   const firstPage = await api(`/api/roommate-cards?${params}`);
   const cards = firstPage.cards;
   let total = firstPage.total;
+  let nextOffset = cards.length;
+  const loadedCardIds = new Set(cards.map((card) => card.id));
   const grades = firstPage.grades;
   setPage(`
     <div class="toolbar">
@@ -505,11 +507,14 @@ async function renderDiscover() {
     button.innerHTML = `${icon('loader-circle')}加载中`;
     refreshIcons();
     try {
-      params.set('offset', String(cards.length));
+      params.set('offset', String(nextOffset));
       const nextPage = await api(`/api/roommate-cards?${params}`);
-      cards.push(...nextPage.cards);
+      nextOffset += nextPage.cards.length;
       total = nextPage.total;
-      grid.insertAdjacentHTML('beforeend', nextPage.cards.map(roommateCard).join(''));
+      const newCards = nextPage.cards.filter((card) => !loadedCardIds.has(card.id));
+      newCards.forEach((card) => loadedCardIds.add(card.id));
+      cards.push(...newCards);
+      grid.insertAdjacentHTML('beforeend', newCards.map(roommateCard).join(''));
       refreshIcons();
       if (!nextPage.cards.length || cards.length >= total) button.closest('.load-more').remove();
       else button.innerHTML = `${icon('chevrons-down')}查看更多`;

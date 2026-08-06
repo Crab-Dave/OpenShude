@@ -96,6 +96,8 @@ let browser;
   assert.equal(await desktop.locator('#load-more-cards').count(), 1);
   await desktop.locator('#load-more-cards').click();
   await desktop.waitForFunction(() => document.querySelectorAll('.roommate-card').length === 16);
+  const loadedCardIds = await desktop.locator('.roommate-card').evaluateAll((cards) => cards.map((card) => card.dataset.cardId));
+  assert.equal(new Set(loadedCardIds).size, loadedCardIds.length);
   assert.equal(await desktop.locator('#load-more-cards').count(), 0);
   await desktop.locator('[data-gender="MALE"]').click();
   await desktop.waitForFunction(() => document.querySelector('[data-gender="MALE"]')?.classList.contains('active'));
