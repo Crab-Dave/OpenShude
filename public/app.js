@@ -674,10 +674,10 @@ async function saveProfile(form) {
   return api('/api/me/roommate-card', { method: 'PUT', body: JSON.stringify(data) });
 }
 
-async function renderMessages() {
+async function renderMessages({ preserveSelection = false } = {}) {
   const { conversations } = await api('/api/conversations');
   const selectedExists = conversations.some((conversation) => conversation.id === state.selectedConversationId);
-  if (!selectedExists) {
+  if (!selectedExists && !preserveSelection) {
     state.selectedConversationId = conversations[0]?.id || null;
     state.applicationDormitoryId = null;
   }
@@ -758,7 +758,7 @@ function bindChat() {
   document.querySelector('[data-chat-back]')?.addEventListener('click', () => {
     state.selectedConversationId = null;
     state.applicationDormitoryId = null;
-    renderMessages();
+    renderMessages({ preserveSelection: true });
   });
   document.querySelector('#message-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
