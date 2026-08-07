@@ -234,6 +234,7 @@ def refresh(request: Request, response: Response, db: DB) -> dict | Response:
         return auth_error(401, "INVALID_REFRESH_TOKEN", "请重新登录")
     verify_csrf(request, session["csrf_token_hash"])
     timestamp = now()
+    cleanup_expired_sessions(db, timestamp)
     if session["status"] not in ("ACTIVE", "PENDING_ACTIVATION"):
         db.execute(text("DELETE FROM sessions WHERE id=:id"), {"id": session["session_id"]})
         db.commit()

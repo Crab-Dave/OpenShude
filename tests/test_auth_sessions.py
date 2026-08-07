@@ -54,10 +54,14 @@ def test_login_issues_hashed_cookie_only_tokens(client):
 
 def test_expired_access_rotates_access_and_refresh_tokens(client):
     login(client, "2026001")
+    with TestClient(client.app) as expired_device:
+        login(expired_device, "2026002")
     old_access = client.cookies.get("access_token")
     old_refresh = client.cookies.get("refresh_token")
     csrf_token = client.cookies.get("csrf_token")
-    expire_access()
+    with SessionLocal.begin() as db:
+        db.execute(text("UPDATE sessions SET access_expires_at='2000-01-01T00:00:00.000Z' WHERE user_id=2"))
+        db.execute(text("UPDATE sessions SET refresh_expires_at='2000-01-01T00:00:00.000Z' WHERE user_id=3"))
 
     expired = client.get("/api/me")
     refreshed = client.post("/api/auth/refresh")
@@ -79,6 +83,7 @@ def test_expired_access_rotates_access_and_refresh_tokens(client):
             .mappings()
             .all()
         )
+        assert db.execute(text("SELECT COUNT(*) FROM sessions WHERE user_id=3")).scalar_one() == 0
     old = next(item for item in tokens if item["token_hash"] == sha256(old_refresh))
     assert old["consumed_at"] is not None
     assert old["replaced_by_hash"] == sha256(client.cookies.get("refresh_token"))
