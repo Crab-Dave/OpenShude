@@ -65,7 +65,7 @@ jobs:
       - build-and-push
 
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     environment:
       name: production
@@ -108,7 +108,7 @@ jobs:
           SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
           archive="openshude-image-$IMAGE_TAG.tar.gz"
-          timeout --foreground --signal=TERM --kill-after=30s 10m scp \
+          timeout --foreground --signal=TERM --kill-after=30s 20m scp \
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
             -i ~/.ssh/deploy_key \
