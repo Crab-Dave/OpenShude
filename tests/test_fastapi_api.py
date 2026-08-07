@@ -68,9 +68,9 @@ def test_roommate_cards_are_loaded_in_batches_of_fifteen(client):
         for index in range(20):
             user_id = db.execute(
                 text("""INSERT INTO users(login_identifier,password_hash,password_salt,role,account_type,
-                  authorization_version,must_change_password,name,grade,grade_id,gender,major,status,created_at,updated_at)
-                  SELECT :login,password_hash,password_salt,role,account_type,authorization_version,
-                  must_change_password,:name,grade,grade_id,gender,major,status,created_at,updated_at
+                  must_change_password,name,grade,grade_id,gender,major,status,created_at,updated_at)
+                  SELECT :login,password_hash,password_salt,role,account_type,must_change_password,
+                  :name,grade,grade_id,gender,major,status,created_at,updated_at
                   FROM users WHERE id=3 RETURNING id"""),
                 {"login": f"page-{index:02d}", "name": f"分页用户{index:02d}"},
             ).scalar_one()
@@ -102,9 +102,9 @@ def test_dormitories_are_batched_paginated_and_searched_on_the_server(client):
         for index in range(20):
             user_id = db.execute(
                 text("""INSERT INTO users(login_identifier,password_hash,password_salt,role,account_type,
-                  authorization_version,must_change_password,name,grade,grade_id,gender,major,status,created_at,updated_at)
-                  SELECT :login,password_hash,password_salt,role,account_type,authorization_version,
-                  must_change_password,:name,grade,grade_id,gender,major,status,created_at,updated_at
+                  must_change_password,name,grade,grade_id,gender,major,status,created_at,updated_at)
+                  SELECT :login,password_hash,password_salt,role,account_type,must_change_password,
+                  :name,grade,grade_id,gender,major,status,created_at,updated_at
                   FROM users WHERE id=3 RETURNING id"""),
                 {"login": f"dorm-page-{index:02d}", "name": f"宿舍成员{index:02d}"},
             ).scalar_one()
@@ -670,8 +670,13 @@ def test_admin_group_configuration_is_atomic(client):
         "reason": "初始配置",
     }
     assert client.put(endpoint, json=initial).status_code == 200
+    former_member = TestClient(client.app)
+    replacement_member = TestClient(client.app)
+    login(former_member, "2026001")
+    login(replacement_member, "2026002")
+    assert former_member.get("/api/me").json()["user"]["canManage"] is True
+    assert replacement_member.get("/api/me").json()["user"]["canManage"] is False
     with SessionLocal() as db:
-        versions_before = dict(db.execute(text("SELECT id,authorization_version FROM users WHERE id IN(2,3)")).all())
         audits_before = db.execute(
             text("SELECT COUNT(*) FROM audit_logs WHERE action='UPDATE_ADMIN_GROUP' AND target_id=:target"),
             {"target": str(group["id"])},
@@ -696,10 +701,6 @@ def test_admin_group_configuration_is_atomic(client):
     assert [member["id"] for member in current["members"]] == [2]
     with SessionLocal() as db:
         assert (
-            dict(db.execute(text("SELECT id,authorization_version FROM users WHERE id IN(2,3)")).all())
-            == versions_before
-        )
-        assert (
             db.execute(
                 text("SELECT COUNT(*) FROM audit_logs WHERE action='UPDATE_ADMIN_GROUP' AND target_id=:target"),
                 {"target": str(group["id"])},
@@ -710,10 +711,8 @@ def test_admin_group_configuration_is_atomic(client):
     updated = client.put(endpoint, json={**initial, "userIds": [3], "reason": "原子替换成员"})
     assert updated.status_code == 200
     assert [member["id"] for member in updated.json()["group"]["members"]] == [3]
-    with SessionLocal() as db:
-        versions_after = dict(db.execute(text("SELECT id,authorization_version FROM users WHERE id IN(2,3)")).all())
-        assert versions_after[2] == versions_before[2] + 1
-        assert versions_after[3] == versions_before[3] + 1
+    assert former_member.get("/api/me").json()["user"]["canManage"] is False
+    assert replacement_member.get("/api/me").json()["user"]["canManage"] is True
 
 
 def test_batch_update_login_identifiers_is_atomic_and_revokes_sessions(client):

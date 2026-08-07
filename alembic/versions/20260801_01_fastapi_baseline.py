@@ -48,7 +48,6 @@ def upgrade() -> None:
             ("gender", "TEXT NOT NULL DEFAULT 'UNSPECIFIED'"),
             ("major", EMPTY_TEXT_COLUMN),
             ("account_type", "TEXT NOT NULL DEFAULT 'USER'"),
-            ("authorization_version", "INTEGER NOT NULL DEFAULT 1"),
             ("must_change_password", "INTEGER NOT NULL DEFAULT 0"),
             ("grade_id", "INTEGER REFERENCES grades(id)"),
         ],
