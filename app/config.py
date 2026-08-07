@@ -15,8 +15,9 @@ class Settings(BaseSettings):
     backup_dir: Path = Path("backups")
     app_version: str = ""
     initial_admin_password: str = ""
-    session_days: int = 7
-    session_cookie_secure: bool = False
+    access_token_minutes: int = Field(default=15, ge=1, le=60)
+    refresh_token_days: int = Field(default=7, ge=1, le=30)
+    auth_cookie_secure: bool = False
     allowed_hosts: list[str] = ["127.0.0.1", "localhost", "testserver"]
     allowed_origins: list[str] = []
     public_dir: Path = Path("public")

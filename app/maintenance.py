@@ -140,6 +140,7 @@ def validate_database(filename: Path) -> dict:
     required = {
         "users",
         "roommate_cards",
+        "refresh_tokens",
         "sessions",
         "dormitory_selection_rounds",
         "dormitories",

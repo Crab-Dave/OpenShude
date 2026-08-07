@@ -181,8 +181,8 @@ app = FastAPI(
     redoc_url="/redoc" if settings.docs_enabled else None,
     openapi_url="/openapi.json" if settings.docs_enabled else None,
 )
-if settings.environment == "production" and not settings.session_cookie_secure:
-    logger.warning("SESSION_COOKIE_SECURE is disabled because production is currently served over HTTP")
+if settings.environment == "production" and not settings.auth_cookie_secure:
+    logger.warning("AUTH_COOKIE_SECURE is disabled because production is currently served over HTTP")
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 app.add_middleware(SecurityMiddleware)
 app.add_exception_handler(ApiError, api_error_handler)

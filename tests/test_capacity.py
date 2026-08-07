@@ -49,7 +49,8 @@ def test_avatar_binary_is_externalized_and_requires_login(client, tmp_path, monk
     with SessionLocal.begin() as db:
         db.execute(text("UPDATE roommate_cards SET status='DRAFT' WHERE user_id=2"))
     login_response = client.post("/api/auth/login", json={"loginIdentifier": "2026001", "password": "Student123!"})
-    client.headers["x-csrf-token"] = login_response.json()["csrfToken"]
+    assert login_response.status_code == 200
+    client.headers["x-csrf-token"] = client.cookies.get("csrf_token")
     image = b"\x89PNG\r\n\x1a\n" + b"avatar-content"
     encoded = base64.b64encode(image).decode()
 

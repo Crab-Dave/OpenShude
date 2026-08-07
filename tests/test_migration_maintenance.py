@@ -61,7 +61,7 @@ def test_alembic_upgrades_a_legacy_database(tmp_path, monkeypatch):
             database.execute("SELECT account_type FROM users WHERE login_identifier='admin'").fetchone()[0]
             == "SUPER_ADMIN"
         )
-        assert database.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "20260806_02"
+        assert database.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "20260807_01"
         assert (
             database.execute(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='system_settings'"
@@ -156,6 +156,8 @@ def test_hot_path_indexes_are_created_and_used(tmp_path, monkeypatch):
         "idx_messages_conversation",
         "idx_blocks_blocked_blocker",
         "idx_reports_reporter_created",
+        "idx_refresh_tokens_session",
+        "idx_sessions_refresh_expiry",
         "idx_sessions_user",
         "idx_dormitories_round_gender_status_created",
         "idx_dormitory_applications_applicant_round_created",
@@ -203,6 +205,7 @@ def test_fresh_production_database_bootstrap(tmp_path, monkeypatch):
         "messages",
         "reports",
         "roommate_cards",
+        "refresh_tokens",
         "sessions",
         "student_selection_group_members",
         "student_selection_groups",
@@ -223,7 +226,7 @@ def test_fresh_production_database_bootstrap(tmp_path, monkeypatch):
 
 
 def test_models_map_all_current_tables():
-    assert len(Base.metadata.tables) == 23
+    assert len(Base.metadata.tables) == 24
     database_engine = create_database_engine()
     try:
         tables = set(inspect(database_engine).get_table_names())
