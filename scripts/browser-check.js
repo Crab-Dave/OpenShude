@@ -60,6 +60,29 @@ let browser;
 
   await login(desktop, '2026001', 'Student123!');
   await desktop.waitForSelector('.roommate-card');
+  const authenticationCookies = await desktop.context().cookies(`${baseUrl}/api/auth/refresh`);
+  const accessCookie = authenticationCookies.find((cookie) => cookie.name === 'access_token');
+  const refreshCookie = authenticationCookies.find((cookie) => cookie.name === 'refresh_token');
+  const csrfCookie = authenticationCookies.find((cookie) => cookie.name === 'csrf_token');
+  assert.equal(accessCookie.httpOnly, true);
+  assert.equal(accessCookie.sameSite, 'Lax');
+  assert.equal(refreshCookie.httpOnly, true);
+  assert.equal(refreshCookie.sameSite, 'Strict');
+  assert.equal(csrfCookie.httpOnly, false);
+  let refreshRequests = 0;
+  const trackRefresh = (request) => {
+    if (request.url() === `${baseUrl}/api/auth/refresh`) refreshRequests += 1;
+  };
+  desktop.on('request', trackRefresh);
+  await desktop.context().clearCookies({ name: 'access_token' });
+  const refreshedUsers = await desktop.evaluate(() => Promise.all([api('/api/me'), api('/api/me')]));
+  desktop.off('request', trackRefresh);
+  assert.equal(refreshRequests, 1);
+  assert.equal(refreshedUsers.every((session) => session.user.name === '林夏'), true);
+  assert.equal(
+    (await desktop.context().cookies(`${baseUrl}/api/me`)).some((cookie) => cookie.name === 'access_token'),
+    true,
+  );
   const loggedInSessionResponse = desktop.waitForResponse((response) => response.url() === `${baseUrl}/api/me`);
   await desktop.locator('#home-btn').click();
   assert.equal((await loggedInSessionResponse).status(), 200);

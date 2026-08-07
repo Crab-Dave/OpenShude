@@ -6,7 +6,6 @@ const API_QUERY_CHARACTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx
 
 const state = {
   user: null,
-  csrfToken: '',
   view: 'discover',
   mode: 'student',
   selectedConversationId: null,
@@ -19,6 +18,8 @@ const state = {
   adminRoundId: null,
   selectionGroups: [],
 };
+
+let refreshPromise = null;
 
 const labels = {
   cleanliness: {
@@ -78,7 +79,34 @@ function toast(message, kind = 'success') {
   setTimeout(() => item.remove(), 3200);
 }
 
-async function api(path, options = {}) {
+function readCookie(name) {
+  const prefix = `${name}=`;
+  const item = document.cookie.split('; ').find((cookie) => cookie.startsWith(prefix));
+  return item ? decodeURIComponent(item.slice(prefix.length)) : '';
+}
+
+async function refreshAccessToken() {
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      const response = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'X-CSRF-Token': readCookie('csrf_token') },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 409 && data.error?.code === 'REFRESH_ALREADY_ROTATED') return;
+      if (!response.ok) {
+        const error = new Error(data.error?.message || '登录已过期，请重新登录');
+        error.code = data.error?.code;
+        error.status = response.status;
+        throw error;
+      }
+    })().finally(() => { refreshPromise = null; });
+  }
+  return refreshPromise;
+}
+
+async function api(path, options = {}, retryAuthentication = true) {
   const [pathname, query, ...extraParts] = typeof path === 'string' ? path.split('?') : [];
   const pathSegments = pathname?.startsWith('/api/') ? pathname.slice(5).split('/') : [];
   const validPath = pathSegments.length > 0 && pathSegments.every((segment) => segment && [...segment].every((character) => API_PATH_CHARACTERS.includes(character)));
@@ -88,13 +116,19 @@ async function api(path, options = {}) {
   if (requestUrl.origin !== window.location.origin) throw new Error('接口地址无效');
   const headers = { ...(options.headers || {}) };
   if (options.body !== undefined) headers['Content-Type'] = 'application/json';
-  if (state.csrfToken && !['GET', 'HEAD'].includes(options.method || 'GET')) headers['X-CSRF-Token'] = state.csrfToken;
+  const csrfToken = readCookie('csrf_token');
+  if (csrfToken && !['GET', 'HEAD'].includes(options.method || 'GET')) headers['X-CSRF-Token'] = csrfToken;
   const response = await fetch(requestUrl, { credentials: 'same-origin', ...options, headers });
   const data = await response.json().catch(() => ({}));
+  if (response.status === 401 && data.error?.code === 'ACCESS_TOKEN_EXPIRED' && retryAuthentication) {
+    try {
+      await refreshAccessToken();
+      return api(path, options, false);
+    } catch {}
+  }
   if (!response.ok) {
     if (response.status === 401 && state.user) {
       state.user = null;
-      state.csrfToken = '';
       const next = window.location.pathname === '/roommates' ? '/roommates' : '/';
       history.replaceState({}, '', next === '/roommates' ? '/login?next=%2Froommates' : '/login');
       renderLoginPage();
@@ -105,7 +139,6 @@ async function api(path, options = {}) {
         if (refreshed.ok) {
           const session = await refreshed.json();
           state.user = session.user;
-          state.csrfToken = session.csrfToken;
           if (!state.user.canManage && state.user.accountType === 'USER') {
             state.mode = 'student';
             state.view = 'discover';
@@ -351,7 +384,6 @@ function renderLoginPage() {
       });
       state.user = data.user;
       state.gender = data.user.gender === 'MALE' ? 'MALE' : 'FEMALE';
-      state.csrfToken = data.csrfToken;
       state.mode = data.user.isSuperAdmin ? 'management' : 'student';
       state.view = state.mode === 'management' ? 'overview' : 'discover';
       if (data.user.mustChangePassword) {
@@ -374,7 +406,6 @@ function renderLoginPage() {
 async function logout() {
   try { await api('/api/auth/logout', { method: 'POST', body: '{}' }); } catch {}
   state.user = null;
-  state.csrfToken = '';
   closeModal();
   goHome();
 }
@@ -1468,7 +1499,6 @@ async function init() {
     const data = await api('/api/me');
     state.user = data.user;
     state.gender = data.user.gender === 'MALE' ? 'MALE' : 'FEMALE';
-    state.csrfToken = data.csrfToken;
   } catch (error) {
     if (error.status !== 401) toast(error.message, 'error');
   }

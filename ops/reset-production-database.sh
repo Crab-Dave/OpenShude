@@ -80,6 +80,7 @@ empty_tables = (
     "messages",
     "reports",
     "roommate_cards",
+    "refresh_tokens",
     "sessions",
     "student_selection_group_members",
     "student_selection_groups",

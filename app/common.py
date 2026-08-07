@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .errors import ApiError
-from .security import token_hash
+from .security import ACCESS_COOKIE, CSRF_COOKIE, secure_compare, token_hash
 
 PERMISSIONS = {
     "USER_READ": "查看用户",
@@ -51,27 +51,34 @@ def clean_text(value: object, maximum: int, required: bool = False) -> str:
     return result
 
 
+def verify_csrf(request: Request, expected_hash: str) -> None:
+    header = request.headers.get("x-csrf-token", "")
+    cookie = request.cookies.get(CSRF_COOKIE, "")
+    if not header or not cookie or not secure_compare(header, cookie) or token_hash(cookie) != expected_hash:
+        raise ApiError(403, "INVALID_CSRF_TOKEN", "请求校验失败，请刷新后重试")
+
+
 def authenticate(request: Request, db: Session, require_csrf: bool | None = None) -> dict:
-    token = request.cookies.get("session")
+    token = request.cookies.get(ACCESS_COOKIE)
     if not token:
-        raise ApiError(401, "UNAUTHORIZED", "请先登录")
+        raise ApiError(401, "ACCESS_TOKEN_EXPIRED", "登录状态需要刷新")
     user = one(
         db,
         """
-        SELECT s.token_hash, s.csrf_token, s.expires_at,
+        SELECT s.id AS session_id, s.csrf_token_hash, s.access_expires_at,
           u.id, u.login_identifier, u.account_type, u.authorization_version,
           u.must_change_password, u.name, u.grade, u.grade_id, u.gender, u.major, u.status
-        FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = :token
+        FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.access_token_hash = :token
         """,
         {"token": token_hash(token)},
     )
-    if not user or user["expires_at"] <= now():
-        raise ApiError(401, "SESSION_EXPIRED", "登录已过期")
+    if not user or user["access_expires_at"] <= now():
+        raise ApiError(401, "ACCESS_TOKEN_EXPIRED", "登录状态需要刷新")
     if user["status"] not in ("ACTIVE", "PENDING_ACTIVATION"):
         raise ApiError(403, "ACCOUNT_UNAVAILABLE", "账号当前不可用")
     check_csrf = request.method not in ("GET", "HEAD", "OPTIONS") if require_csrf is None else require_csrf
-    if check_csrf and request.headers.get("x-csrf-token") != user["csrf_token"]:
-        raise ApiError(403, "INVALID_CSRF_TOKEN", "请求校验失败，请刷新后重试")
+    if check_csrf:
+        verify_csrf(request, user["csrf_token_hash"])
     return user
 
 

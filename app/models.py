@@ -189,12 +189,29 @@ class AuditLog(Base):
 
 class LoginSession(Base):
     __tablename__ = "sessions"
-    token_hash: Mapped[str] = mapped_column(Text, primary_key=True)
-    csrf_token: Mapped[str] = mapped_column(Text)
+    id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey(USERS_ID, ondelete="CASCADE"))
-    expires_at: Mapped[str] = mapped_column(Text)
+    access_token_hash: Mapped[str] = mapped_column(Text, unique=True)
+    access_expires_at: Mapped[str] = mapped_column(Text)
+    csrf_token_hash: Mapped[str] = mapped_column(Text)
+    refresh_expires_at: Mapped[str] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text)
-    __table_args__ = (Index("idx_sessions_user", "user_id"),)
+    refreshed_at: Mapped[str] = mapped_column(Text)
+    __table_args__ = (
+        Index("idx_sessions_user", "user_id"),
+        Index("idx_sessions_refresh_expiry", "refresh_expires_at"),
+    )
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+    token_hash: Mapped[str] = mapped_column(Text, primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("sessions.id", ondelete="CASCADE"))
+    expires_at: Mapped[str] = mapped_column(Text)
+    consumed_at: Mapped[str | None] = mapped_column(Text)
+    replaced_by_hash: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text)
+    __table_args__ = (Index("idx_refresh_tokens_session", "session_id"),)
 
 
 class DormitorySelectionRound(Base):

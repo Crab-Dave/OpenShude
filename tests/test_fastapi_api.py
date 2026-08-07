@@ -156,15 +156,22 @@ def test_dormitories_are_batched_paginated_and_searched_on_the_server(client):
     assert oversized.status_code == 400
 
 
-def test_existing_session_csrf_body_limit_host_and_login_rate_limit(client):
-    raw_token = "existing-node-session-token"
+def test_existing_access_csrf_body_limit_host_and_login_rate_limit(client):
+    raw_token = "existing-access-token"
+    csrf_token = "existing-csrf"
     with SessionLocal.begin() as db:
         db.execute(
-            text("""INSERT INTO sessions(token_hash,csrf_token,user_id,expires_at,created_at)
-              VALUES(:hash,'existing-csrf',2,'2099-01-01T00:00:00.000Z',:now)"""),
-            {"hash": hashlib.sha256(raw_token.encode()).hexdigest(), "now": now()},
+            text("""INSERT INTO sessions(user_id,access_token_hash,access_expires_at,csrf_token_hash,
+              refresh_expires_at,created_at,refreshed_at)
+              VALUES(2,:access,'2099-01-01T00:00:00.000Z',:csrf,'2099-01-01T00:00:00.000Z',:now,:now)"""),
+            {
+                "access": hashlib.sha256(raw_token.encode()).hexdigest(),
+                "csrf": hashlib.sha256(csrf_token.encode()).hexdigest(),
+                "now": now(),
+            },
         )
-    client.cookies.set("session", raw_token)
+    client.cookies.set("access_token", raw_token)
+    client.cookies.set("csrf_token", csrf_token)
     assert client.get("/api/me").status_code == 200
     assert client.post("/api/me/dormitory/leave").status_code == 403
     too_large = client.put(
@@ -840,12 +847,14 @@ def test_only_one_round_can_open_under_concurrency(client):
         result = client.post("/api/admin/dormitory-rounds", json={"code": code, "name": code, "participantIds": [2, 3]})
         round_ids.append(result.json()["round"]["id"])
 
-    cookie = client.cookies.get("session")
+    cookie = client.cookies.get("access_token")
+    csrf_cookie = client.cookies.get("csrf_token")
     csrf = client.headers["x-csrf-token"]
 
     def open_round(round_id):
         with TestClient(client.app) as parallel:
-            parallel.cookies.set("session", cookie)
+            parallel.cookies.set("access_token", cookie)
+            parallel.cookies.set("csrf_token", csrf_cookie)
             return parallel.post(
                 f"/api/admin/dormitory-rounds/{round_id}/open", json={"reason": "并发"}, headers={"x-csrf-token": csrf}
             ).status_code
@@ -876,12 +885,14 @@ def test_concurrent_approvals_never_overfill_a_dormitory(client):
     assert client.post(f"/api/dormitory-applications/{first}/approve").status_code == 200
     assert client.post(f"/api/dormitory-applications/{second}/approve").status_code == 200
     pending_ids = [apply("2026006", 7), apply("2026007", 8)]
-    cookie = client.cookies.get("session")
+    cookie = client.cookies.get("access_token")
+    csrf_cookie = client.cookies.get("csrf_token")
     csrf = client.headers["x-csrf-token"]
 
     def approve(application_id):
         with TestClient(client.app) as parallel:
-            parallel.cookies.set("session", cookie)
+            parallel.cookies.set("access_token", cookie)
+            parallel.cookies.set("csrf_token", csrf_cookie)
             return parallel.post(
                 f"/api/dormitory-applications/{application_id}/approve",
                 headers={"x-csrf-token": csrf},

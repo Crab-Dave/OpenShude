@@ -3,6 +3,10 @@ import hmac
 import secrets
 from dataclasses import dataclass
 
+ACCESS_COOKIE = "access_token"
+REFRESH_COOKIE = "refresh_token"
+CSRF_COOKIE = "csrf_token"
+
 
 @dataclass(frozen=True)
 class PasswordHash:
@@ -31,7 +35,7 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def new_session_token() -> str:
+def new_auth_token() -> str:
     return secrets.token_urlsafe(32)
 
 

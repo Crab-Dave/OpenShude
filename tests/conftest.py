@@ -105,5 +105,5 @@ def login(client: TestClient, identifier: str, password: str = "Student123!") ->
     response = client.post("/api/auth/login", json={"loginIdentifier": identifier, "password": password})
     assert response.status_code == 200, response.text
     data = response.json()
-    client.headers["x-csrf-token"] = data["csrfToken"]
+    client.headers["x-csrf-token"] = client.cookies.get("csrf_token")
     return data
