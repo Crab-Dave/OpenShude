@@ -28,7 +28,9 @@ def test_login_issues_hashed_cookie_only_tokens(client):
     access_token = client.cookies.get("access_token")
     refresh_token = client.cookies.get("refresh_token")
     csrf_token = client.cookies.get("csrf_token")
-    assert access_token and refresh_token and csrf_token
+    assert access_token
+    assert refresh_token
+    assert csrf_token
     assert access_token not in response.text
     assert refresh_token not in response.text
     with SessionLocal() as db:
@@ -47,9 +49,15 @@ def test_login_issues_hashed_cookie_only_tokens(client):
     access_header = next(item for item in cookies if item.startswith("access_token="))
     refresh_header = next(item for item in cookies if item.startswith("refresh_token="))
     csrf_header = next(item for item in cookies if item.startswith("csrf_token="))
-    assert "HttpOnly" in access_header and "Path=/api" in access_header and "SameSite=lax" in access_header
-    assert "HttpOnly" in refresh_header and "Path=/api/auth" in refresh_header and "SameSite=strict" in refresh_header
-    assert "HttpOnly" not in csrf_header and "Path=/" in csrf_header and "SameSite=lax" in csrf_header
+    assert "HttpOnly" in access_header
+    assert "Path=/api" in access_header
+    assert "SameSite=lax" in access_header
+    assert "HttpOnly" in refresh_header
+    assert "Path=/api/auth" in refresh_header
+    assert "SameSite=strict" in refresh_header
+    assert "HttpOnly" not in csrf_header
+    assert "Path=/" in csrf_header
+    assert "SameSite=lax" in csrf_header
 
 
 def test_expired_access_rotates_access_and_refresh_tokens(client):
