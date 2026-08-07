@@ -331,7 +331,13 @@
 
 ## 9. 接口边界
 
-接口统一以 `/api` 为前缀，使用登录态认证；写操作启用 CSRF 防护（Cookie 会话方案）或使用短时访问令牌。
+接口统一以 `/api` 为前缀，使用 HttpOnly Cookie 中的短时 Access Token 认证；写操作同时校验同源和 CSRF Token。Refresh Token 只用于 `/api/auth` 下的轮换与注销接口。
+
+### 认证接口
+
+- `POST /api/auth/login`
+- `POST /api/auth/refresh`
+- `POST /api/auth/logout`
 
 ### 学生端接口
 

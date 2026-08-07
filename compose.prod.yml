@@ -25,7 +25,9 @@ services:
       DATABASE_POOL_SIZE: "5"
       DATABASE_POOL_TIMEOUT_SECONDS: "2"
       LOGIN_PASSWORD_CONCURRENCY: "2"
-      SESSION_COOKIE_SECURE: "false"
+      ACCESS_TOKEN_MINUTES: "15"
+      REFRESH_TOKEN_DAYS: "7"
+      AUTH_COOKIE_SECURE: "false"
       ALLOWED_HOSTS: '["39.96.36.207","127.0.0.1","localhost"]'
       ALLOWED_ORIGINS: '["http://39.96.36.207"]'
 

@@ -16,7 +16,7 @@
 本次重构采用以下总体策略：
 
 1. 使用 FastAPI、SQLAlchemy 2、Alembic 和 Pydantic 2 重写后端。
-2. 保留现有前端使用的 URL、请求字段、响应字段、Cookie 会话和错误结构。
+2. 保留业务 URL 与错误结构；认证升级为短时 Access Token 和轮换 Refresh Token。
 3. 直接映射现有 SQLite 数据库，不在第一阶段顺便清理旧字段或改变业务语义。
 4. 使用同步 SQLAlchemy，不使用 `aiosqlite` 和异步 ORM。
 5. 生产环境只运行一个 Uvicorn worker，避免放大 SQLite 写锁竞争。
@@ -65,7 +65,7 @@
 | 数据库 | SQLite，启用外键和 WAL |
 | 数据表 | 24 张 |
 | 路由 | 约 61 处路由判断 |
-| 会话 | 数据库存储的不透明 Session Token |
+| 会话 | 数据库存储哈希的不透明 Access Token 与轮换 Refresh Token |
 | 密码 | scrypt + 独立随机 Salt |
 | CSRF | Cookie 会话 + 请求头 Token |
 | 授权 | 超级管理员、管理员组、权限编码、年级范围 |
@@ -185,7 +185,7 @@ public/
 前端使用的所有现有路径和 HTTP 方法保持不变，按以下领域迁移：
 
 - 健康：`/api/health`
-- 认证：`/api/auth/login`、`/api/auth/logout`
+- 认证：`/api/auth/login`、`/api/auth/refresh`、`/api/auth/logout`
 - 当前用户：`/api/me`、密码、我的卡片、我的宿舍
 - 卡片：卡片列表、详情、私信入口
 - 私信：会话、消息、已读、加入宿舍申请卡片
@@ -350,17 +350,16 @@ PRAGMA synchronous = NORMAL;
 
 ## 11. 认证、会话和密码迁移
 
-### 11.1 继续使用不透明 Session
+### 11.1 使用不透明 Access 和 Refresh Token
 
-保持当前模型：
+- 登录成功后生成独立的 32 字节随机 Access Token 与 Refresh Token。
+- Access Token 绝对有效 15 分钟；Refresh Token 绝对有效 7 天。
+- 原始 Token 只保存在 HttpOnly Cookie，数据库只保存 SHA-256。
+- Access Token 每次请求都从数据库读取最新账号状态和授权，不把角色或权限写入 Token。
+- Refresh Token 每次使用都原子消费并轮换；已消费 Token 在并发宽限期后再次出现时撤销整个设备会话。
+- CSRF Token 使用可读 Cookie 和请求头双提交，数据库只保存其哈希。
 
-- 登录成功后生成 32 字节随机 Session Token。
-- 浏览器 Cookie 保存原始 Token。
-- 数据库只保存 Token 的 SHA-256。
-- 每个 Session 保存独立 CSRF Token、用户 ID、创建时间和过期时间。
-- 每个受保护请求从数据库读取最新账号状态和授权。
-
-不使用 JWT，不把 Session 写入浏览器本地存储。
+不使用 JWT，不把 Access 或 Refresh Token 写入响应 JSON、URL、`localStorage` 或 `sessionStorage`。
 
 ### 11.2 现有密码兼容
 
@@ -383,21 +382,15 @@ hashlib.scrypt(
 
 ### 11.3 会话迁移选择
 
-默认方案为保留现有 `sessions` 表和 Token 哈希，使上线期间已有会话继续有效。必须验证：
-
-- Cookie 名仍为 `session`。
-- Token 哈希算法一致。
-- ISO 过期时间比较一致。
-- CSRF Token 不变。
-
-如果验证发现会话格式无法可靠兼容，则采用一次性清空 Session、要求全部用户重新登录的方案。不得长期维护两套 Session 格式。
+迁移会重建 `sessions` 并新增 `refresh_tokens`，所有旧会话统一失效。上线后用户重新登录一次，不维护旧 `session` Cookie、旧表结构或双认证路径。
 
 ### 11.4 会话安全改进
 
-- 密码修改成功后撤销该用户其他 Session；当前请求是否保留由实现时的合约测试确定。
-- 账号停用、封禁或永久删除时立即删除全部 Session。
-- 增加过期 Session 定期清理命令。
-- 登录成功后总是签发新 Token，防止 Session Fixation。
+- 密码修改成功后撤销全部旧设备会话，并为当前设备签发全新的 Access 与 Refresh Token。
+- 密码重置、登录标识变更、账号停用、封禁或永久删除时立即删除全部会话。
+- 登录和刷新时顺带清理过期会话；Refresh Token 历史随设备会话级联清理。
+- 登录成功后总是创建新设备会话，防止 Session Fixation。
+- 浏览器对并发的 Access 过期响应只发起一个 Refresh，并将原请求最多重试一次。
 - 登录失败对不存在账号和密码错误返回同一提示。
 
 ## 12. HTTP 阶段的安全方案
@@ -417,16 +410,12 @@ FastAPI、ORM 和 Nginx 配置都不能消除这一限制。
 
 ### 12.2 HTTP 期间的 Cookie
 
-使用：
-
-```text
-HttpOnly; SameSite=Lax; Path=/; Max-Age=604800
-```
+Access Cookie 使用 `HttpOnly; SameSite=Lax; Path=/api; Max-Age=900`；Refresh Cookie 使用 `HttpOnly; SameSite=Strict; Path=/api/auth; Max-Age=604800`。CSRF Cookie 可被同源 JavaScript 读取，服务端仅保存其哈希。
 
 - 不设置 `Domain`，保持 Host-only Cookie。
 - HTTP 阶段不能设置 `Secure`，否则浏览器不会通过 HTTP 发送 Cookie。
-- 配置项 `SESSION_COOKIE_SECURE=false` 必须显式设置；生产启动日志打印明显警告。
-- 备案和 HTTPS 完成后切换为 `SESSION_COOKIE_SECURE=true`。
+- 配置项 `AUTH_COOKIE_SECURE=false` 必须显式设置；生产启动日志打印明显警告。
+- 备案和 HTTPS 完成后切换为 `AUTH_COOKIE_SECURE=true`，撤销全部 HTTP 会话并要求重新登录。
 
 ### 12.3 CSRF 与来源校验
 
@@ -659,7 +648,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 4173 --workers 1 --no-server-header
 新增或调整：
 
 - Python 配置环境变量。
-- `SESSION_COOKIE_SECURE=false`，HTTP 阶段显式配置。
+- `ACCESS_TOKEN_MINUTES=15`、`REFRESH_TOKEN_DAYS=7`。
+- `AUTH_COOKIE_SECURE=false`，HTTP 阶段显式配置。
 - `ALLOWED_HOSTS=39.96.36.207,127.0.0.1,localhost`。
 - `ALLOWED_ORIGINS=http://39.96.36.207`。
 - 健康检查改用 Python 标准库请求，避免在镜像中安装 curl 或保留 Node。
@@ -826,7 +816,8 @@ SQLite 无法安全实现两个不同 Schema 版本后端的无停机双写，�
 
 - 正确密码和现有 scrypt 哈希登录成功。
 - 不存在账号和错误密码返回相同错误。
-- 缺少、错误和过期 Session 被拒绝。
+- 缺少、错误和过期 Access Token 会尝试一次 Refresh；Refresh 无效或过期后要求重新登录。
+- Refresh Token 每次使用都轮换，旧 Token 重放会撤销设备会话。
 - 所有写请求缺少或伪造 CSRF 时被拒绝。
 - 非法 Origin、Host 和代理头被拒绝或忽略。
 - 停用和封禁立即使 Session 失效。
@@ -957,7 +948,7 @@ SQLite 无法安全实现两个不同 Schema 版本后端的无停机双写，�
 3. **ORM**：使用同步 SQLAlchemy 2，不使用异步 ORM。
 4. **迁移**：第一阶段精确映射现有 Schema，不清理旧字段。
 5. **密码**：保持现有 scrypt 算法，现有账号无需重置密码。
-6. **会话**：优先保留现有 Session；验证失败时上线统一清空 Session。
+6. **会话**：迁移到短时 Access 与轮换 Refresh Token，上线统一清空旧 Session。
 7. **安全**：HTTP 阶段不设置 Cookie `Secure`、不启用 HSTS，但保留 CSRF 并增加 Host、Origin、限流和安全响应头。
 8. **HTTP 风险**：在 HTTPS 完成前不正式导入大批真实学生数据；如果提前正式使用，则明确接受密码和 Session 可能被链路窃听的风险。
 9. **部署**：接受首次切换需要短维护窗口，不做 SQLite 双写和零停机迁移。
