@@ -106,7 +106,7 @@ async function refreshAccessToken() {
   return refreshPromise;
 }
 
-async function api(path, options = {}, retryAuthentication = true) {
+function apiRequestUrl(path) {
   const [pathname, query, ...extraParts] = typeof path === 'string' ? path.split('?') : [];
   const pathSegments = pathname?.startsWith('/api/') ? pathname.slice(5).split('/') : [];
   const validPath = pathSegments.length > 0 && pathSegments.every((segment) => segment && [...segment].every((character) => API_PATH_CHARACTERS.includes(character)));
@@ -114,46 +114,64 @@ async function api(path, options = {}, retryAuthentication = true) {
   if (!validPath || !validQuery || extraParts.length) throw new Error('接口地址无效');
   const requestUrl = new URL(path, window.location.origin);
   if (requestUrl.origin !== window.location.origin) throw new Error('接口地址无效');
+  return requestUrl;
+}
+
+function apiRequestHeaders(options) {
   const headers = { ...(options.headers || {}) };
   if (options.body !== undefined) headers['Content-Type'] = 'application/json';
   const csrfToken = readCookie('csrf_token');
   if (csrfToken && !['GET', 'HEAD'].includes(options.method || 'GET')) headers['X-CSRF-Token'] = csrfToken;
-  const response = await fetch(requestUrl, { credentials: 'same-origin', ...options, headers });
+  return headers;
+}
+
+function showLoginAfterUnauthorized() {
+  state.user = null;
+  const next = window.location.pathname === '/roommates' ? '/roommates' : '/';
+  history.replaceState({}, '', next === '/roommates' ? '/login?next=%2Froommates' : '/login');
+  renderLoginPage();
+}
+
+async function refreshManagementProfile() {
+  try {
+    const refreshed = await fetch('/api/me', { credentials: 'same-origin' });
+    if (!refreshed.ok) return;
+    const session = await refreshed.json();
+    state.user = session.user;
+    if (!state.user.canManage && state.user.accountType === 'USER') {
+      state.mode = 'student';
+      state.view = 'discover';
+    } else if (!visibleAdminNav().some(([view]) => view === state.view)) {
+      state.view = 'overview';
+    }
+    setTimeout(() => navigate(state.view), 0);
+  } catch {}
+}
+
+async function throwApiFailure(response, data) {
+  if (response.status === 401 && state.user) showLoginAfterUnauthorized();
+  if (response.status === 403 && state.user && state.mode === 'management') await refreshManagementProfile();
+  const error = new Error(data.error?.message || '请求失败，请稍后重试');
+  error.code = data.error?.code;
+  error.status = response.status;
+  throw error;
+}
+
+async function api(path, options = {}, retryAuthentication = true) {
+  const response = await fetch(apiRequestUrl(path), {
+    credentials: 'same-origin',
+    ...options,
+    headers: apiRequestHeaders(options),
+  });
   const data = await response.json().catch(() => ({}));
-  if (response.status === 401 && data.error?.code === 'ACCESS_TOKEN_EXPIRED' && retryAuthentication) {
+  const accessExpired = response.status === 401 && data.error?.code === 'ACCESS_TOKEN_EXPIRED';
+  if (accessExpired && retryAuthentication) {
     try {
       await refreshAccessToken();
       return api(path, options, false);
     } catch {}
   }
-  if (!response.ok) {
-    if (response.status === 401 && state.user) {
-      state.user = null;
-      const next = window.location.pathname === '/roommates' ? '/roommates' : '/';
-      history.replaceState({}, '', next === '/roommates' ? '/login?next=%2Froommates' : '/login');
-      renderLoginPage();
-    }
-    if (response.status === 403 && state.user && state.mode === 'management') {
-      try {
-        const refreshed = await fetch('/api/me', { credentials: 'same-origin' });
-        if (refreshed.ok) {
-          const session = await refreshed.json();
-          state.user = session.user;
-          if (!state.user.canManage && state.user.accountType === 'USER') {
-            state.mode = 'student';
-            state.view = 'discover';
-          } else if (!visibleAdminNav().some(([view]) => view === state.view)) {
-            state.view = 'overview';
-          }
-          setTimeout(() => navigate(state.view), 0);
-        }
-      } catch {}
-    }
-    const error = new Error(data.error?.message || '请求失败，请稍后重试');
-    error.code = data.error?.code;
-    error.status = response.status;
-    throw error;
-  }
+  if (!response.ok) await throwApiFailure(response, data);
   return data;
 }
 

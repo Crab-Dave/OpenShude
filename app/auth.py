@@ -30,6 +30,7 @@ DB = Annotated[Session, Depends(get_db)]
 LOGIN_WINDOW_SECONDS = 300
 LOGIN_LIMITS = {"ip": 30, "identifier": 10, "pair": 10}
 REFRESH_REUSE_GRACE_SECONDS = 10
+DELETE_SESSION_SQL = "DELETE FROM sessions WHERE id=:id"
 _login_failures: dict[tuple[str, str], deque[float]] = defaultdict(deque)
 _login_failures_lock = Lock()
 _dummy_password = hash_password(new_auth_token())
@@ -129,7 +130,7 @@ def set_auth_cookies(
             CSRF_COOKIE,
             csrf_token,
             max_age=refresh_seconds,
-            httponly=False,
+            httponly=False,  # NOSONAR: this non-secret CSRF value must be readable for double-submit protection.
             samesite="lax",
             secure=settings.auth_cookie_secure,
             path="/",
@@ -236,11 +237,11 @@ def refresh(request: Request, response: Response, db: DB) -> dict | Response:
     timestamp = now()
     cleanup_expired_sessions(db, timestamp)
     if session["status"] not in ("ACTIVE", "PENDING_ACTIVATION"):
-        db.execute(text("DELETE FROM sessions WHERE id=:id"), {"id": session["session_id"]})
+        db.execute(text(DELETE_SESSION_SQL), {"id": session["session_id"]})
         db.commit()
         return auth_error(403, "ACCOUNT_UNAVAILABLE", "账号当前不可用")
     if session["refresh_expires_at"] <= timestamp or session["token_expires_at"] <= timestamp:
-        db.execute(text("DELETE FROM sessions WHERE id=:id"), {"id": session["session_id"]})
+        db.execute(text(DELETE_SESSION_SQL), {"id": session["session_id"]})
         db.commit()
         return auth_error(401, "REFRESH_TOKEN_EXPIRED", "登录已过期，请重新登录")
     if session["consumed_at"]:
@@ -248,7 +249,7 @@ def refresh(request: Request, response: Response, db: DB) -> dict | Response:
         if age <= REFRESH_REUSE_GRACE_SECONDS:
             db.rollback()
             raise ApiError(409, "REFRESH_ALREADY_ROTATED", "登录状态已由另一个请求刷新")
-        db.execute(text("DELETE FROM sessions WHERE id=:id"), {"id": session["session_id"]})
+        db.execute(text(DELETE_SESSION_SQL), {"id": session["session_id"]})
         db.commit()
         return auth_error(401, "REFRESH_TOKEN_REUSED", "检测到重复使用的登录凭据，请重新登录")
     access_token = new_auth_token()
@@ -304,7 +305,7 @@ def logout(request: Request, response: Response, db: DB) -> dict:
         )
     if session:
         verify_csrf(request, session["csrf_token_hash"])
-        db.execute(text("DELETE FROM sessions WHERE id=:id"), {"id": session["id"]})
+        db.execute(text(DELETE_SESSION_SQL), {"id": session["id"]})
         db.commit()
     clear_auth_cookies(response)
     return {"ok": True}
