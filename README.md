@@ -21,7 +21,7 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 4173 --workers 1
 打开 `http://127.0.0.1:4173`。
 
 Web 进程不会自动创建表、迁移或写入演示数据。首次使用空数据库时，必须先显式运行 Alembic 和
-`bootstrap-admin`；已有数据库会保留现有账号、密码和 Session。
+`bootstrap-admin`；认证结构迁移会保留账号和密码，但会清除旧登录状态并要求重新登录。
 
 仓库开发数据库中的演示账号为：
 
@@ -47,6 +47,7 @@ Web 进程不会自动创建表、迁移或写入演示数据。首次使用空�
 - 管理操作按“同一管理员组的权限 + 年级范围”授权，账号治理、卡片治理、按轮宿舍查看与导出、举报和审计均由后端强制校验。
 - 学生注销后保留资源，管理员可执行永久删除。
 - 人员候选列表、室友卡片、会话、宿舍成员及管理后台人员列表均支持按姓名搜索。
+- 登录使用 15 分钟 Access Token 与 7 天轮换 Refresh Token，原始令牌仅存放在 HttpOnly Cookie。
 
 ## 验证
 
@@ -77,4 +78,7 @@ pytest 使用独立临时数据库，覆盖迁移、权限、安全、并发和�
 - `ALLOWED_HOSTS`：允许的 Host JSON 数组；生产环境必须包含公网 IP 或后续域名。
 - `ALLOWED_ORIGINS`：额外允许的 Origin JSON 数组。
 - `DOCS_ENABLED`：是否开放 OpenAPI 文档；生产环境设为 `false`。
+- `ACCESS_TOKEN_MINUTES`：Access Token 有效分钟数，默认 `15`。
+- `REFRESH_TOKEN_DAYS`：Refresh Token 绝对有效天数，默认 `7`。
+- `AUTH_COOKIE_SECURE`：认证 Cookie 是否仅通过 HTTPS 发送；当前 HTTP 部署显式设为 `false`。
 - `INITIAL_ADMIN_PASSWORD`：生产环境首次创建超级管理员时必须提供的至少 12 位一次性密码；首次登录后系统会强制修改。已有数据库不再需要保留该变量的值。

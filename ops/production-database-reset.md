@@ -15,7 +15,7 @@
 4. 已安排维护窗口，并确认当前数据库没有需要保留的首页、账号、私信、卡片、宿舍或审计数据。
 5. 服务器 `/opt/myapp` 中存在 `reset-production-database.sh`、`compose.prod.yml` 和 `.deployed-image-tag`。
 
-系统当前继续使用 HTTP，因此 `SESSION_COOKIE_SECURE=false`、公网 IP Host 和 HTTP Origin 配置保持不变。
+系统当前继续使用 HTTP，因此 `AUTH_COOKIE_SECURE=false`、公网 IP Host 和 HTTP Origin 配置保持不变。Access Token 有效期为 15 分钟，Refresh Token 绝对有效期为 7 天。
 正式账号密码和个人信息会以明文 HTTP 传输，应通过安全组、校园网或 VPN 限制访问范围。
 
 ## 一次性演练
