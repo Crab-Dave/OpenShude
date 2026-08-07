@@ -336,8 +336,6 @@ def configure_group_members(db: Session, group_id: int, body: dict, admin_id: in
             ),
             {"group": group_id, "value": value, "admin": admin_id, "now": now()},
         )
-    for value in set(before + values):
-        db.execute(text("UPDATE users SET authorization_version=authorization_version+1 WHERE id=:id"), {"id": value})
     return before, values
 
 
@@ -819,8 +817,7 @@ def update_account_type(user_id: int, request: Request, body: dict, db: DB) -> d
         if not account["grade_id"]:
             raise ApiError(409, "GRADE_REQUIRED", "降级前必须为账号设置年级")
     db.execute(
-        text("""UPDATE users SET account_type=:type,authorization_version=authorization_version+1,
-      updated_at=:now WHERE id=:id"""),
+        text("UPDATE users SET account_type=:type,updated_at=:now WHERE id=:id"),
         {"type": account_type, "now": now(), "id": user_id},
     )
     if account_type == "SUPER_ADMIN":

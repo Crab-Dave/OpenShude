@@ -19,7 +19,6 @@ class User(Base):
     password_salt: Mapped[str] = mapped_column(Text)
     role: Mapped[str] = mapped_column(Text)
     account_type: Mapped[str] = mapped_column(Text, server_default=text("'USER'"))
-    authorization_version: Mapped[int] = mapped_column(server_default=text("1"))
     must_change_password: Mapped[int] = mapped_column(server_default=text("0"))
     name: Mapped[str] = mapped_column(Text)
     grade: Mapped[str] = mapped_column(Text)

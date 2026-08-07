@@ -49,8 +49,8 @@ def reset_database():
             password = hash_password(password_text)
             db.execute(
                 text("""INSERT INTO users(login_identifier,password_hash,password_salt,role,account_type,
-              authorization_version,must_change_password,name,grade,grade_id,gender,major,status,created_at,updated_at)
-              VALUES(:login,:hash,:salt,:role,:type,1,0,:name,:grade,:grade_id,:gender,:major,'ACTIVE',:now,:now)"""),
+              must_change_password,name,grade,grade_id,gender,major,status,created_at,updated_at)
+              VALUES(:login,:hash,:salt,:role,:type,0,:name,:grade,:grade_id,:gender,:major,'ACTIVE',:now,:now)"""),
                 {
                     "login": login,
                     "hash": password.hash,

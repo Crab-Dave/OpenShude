@@ -271,8 +271,8 @@ def main() -> None:
         )
         admin_id = db.execute(
             text("""INSERT INTO users(login_identifier,password_hash,password_salt,role,account_type,
-              authorization_version,must_change_password,name,grade,gender,major,status,created_at,updated_at)
-              VALUES('admin',:hash,:salt,'ADMIN','SUPER_ADMIN',1,0,'系统管理员','-','UNSPECIFIED','',
+              must_change_password,name,grade,gender,major,status,created_at,updated_at)
+              VALUES('admin',:hash,:salt,'ADMIN','SUPER_ADMIN',0,'系统管理员','-','UNSPECIFIED','',
               'ACTIVE',:now,:now) RETURNING id"""),
             {"hash": admin_password.hash, "salt": admin_password.salt, "now": timestamp},
         ).scalar_one()
@@ -310,8 +310,8 @@ def main() -> None:
             major = ("计算机科学与技术", "视觉传达设计", "工商管理")[(index - 1) % 3]
             user_id = db.execute(
                 text("""INSERT INTO users(login_identifier,password_hash,password_salt,role,account_type,
-                  authorization_version,must_change_password,name,grade,grade_id,gender,major,status,imported_by,
-                  created_at,updated_at) VALUES(:login,:hash,:salt,'STUDENT','USER',1,0,:name,:grade,:grade_id,
+                  must_change_password,name,grade,grade_id,gender,major,status,imported_by,
+                  created_at,updated_at) VALUES(:login,:hash,:salt,'STUDENT','USER',0,:name,:grade,:grade_id,
                   :gender,:major,'ACTIVE',:admin,:now,:now) RETURNING id"""),
                 {
                     "login": login,
@@ -384,8 +384,8 @@ def main() -> None:
             password = hash_password("Student123!")
             user_id = db.execute(
                 text("""INSERT INTO users(login_identifier,password_hash,password_salt,role,account_type,
-                  authorization_version,must_change_password,name,grade,grade_id,gender,major,status,imported_by,
-                  created_at,updated_at) VALUES(:login,:hash,:salt,'STUDENT','USER',1,0,:name,'2026级',:grade,
+                  must_change_password,name,grade,grade_id,gender,major,status,imported_by,
+                  created_at,updated_at) VALUES(:login,:hash,:salt,'STUDENT','USER',0,:name,'2026级',:grade,
                   'FEMALE','计算机科学与技术','ACTIVE',:admin,:created,:created) RETURNING id"""),
                 {
                     "login": f"browser-page-{index:02d}",

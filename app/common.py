@@ -66,8 +66,8 @@ def authenticate(request: Request, db: Session, require_csrf: bool | None = None
         db,
         """
         SELECT s.id AS session_id, s.csrf_token_hash, s.access_expires_at,
-          u.id, u.login_identifier, u.account_type, u.authorization_version,
-          u.must_change_password, u.name, u.grade, u.grade_id, u.gender, u.major, u.status
+          u.id, u.login_identifier, u.account_type, u.must_change_password,
+          u.name, u.grade, u.grade_id, u.gender, u.major, u.status
         FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.access_token_hash = :token
         """,
         {"token": token_hash(token)},
