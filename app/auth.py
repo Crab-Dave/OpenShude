@@ -126,11 +126,12 @@ def set_auth_cookies(
         path="/api/auth",
     )
     if csrf_token is not None:
-        response.set_cookie(
+        # This non-secret CSRF value must be readable by same-origin JavaScript for double-submit protection.
+        response.set_cookie(  # NOSONAR
             CSRF_COOKIE,
             csrf_token,
             max_age=refresh_seconds,
-            httponly=False,  # NOSONAR: this non-secret CSRF value must be readable for double-submit protection.
+            httponly=False,
             samesite="lax",
             secure=settings.auth_cookie_secure,
             path="/",
