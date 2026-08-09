@@ -593,7 +593,7 @@ def configure_author_grades(request: Request, body: dict, db: DB) -> dict:
 def private_posts(
     request: Request,
     db: DB,
-    status: str = "ALL",
+    status: str = "WAITING",
     before_id: int = 0,
     limit: Annotated[int, Query(ge=1, le=50)] = 30,
 ) -> dict:
