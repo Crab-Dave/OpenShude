@@ -111,6 +111,16 @@ def test_private_review_publish_and_anonymous_public_discussion(client: TestClie
         json={"targetType": "TREEHOLE_COMMENT", "targetId": public_comment.json()["commentId"], "reason": "其他"},
     )
     assert duplicate.status_code == 409
+    invalid_reason = client.post(
+        "/api/reports",
+        json={
+            "targetType": "TREEHOLE_POST",
+            "targetId": post_id,
+            "reason": "未定义原因",
+        },
+    )
+    assert invalid_reason.status_code == 400
+    assert invalid_reason.json()["error"]["code"] == "INVALID_REPORT_REASON"
 
     login(client, "2026001")
     assert client.post(f"/api/treehole/posts/{post_id}/withdraw").status_code == 200

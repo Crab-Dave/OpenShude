@@ -809,7 +809,7 @@ async function showCardDetail(cardId) {
 function showReportModal(targetType, targetId) {
   const modal = openModal('提交举报', `
     <form id="report-form" class="form-grid">
-      <div class="form-field full"><label>举报原因</label><select name="reason" required><option value="">请选择</option><option>不当内容</option><option>骚扰行为</option><option>身份信息异常</option><option>其他</option></select></div>
+      <div class="form-field full"><label>举报原因</label><select name="reason" required><option value="">请选择</option><option>人身攻击</option><option>隐私泄露</option><option>不当内容</option><option>广告或诈骗</option><option>骚扰行为</option><option>身份信息异常</option><option>其他</option></select></div>
       <div class="form-field full"><label>补充说明</label><textarea name="description" maxlength="500" placeholder="请描述具体情况"></textarea></div>
       <div class="form-actions"><button type="button" class="btn btn-secondary" data-close-form>取消</button><button class="btn btn-primary" type="submit">${icon('send')}提交举报</button></div>
     </form>`);

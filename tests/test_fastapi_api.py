@@ -250,7 +250,7 @@ def test_messaging_blocking_and_reports(client):
     )
     assert client.delete("/api/users/3/blocks").status_code == 200
     report = client.post(
-        "/api/reports", json={"targetType": "MESSAGE", "targetId": sent.json()["message"]["id"], "reason": "测试"}
+        "/api/reports", json={"targetType": "MESSAGE", "targetId": sent.json()["message"]["id"], "reason": "其他"}
     )
     assert report.status_code == 201
 
