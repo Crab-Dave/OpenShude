@@ -157,9 +157,19 @@ class Report(Base):
     created_at: Mapped[str] = mapped_column(Text)
     handled_at: Mapped[str | None] = mapped_column(Text)
     __table_args__ = (
-        CheckConstraint("target_type IN ('ROOMMATE_CARD','MESSAGE')"),
+        CheckConstraint("target_type IN ('ROOMMATE_CARD','MESSAGE','TREEHOLE_POST','TREEHOLE_COMMENT')"),
         CheckConstraint("status IN ('PENDING','RESOLVED','REJECTED')"),
         Index("idx_reports_reporter_created", "reporter_id", "created_at"),
+        Index("idx_reports_target", "target_type", "target_id"),
+        Index("idx_reports_status_created", "status", "created_at"),
+        Index(
+            "idx_pending_reporter_target",
+            "reporter_id",
+            "target_type",
+            "target_id",
+            unique=True,
+            sqlite_where=text("status = 'PENDING'"),
+        ),
     )
 
 
@@ -382,6 +392,91 @@ class Grade(Base):
     created_at: Mapped[str] = mapped_column(Text)
     updated_at: Mapped[str] = mapped_column(Text)
     __table_args__ = (CheckConstraint("status IN ('ACTIVE','DISABLED')"),)
+
+
+class TreeholeAuthorGrade(Base):
+    __tablename__ = "treehole_author_grades"
+    grade_id: Mapped[int] = mapped_column(ForeignKey(GRADES_ID, ondelete="CASCADE"), primary_key=True)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID, ondelete=SET_NULL))
+    created_at: Mapped[str] = mapped_column(Text)
+
+
+class TreeholePost(Base):
+    __tablename__ = "treehole_posts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    author_id: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID, ondelete=SET_NULL))
+    management_grade_id: Mapped[int] = mapped_column(ForeignKey(GRADES_ID))
+    title: Mapped[str] = mapped_column(Text)
+    content: Mapped[str] = mapped_column(Text)
+    visibility: Mapped[str] = mapped_column(Text, server_default=text("'PRIVATE'"))
+    moderation_status: Mapped[str] = mapped_column(Text, server_default=text("'NORMAL'"))
+    moderation_reason: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    moderated_by: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID, ondelete=SET_NULL))
+    moderated_at: Mapped[str | None] = mapped_column(Text)
+    reviewed_at: Mapped[str | None] = mapped_column(Text)
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID, ondelete=SET_NULL))
+    published_at: Mapped[str | None] = mapped_column(Text)
+    withdrawn_at: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[str] = mapped_column(Text)
+    __table_args__ = (
+        CheckConstraint("visibility IN ('PRIVATE','PUBLIC','WITHDRAWN')"),
+        CheckConstraint("moderation_status IN ('NORMAL','HIDDEN','DELETED')"),
+        Index(
+            "idx_treehole_posts_public",
+            "visibility",
+            "moderation_status",
+            "published_at",
+            "id",
+        ),
+        Index("idx_treehole_posts_author_updated", "author_id", "updated_at", "id"),
+        Index(
+            "idx_treehole_posts_management",
+            "management_grade_id",
+            "visibility",
+            "moderation_status",
+            "created_at",
+            "id",
+        ),
+    )
+
+
+class TreeholeComment(Base):
+    __tablename__ = "treehole_comments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    post_id: Mapped[int] = mapped_column(ForeignKey("treehole_posts.id", ondelete="CASCADE"))
+    participant_id: Mapped[int] = mapped_column(ForeignKey("treehole_participants.id", ondelete="CASCADE"))
+    parent_comment_id: Mapped[int | None] = mapped_column(ForeignKey("treehole_comments.id", ondelete=SET_NULL))
+    reply_to_participant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("treehole_participants.id", ondelete=SET_NULL)
+    )
+    content: Mapped[str] = mapped_column(Text)
+    is_official: Mapped[int] = mapped_column(server_default=text("0"))
+    moderation_status: Mapped[str] = mapped_column(Text, server_default=text("'NORMAL'"))
+    moderation_reason: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    moderated_by: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID, ondelete=SET_NULL))
+    moderated_at: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text)
+    deleted_at: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (
+        CheckConstraint("is_official IN (0,1)"),
+        CheckConstraint("moderation_status IN ('NORMAL','HIDDEN','DELETED')"),
+        Index("idx_treehole_comments_post_created", "post_id", "created_at", "id"),
+    )
+
+
+class TreeholeParticipant(Base):
+    __tablename__ = "treehole_participants"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    post_id: Mapped[int] = mapped_column(ForeignKey("treehole_posts.id", ondelete="CASCADE"))
+    user_id: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID, ondelete=SET_NULL))
+    alias_number: Mapped[int]
+    created_at: Mapped[str] = mapped_column(Text)
+    __table_args__ = (
+        UniqueConstraint("post_id", "user_id"),
+        UniqueConstraint("post_id", "alias_number"),
+        CheckConstraint("alias_number > 0"),
+    )
 
 
 class AdminGroup(Base):

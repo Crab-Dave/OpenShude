@@ -330,11 +330,11 @@ def test_message_rate_limit_recovers_after_window(client, monkeypatch):
 
 def test_report_daily_quota_and_dormitory_application_burst_limit(client):
     with SessionLocal.begin() as db:
-        for _ in range(10):
+        for target_id in range(100, 110):
             db.execute(
                 text("""INSERT INTO reports(reporter_id,target_type,target_id,reason,description,snapshot,created_at)
-                  VALUES(2,'ROOMMATE_CARD',2,'测试','','{}',:now)"""),
-                {"now": now()},
+                  VALUES(2,'ROOMMATE_CARD',:target,'测试','','{}',:now)"""),
+                {"target": target_id, "now": now()},
             )
     login(client, "2026001")
     daily_limit = client.post(
