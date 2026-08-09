@@ -24,13 +24,25 @@ REQUIRED_CHECKS = {
     ),
     "roommate_cards": ("status IN ('DRAFT','PUBLISHED','HIDDEN')",),
     "conversations": ("student_a_id < student_b_id",),
-    "reports": ("target_type IN ('ROOMMATE_CARD','MESSAGE')", "status IN ('PENDING','RESOLVED','REJECTED')"),
+    "reports": (
+        "target_type IN ('ROOMMATE_CARD','MESSAGE','TREEHOLE_POST','TREEHOLE_COMMENT')",
+        "status IN ('PENDING','RESOLVED','REJECTED')",
+    ),
     "dormitory_selection_rounds": ("status IN ('DRAFT','OPEN','CLOSED','ARCHIVED')",),
     "dormitories": ("capacity = 4", "gender IN ('MALE','FEMALE')", "status IN ('OPEN','FULL','CLOSED')"),
     "dormitory_members": ("role IN ('INITIATOR','MEMBER')",),
     "dormitory_applications": ("status IN ('PENDING','APPROVED','REJECTED','CANCELLED')",),
     "grades": ("status IN ('ACTIVE','DISABLED')",),
     "admin_groups": ("status IN ('ACTIVE','DISABLED')",),
+    "treehole_posts": (
+        "visibility IN ('PRIVATE','PUBLIC','WITHDRAWN')",
+        "moderation_status IN ('NORMAL','HIDDEN','DELETED')",
+    ),
+    "treehole_comments": (
+        "is_official IN (0,1)",
+        "moderation_status IN ('NORMAL','HIDDEN','DELETED')",
+    ),
+    "treehole_participants": ("alias_number > 0",),
 }
 
 
@@ -146,6 +158,10 @@ def validate_database(filename: Path) -> dict:
         "dormitories",
         "dormitory_members",
         "dormitory_result_snapshots",
+        "treehole_author_grades",
+        "treehole_posts",
+        "treehole_comments",
+        "treehole_participants",
         "alembic_version",
     } | set(REQUIRED_CHECKS)
     with closing(sqlite3.connect(filename)) as database:
@@ -170,6 +186,16 @@ def validate_database(filename: Path) -> dict:
           GROUP BY dormitory_id HAVING COUNT(*)>4)""").fetchone()[0]
         duplicate_memberships = database.execute("""SELECT COUNT(*) FROM (SELECT selection_round_id,user_id
           FROM dormitory_members GROUP BY selection_round_id,user_id HAVING COUNT(*)>1)""").fetchone()[0]
+        treehole_tables = {"treehole_comments", "treehole_participants"}
+        invalid_treehole_links = 0
+        if treehole_tables <= tables:
+            invalid_treehole_links = database.execute("""SELECT COUNT(*) FROM treehole_comments comment
+              JOIN treehole_participants participant ON participant.id=comment.participant_id
+              LEFT JOIN treehole_comments parent ON parent.id=comment.parent_comment_id
+              LEFT JOIN treehole_participants reply_target ON reply_target.id=comment.reply_to_participant_id
+              WHERE participant.post_id<>comment.post_id
+              OR (parent.id IS NOT NULL AND (parent.post_id<>comment.post_id OR parent.parent_comment_id IS NOT NULL))
+              OR (reply_target.id IS NOT NULL AND reply_target.post_id<>comment.post_id)""").fetchone()[0]
     missing = sorted(required - tables)
     if (
         quick_check != ["ok"]
@@ -179,6 +205,7 @@ def validate_database(filename: Path) -> dict:
         or open_rounds > 1
         or oversized
         or duplicate_memberships
+        or invalid_treehole_links
     ):
         raise RuntimeError(
             "Database validation failed: "
@@ -191,6 +218,7 @@ def validate_database(filename: Path) -> dict:
                     "openRounds": open_rounds,
                     "oversizedDormitories": oversized,
                     "duplicateMemberships": duplicate_memberships,
+                    "invalidTreeholeLinks": invalid_treehole_links,
                 }
             )
         )
