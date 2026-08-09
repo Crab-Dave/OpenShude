@@ -404,6 +404,95 @@ def main() -> None:
                 {"user": user_id, "created": "2020-01-01T00:00:00.000Z"},
             )
 
+        student_ids = dict(db.execute(text("SELECT login_identifier,id FROM users WHERE account_type='USER'")).all())
+        db.execute(
+            text("INSERT INTO treehole_author_grades(grade_id,created_by,created_at) VALUES(:grade,:admin,:now)"),
+            {"grade": grade_ids["2026级"], "admin": admin_id, "now": timestamp},
+        )
+        waiting_post = db.execute(
+            text(
+                """INSERT INTO treehole_posts(author_id,management_grade_id,title,content,created_at,updated_at)
+                VALUES(:author,:grade,'第一次离家有些不适应','最近总觉得生活节奏变化很大，想听听老师的建议。',:now,:now)
+                RETURNING id"""
+            ),
+            {"author": student_ids["2026001"], "grade": grade_ids["2026级"], "now": timestamp},
+        ).scalar_one()
+        db.execute(
+            text(
+                "INSERT INTO treehole_participants(post_id,user_id,alias_number,created_at) VALUES(:post,:user,1,:now)"
+            ),
+            {"post": waiting_post, "user": student_ids["2026001"], "now": timestamp},
+        )
+        reviewed_post = db.execute(
+            text(
+                """INSERT INTO treehole_posts(author_id,management_grade_id,title,content,reviewed_at,reviewed_by,
+                created_at,updated_at) VALUES(:author,:grade,'怎样安排自己的大学时间',
+                '课程、社团和休息都很重要，我还没有找到合适的平衡。',:now,:admin,:now,:now) RETURNING id"""
+            ),
+            {"author": student_ids["2026001"], "grade": grade_ids["2026级"], "admin": admin_id, "now": timestamp},
+        ).scalar_one()
+        db.execute(
+            text(
+                """INSERT INTO treehole_participants(post_id,user_id,alias_number,created_at)
+                VALUES(:post,:user,1,:now) RETURNING id"""
+            ),
+            {"post": reviewed_post, "user": student_ids["2026001"], "now": timestamp},
+        ).scalar_one()
+        admin_participant = db.execute(
+            text(
+                """INSERT INTO treehole_participants(post_id,user_id,alias_number,created_at)
+                VALUES(:post,:user,2,:now) RETURNING id"""
+            ),
+            {"post": reviewed_post, "user": admin_id, "now": timestamp},
+        ).scalar_one()
+        db.execute(
+            text(
+                """INSERT INTO treehole_comments(post_id,participant_id,content,is_official,created_at)
+                VALUES(:post,:participant,'可以先记录一周的时间安排，再决定需要调整的优先级。',1,:now)"""
+            ),
+            {"post": reviewed_post, "participant": admin_participant, "now": timestamp},
+        )
+        for index in range(16):
+            published_at = f"2026-08-09T01:{index:02d}:00.000Z"
+            post_id = db.execute(
+                text(
+                    """INSERT INTO treehole_posts(author_id,management_grade_id,title,content,visibility,
+                    moderation_status,reviewed_at,reviewed_by,published_at,created_at,updated_at)
+                    VALUES(:author,:grade,:title,:content,'PUBLIC','NORMAL',:published,:admin,:published,:published,:published)
+                    RETURNING id"""
+                ),
+                {
+                    "author": student_ids["2026001"],
+                    "grade": grade_ids["2026级"],
+                    "title": f"匿名成长记录 {index + 1}",
+                    "content": "进入大学以后遇到了一些新的选择，也在慢慢学习怎样照顾自己的节奏。",
+                    "published": published_at,
+                    "admin": admin_id,
+                },
+            ).scalar_one()
+            db.execute(
+                text(
+                    """INSERT INTO treehole_participants(post_id,user_id,alias_number,created_at)
+                    VALUES(:post,:user,1,:created) RETURNING id"""
+                ),
+                {"post": post_id, "user": student_ids["2026001"], "created": published_at},
+            ).scalar_one()
+            if index == 15:
+                public_admin = db.execute(
+                    text(
+                        """INSERT INTO treehole_participants(post_id,user_id,alias_number,created_at)
+                        VALUES(:post,:user,2,:created) RETURNING id"""
+                    ),
+                    {"post": post_id, "user": admin_id, "created": published_at},
+                ).scalar_one()
+                db.execute(
+                    text(
+                        """INSERT INTO treehole_comments(post_id,participant_id,content,is_official,created_at)
+                        VALUES(:post,:participant,'成长没有统一进度，可以从最想改善的一件小事开始。',1,:created)"""
+                    ),
+                    {"post": post_id, "participant": public_admin, "created": published_at},
+                )
+
 
 if __name__ == "__main__":
     main()
