@@ -19,6 +19,8 @@ from .database import SessionLocal
 from .dormitories import router as dormitories_router
 from .errors import ApiError, api_error_handler, validation_error_handler
 from .student import router as student_router
+from .treehole import admin_router as treehole_admin_router
+from .treehole import router as treehole_router
 
 settings = get_settings()
 logger = logging.getLogger("openshude")
@@ -191,6 +193,8 @@ app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(student_router)
 app.include_router(dormitories_router)
+app.include_router(treehole_router)
+app.include_router(treehole_admin_router)
 
 
 @app.get("/api/health")
@@ -218,7 +222,7 @@ def static_file(path: str) -> FileResponse:
     generated_page = (generated / path / "index.html").resolve() if path else generated / "index.html"
     if generated_page.is_file() and generated_page.is_relative_to(generated):
         return FileResponse(generated_page)
-    if path in ("login", "roommates"):
+    if path in ("login", "roommates", "shudong"):
         application = public / "app.html"
         if application.is_file():
             return FileResponse(application)

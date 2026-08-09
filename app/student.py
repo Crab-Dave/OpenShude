@@ -9,6 +9,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import FileResponse
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .common import all_rows, clean_text, current_user, now, one, require_user
@@ -16,6 +17,7 @@ from .config import get_settings
 from .database import get_db
 from .errors import ApiError
 from .rate_limit import enforce_rate_limit
+from .treehole import treehole_report_snapshot
 
 router = APIRouter(prefix="/api")
 DB = Annotated[Session, Depends(get_db)]
@@ -587,7 +589,7 @@ def report(request: Request, body: dict, db: DB) -> dict:
         target_id = int(body.get("targetId"))
     except (TypeError, ValueError):
         target_id = 0
-    if target_type not in ("ROOMMATE_CARD", "MESSAGE") or not target_id:
+    if target_type not in ("ROOMMATE_CARD", "MESSAGE", "TREEHOLE_POST", "TREEHOLE_COMMENT") or not target_id:
         raise ApiError(400, "INVALID_REPORT_TARGET", "举报对象无效")
     if target_type == "ROOMMATE_CARD":
         card = card_by_id(db, target_id)
@@ -598,7 +600,7 @@ def report(request: Request, body: dict, db: DB) -> dict:
             "additional_note": card["additional_note"],
             "personality_note": card.get("personality_note"),
         }
-    else:
+    elif target_type == "MESSAGE":
         snapshot = one(
             db,
             """SELECT m.id,m.body,m.sender_id,m.conversation_id FROM messages m
@@ -608,18 +610,31 @@ def report(request: Request, body: dict, db: DB) -> dict:
         )
         if not snapshot:
             raise ApiError(404, "MESSAGE_NOT_FOUND", "消息不存在")
-    result = db.execute(
-        text("""INSERT INTO reports(reporter_id,target_type,target_id,reason,description,snapshot,created_at)
-      VALUES(:reporter,:type,:target,:reason,:description,:snapshot,:now)"""),
-        {
-            "reporter": user["id"],
-            "type": target_type,
-            "target": target_id,
-            "reason": clean_text(body.get("reason"), 50, True),
-            "description": clean_text(body.get("description"), 500),
-            "snapshot": json.dumps(snapshot, ensure_ascii=False),
-            "now": now(),
-        },
-    )
+    else:
+        snapshot = treehole_report_snapshot(db, user, target_type, target_id)
+    if one(
+        db,
+        """SELECT 1 AS found FROM reports
+        WHERE reporter_id=:reporter AND target_type=:type AND target_id=:target AND status='PENDING'""",
+        {"reporter": user["id"], "type": target_type, "target": target_id},
+    ):
+        raise ApiError(409, "REPORT_ALREADY_PENDING", "已经提交过该内容的待处理举报")
+    try:
+        result = db.execute(
+            text("""INSERT INTO reports(reporter_id,target_type,target_id,reason,description,snapshot,created_at)
+          VALUES(:reporter,:type,:target,:reason,:description,:snapshot,:now)"""),
+            {
+                "reporter": user["id"],
+                "type": target_type,
+                "target": target_id,
+                "reason": clean_text(body.get("reason"), 50, True),
+                "description": clean_text(body.get("description"), 500),
+                "snapshot": json.dumps(snapshot, ensure_ascii=False),
+                "now": now(),
+            },
+        )
+    except IntegrityError:
+        db.rollback()
+        raise ApiError(409, "REPORT_ALREADY_PENDING", "已经提交过该内容的待处理举报") from None
     db.commit()
     return {"reportId": result.lastrowid}
