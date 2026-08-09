@@ -636,6 +636,33 @@ def private_posts(
     return {"posts": rows, "nextBeforeId": rows[-1]["id"] if has_more and rows else None}
 
 
+def optional_enum_filter(value: str, allowed: tuple[str, ...], column: str, key: str, params: dict) -> str:
+    if value == "ALL":
+        return ""
+    if value not in allowed:
+        raise ApiError(400, "INVALID_TREEHOLE_FILTER", "筛选条件无效")
+    params[key] = value
+    return f"{column}=:{key}"
+
+
+def content_date_filters(date_from: str, date_to: str, alias: str, params: dict) -> list[str]:
+    try:
+        start = date.fromisoformat(date_from) if date_from else None
+        end = date.fromisoformat(date_to) if date_to else None
+    except ValueError:
+        raise ApiError(400, "INVALID_TREEHOLE_FILTER", "时间筛选无效") from None
+    if start and end and start > end:
+        raise ApiError(400, "INVALID_TREEHOLE_FILTER", "开始日期不能晚于结束日期")
+    filters = []
+    if start:
+        filters.append(f"{alias}.created_at>=:date_from")
+        params["date_from"] = f"{start.isoformat()}T00:00:00.000Z"
+    if end:
+        filters.append(f"{alias}.created_at<:date_to")
+        params["date_to"] = f"{(end + timedelta(days=1)).isoformat()}T00:00:00.000Z"
+    return filters
+
+
 @admin_router.get("/content")
 def managed_content(
     request: Request,
@@ -654,34 +681,22 @@ def managed_content(
     scope = scope_sql(authorized_grade_ids(db, admin, "TREEHOLE_MODERATE"), params)
     if content_type not in ("POST", "COMMENT"):
         raise ApiError(400, "INVALID_TREEHOLE_FILTER", "内容类型筛选无效")
-    filters = []
-    if visibility != "ALL":
-        if visibility not in ("PRIVATE", "PUBLIC", "WITHDRAWN"):
-            raise ApiError(400, "INVALID_TREEHOLE_FILTER", "帖子可见性筛选无效")
-        filters.append("p.visibility=:visibility")
-        params["visibility"] = visibility
-    if moderation_status != "ALL":
-        if moderation_status not in ("NORMAL", "HIDDEN", "DELETED"):
-            raise ApiError(400, "INVALID_TREEHOLE_FILTER", "治理状态筛选无效")
-        filters.append(f"{'p' if content_type == 'POST' else 'c'}.moderation_status=:moderation_status")
-        params["moderation_status"] = moderation_status
+    content_alias = "p" if content_type == "POST" else "c"
+    filters = [
+        optional_enum_filter(visibility, ("PRIVATE", "PUBLIC", "WITHDRAWN"), "p.visibility", "visibility", params),
+        optional_enum_filter(
+            moderation_status,
+            ("NORMAL", "HIDDEN", "DELETED"),
+            f"{content_alias}.moderation_status",
+            "moderation_status",
+            params,
+        ),
+    ]
+    filters = [item for item in filters if item]
     if grade_id:
         filters.append("p.management_grade_id=:selected_grade")
         params["selected_grade"] = grade_id
-    try:
-        start = date.fromisoformat(date_from) if date_from else None
-        end = date.fromisoformat(date_to) if date_to else None
-    except ValueError:
-        raise ApiError(400, "INVALID_TREEHOLE_FILTER", "时间筛选无效") from None
-    if start and end and start > end:
-        raise ApiError(400, "INVALID_TREEHOLE_FILTER", "开始日期不能晚于结束日期")
-    content_alias = "p" if content_type == "POST" else "c"
-    if start:
-        filters.append(f"{content_alias}.created_at>=:date_from")
-        params["date_from"] = f"{start.isoformat()}T00:00:00.000Z"
-    if end:
-        filters.append(f"{content_alias}.created_at<:date_to")
-        params["date_to"] = f"{(end + timedelta(days=1)).isoformat()}T00:00:00.000Z"
+    filters.extend(content_date_filters(date_from, date_to, content_alias, params))
     if before_id > 0:
         filters.append(f"{content_alias}.id<:before_id")
         params["before_id"] = before_id
@@ -750,6 +765,102 @@ def official_comment(post_id: int, request: Request, body: dict, db: DB) -> dict
     return {"commentId": comment_id}
 
 
+def moderate_comment(
+    db: Session,
+    comment: dict,
+    post: dict,
+    action: str,
+    reason: str,
+    admin_id: int,
+    timestamp: str,
+) -> tuple[dict, dict]:
+    if action == "restore-withdrawn":
+        raise ApiError(400, "INVALID_MODERATION_ACTION", "评论不支持该操作")
+    if action in ("hide", "restore") and post["moderation_status"] != "NORMAL":
+        raise ApiError(409, "TREEHOLE_CONTENT_STATE_CONFLICT", "请先恢复帖子再治理评论")
+    current = comment["moderation_status"]
+    if action == "hide" and current != "NORMAL":
+        raise ApiError(409, "TREEHOLE_CONTENT_STATE_CONFLICT", "只有正常评论可以隐藏")
+    if action == "restore" and current != "HIDDEN":
+        raise ApiError(409, "TREEHOLE_CONTENT_STATE_CONFLICT", "只有隐藏评论可以恢复")
+    if action == "delete" and current == "DELETED":
+        raise ApiError(409, "TREEHOLE_CONTENT_STATE_CONFLICT", "评论已经删除")
+    status = {"hide": "HIDDEN", "restore": "NORMAL", "delete": "DELETED"}[action]
+    db.execute(
+        text(
+            """UPDATE treehole_comments SET moderation_status=:status,
+            moderation_reason=:reason,moderated_by=:admin,moderated_at=:now,
+            content=CASE WHEN :status='DELETED' THEN '' ELSE content END,
+            deleted_at=CASE WHEN :status='DELETED' THEN :now ELSE deleted_at END WHERE id=:id"""
+        ),
+        {
+            "status": status,
+            "reason": "" if action == "restore" else reason,
+            "admin": admin_id,
+            "now": timestamp,
+            "id": comment["id"],
+        },
+    )
+    return {"moderationStatus": current}, {"moderationStatus": status}
+
+
+def moderate_post(
+    db: Session,
+    post: dict,
+    action: str,
+    reason: str,
+    admin_id: int,
+    timestamp: str,
+) -> tuple[dict, dict]:
+    current = post["moderation_status"]
+    if action == "restore-withdrawn":
+        if post["visibility"] != "WITHDRAWN" or current != "NORMAL":
+            raise ApiError(409, "TREEHOLE_CONTENT_STATE_CONFLICT", "只有正常的已撤回帖子可以恢复")
+        db.execute(
+            text("UPDATE treehole_posts SET visibility='PRIVATE',withdrawn_at=NULL,updated_at=:now WHERE id=:id"),
+            {"now": timestamp, "id": post["id"]},
+        )
+        return (
+            {"visibility": "WITHDRAWN", "moderationStatus": current},
+            {"visibility": "PRIVATE", "moderationStatus": current},
+        )
+    if action == "hide" and current != "NORMAL":
+        raise ApiError(409, "TREEHOLE_CONTENT_STATE_CONFLICT", "只有正常帖子可以隐藏")
+    if action == "restore" and current != "HIDDEN":
+        raise ApiError(409, "TREEHOLE_CONTENT_STATE_CONFLICT", "只有隐藏帖子可以恢复")
+    if action == "delete" and current == "DELETED":
+        raise ApiError(409, "TREEHOLE_CONTENT_STATE_CONFLICT", "帖子已经删除")
+    status = {"hide": "HIDDEN", "restore": "NORMAL", "delete": "DELETED"}[action]
+    db.execute(
+        text(
+            """UPDATE treehole_posts SET moderation_status=:status,
+            moderation_reason=:reason,moderated_by=:admin,moderated_at=:now,
+            title=CASE WHEN :status='DELETED' THEN '[已删除]' ELSE title END,
+            content=CASE WHEN :status='DELETED' THEN '' ELSE content END,updated_at=:now WHERE id=:id"""
+        ),
+        {
+            "status": status,
+            "reason": "" if action == "restore" else reason,
+            "admin": admin_id,
+            "now": timestamp,
+            "id": post["id"],
+        },
+    )
+    if status == "DELETED":
+        db.execute(
+            text(
+                """UPDATE treehole_comments SET content='',moderation_status='DELETED',
+                moderation_reason=:reason,moderated_by=:admin,moderated_at=:now,deleted_at=:now
+                WHERE post_id=:post"""
+            ),
+            {"reason": reason, "admin": admin_id, "now": timestamp, "post": post["id"]},
+        )
+    return (
+        {"visibility": post["visibility"], "moderationStatus": current},
+        {"visibility": post["visibility"], "moderationStatus": status},
+    )
+
+
 @admin_router.post("/{target_type}/{target_id}/moderation")
 def moderate_treehole(target_type: str, target_id: int, request: Request, body: dict, db: DB) -> dict:
     if target_type not in ("posts", "comments"):
@@ -771,83 +882,10 @@ def moderate_treehole(target_type: str, target_id: int, request: Request, body: 
     reason = validated_text(body.get("reason"), 1, 200, "操作原因")
     timestamp = now()
     if target_type == "comments":
-        if action == "restore-withdrawn":
-            raise ApiError(400, "INVALID_MODERATION_ACTION", "评论不支持该操作")
-        if action in ("hide", "restore") and post["moderation_status"] != "NORMAL":
-            raise ApiError(409, "TREEHOLE_CONTENT_STATE_CONFLICT", "请先恢复帖子再治理评论")
-        current = comment["moderation_status"]
-        if action == "hide" and current != "NORMAL":
-            raise ApiError(409, "TREEHOLE_CONTENT_STATE_CONFLICT", "只有正常评论可以隐藏")
-        if action == "restore" and current != "HIDDEN":
-            raise ApiError(409, "TREEHOLE_CONTENT_STATE_CONFLICT", "只有隐藏评论可以恢复")
-        if action == "delete" and current == "DELETED":
-            raise ApiError(409, "TREEHOLE_CONTENT_STATE_CONFLICT", "评论已经删除")
-        status = {"hide": "HIDDEN", "restore": "NORMAL", "delete": "DELETED"}[action]
-        db.execute(
-            text(
-                """UPDATE treehole_comments SET moderation_status=:status,
-                moderation_reason=:reason,moderated_by=:admin,moderated_at=:now,
-                content=CASE WHEN :status='DELETED' THEN '' ELSE content END,
-                deleted_at=CASE WHEN :status='DELETED' THEN :now ELSE deleted_at END WHERE id=:id"""
-            ),
-            {
-                "status": status,
-                "reason": "" if action == "restore" else reason,
-                "admin": admin["id"],
-                "now": timestamp,
-                "id": target_id,
-            },
-        )
-        before = {"moderationStatus": current}
-        after = {"moderationStatus": status}
+        before, after = moderate_comment(db, comment, post, action, reason, admin["id"], timestamp)
         audit_target = "TREEHOLE_COMMENT"
     else:
-        current = post["moderation_status"]
-        if action == "restore-withdrawn":
-            if post["visibility"] != "WITHDRAWN" or current != "NORMAL":
-                raise ApiError(409, "TREEHOLE_CONTENT_STATE_CONFLICT", "只有正常的已撤回帖子可以恢复")
-            db.execute(
-                text(
-                    """UPDATE treehole_posts SET visibility='PRIVATE',withdrawn_at=NULL,updated_at=:now WHERE id=:id"""
-                ),
-                {"now": timestamp, "id": target_id},
-            )
-            before = {"visibility": "WITHDRAWN", "moderationStatus": current}
-            after = {"visibility": "PRIVATE", "moderationStatus": current}
-        else:
-            if action == "hide" and current != "NORMAL":
-                raise ApiError(409, "TREEHOLE_CONTENT_STATE_CONFLICT", "只有正常帖子可以隐藏")
-            if action == "restore" and current != "HIDDEN":
-                raise ApiError(409, "TREEHOLE_CONTENT_STATE_CONFLICT", "只有隐藏帖子可以恢复")
-            if action == "delete" and current == "DELETED":
-                raise ApiError(409, "TREEHOLE_CONTENT_STATE_CONFLICT", "帖子已经删除")
-            status = {"hide": "HIDDEN", "restore": "NORMAL", "delete": "DELETED"}[action]
-            db.execute(
-                text(
-                    """UPDATE treehole_posts SET moderation_status=:status,
-                    moderation_reason=:reason,moderated_by=:admin,moderated_at=:now,
-                    title=CASE WHEN :status='DELETED' THEN '[已删除]' ELSE title END,
-                    content=CASE WHEN :status='DELETED' THEN '' ELSE content END,updated_at=:now WHERE id=:id"""
-                ),
-                {
-                    "status": status,
-                    "reason": "" if action == "restore" else reason,
-                    "admin": admin["id"],
-                    "now": timestamp,
-                    "id": target_id,
-                },
-            )
-            if status == "DELETED":
-                db.execute(
-                    text(
-                        """UPDATE treehole_comments SET content='',moderation_status='DELETED',
-                        moderation_reason=:reason,moderated_by=:admin,moderated_at=:now,deleted_at=:now
-                        WHERE post_id=:post"""
-                    ),
-                    {"reason": reason, "admin": admin["id"], "now": timestamp, "post": target_id},
-                )
-            before = {"visibility": post["visibility"], "moderationStatus": current}
-            after = {"visibility": post["visibility"], "moderationStatus": status}
+        before, after = moderate_post(db, post, action, reason, admin["id"], timestamp)
         audit_target = "TREEHOLE_POST"
     audit(
         db,
