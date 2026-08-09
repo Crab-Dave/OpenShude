@@ -17,6 +17,7 @@ const state = {
   dormitorySearch: '',
   adminRoundId: null,
   selectionGroups: [],
+  treeholeNextCursor: null,
 };
 
 let refreshPromise = null;
@@ -38,6 +39,8 @@ const labels = {
   dormitoryStatus: { OPEN: '可申请', FULL: '已满员', CLOSED: '已关闭' },
   applicationStatus: { PENDING: '待审核', APPROVED: '已通过', REJECTED: '已拒绝', CANCELLED: '已取消' },
   reportStatus: { PENDING: '待处理', RESOLVED: '已处理', REJECTED: '不成立' },
+  treeholeVisibility: { PRIVATE: '私密', PUBLIC: '已公开', WITHDRAWN: '已撤回' },
+  treeholeModeration: { NORMAL: '正常', HIDDEN: '已隐藏', DELETED: '已删除' },
 };
 
 function escapeHtml(value) {
@@ -127,8 +130,8 @@ function apiRequestHeaders(options) {
 
 function showLoginAfterUnauthorized() {
   state.user = null;
-  const next = window.location.pathname === '/roommates' ? '/roommates' : '/';
-  history.replaceState({}, '', next === '/roommates' ? '/login?next=%2Froommates' : '/login');
+  const next = ['/roommates', '/shudong'].includes(window.location.pathname) ? window.location.pathname : '';
+  history.replaceState({}, '', next ? `/login?next=${encodeURIComponent(next)}` : '/login');
   renderLoginPage();
 }
 
@@ -244,10 +247,18 @@ const studentNav = [
   ['settings', 'settings', '账号设置'],
 ];
 
+function treeholeNav() {
+  const navigation = [['treehole-public', 'trees', '公开树洞']];
+  if (state.user?.accountType === 'USER') navigation.push(['treehole-mine', 'notebook-pen', '我的树洞']);
+  return navigation;
+}
+
 const adminNav = [
   ['overview', 'layout-dashboard', '数据概览'],
   ['users', 'users', '账号管理'],
   ['cards', 'contact-round', '卡片治理'],
+  ['treehole-replies', 'messages-square', '树洞回复'],
+  ['treehole-content', 'trees', '树洞治理'],
   ['rounds', 'calendar-range', '选宿舍轮次'],
   ['groups', 'bed-double', '宿舍组'],
   ['reports', 'shield-alert', '举报处理'],
@@ -276,6 +287,8 @@ function visibleAdminNav() {
     if (key === 'overview') return true;
     if (key === 'users') return hasPermission('USER_READ') || hasPermission('USER_IMPORT') || hasPermission('USER_EXPORT') || hasPermission('USER_LOGIN_IDENTIFIER_UPDATE');
     if (key === 'cards') return hasPermission('CARD_READ');
+    if (key === 'treehole-replies') return hasPermission('TREEHOLE_PRIVATE_REPLY');
+    if (key === 'treehole-content') return hasPermission('TREEHOLE_MODERATE') || state.user.isSuperAdmin;
     if (key === 'groups') return hasPermission('DORMITORY_READ');
     if (key === 'reports') return hasPermission('REPORT_READ');
     if (key === 'audit') return state.user.isSuperAdmin || hasPermission('AUDIT_READ_SCOPED');
@@ -293,6 +306,10 @@ const titles = {
   overview: ['数据概览', '平台当前运行状态'],
   users: ['账号管理', '导入正式账号并维护身份字段'],
   cards: ['卡片治理', '处理公开卡片中的违规内容'],
+  'treehole-public': ['公开树洞', '匿名分享成长记录与建议'],
+  'treehole-mine': ['我的树洞', '查看私密交流与公开状态'],
+  'treehole-replies': ['树洞回复', '回复授权年级的新生私密帖子'],
+  'treehole-content': ['树洞治理', '按授权范围处理帖子和评论'],
   rounds: ['选宿舍轮次', '配置参与学生并分别保留每轮结果'],
   groups: ['宿舍组管理', '查看和处理异常宿舍组'],
   reports: ['举报处理', '仅查看用户主动提交的举报快照'],
@@ -312,11 +329,31 @@ async function enterRoommateSystem() {
     return;
   }
   if (window.location.pathname !== '/roommates') history.pushState({}, '', '/roommates');
+  document.title = '合住 · 自由双选室友';
   state.mode = state.user.isSuperAdmin ? 'management' : 'student';
   state.view = state.mode === 'management' ? 'overview' : 'discover';
   if (state.user.mustChangePassword) {
     renderLoginPage();
-    showRequiredPasswordChange(true);
+    showRequiredPasswordChange('/roommates');
+    return;
+  }
+  await navigate(state.view);
+}
+
+async function enterTreeholeSystem() {
+  if (!state.user) {
+    if (window.location.pathname === '/shudong') history.replaceState({}, '', '/login?next=%2Fshudong');
+    else history.pushState({}, '', '/login?next=%2Fshudong');
+    renderLoginPage();
+    return;
+  }
+  if (window.location.pathname !== '/shudong') history.pushState({}, '', '/shudong');
+  document.title = '树洞道理 · 树德岛哩';
+  state.mode = 'treehole';
+  state.view = 'treehole-public';
+  if (state.user.mustChangePassword) {
+    renderLoginPage();
+    showRequiredPasswordChange('/shudong');
     return;
   }
   await navigate(state.view);
@@ -324,13 +361,14 @@ async function enterRoommateSystem() {
 
 function renderShell() {
   const management = state.mode === 'management';
-  const nav = management ? visibleAdminNav() : studentNav;
+  const treehole = state.mode === 'treehole';
+  const nav = management ? visibleAdminNav() : treehole ? treeholeNav() : studentNav;
   const [title, subtitle] = titles[state.view] || titles[nav[0][0]];
   app.innerHTML = `
     <div class="app-shell">
       <aside class="sidebar">
-        <div class="sidebar-brand"><div class="brand-mark">合</div><div><strong>合住</strong><small>自由双选室友</small></div></div>
-        <div class="nav-label">${management ? '管理工作台' : '室友双选'}</div>
+        <div class="sidebar-brand"><div class="brand-mark">${treehole ? '树' : '合'}</div><div><strong>${treehole ? '树洞道理' : '合住'}</strong><small>${treehole ? '成长记录与交流' : '自由双选室友'}</small></div></div>
+        <div class="nav-label">${management ? '管理工作台' : treehole ? '树洞道理' : '室友双选'}</div>
         <nav class="nav-list">${nav.map(([key, iconName, label]) => `
           <button class="nav-item ${state.view === key ? 'active' : ''}" data-view="${key}">${icon(iconName)}<span>${label}</span></button>
         `).join('')}</nav>
@@ -341,7 +379,9 @@ function renderShell() {
           <div class="topbar-title"><h1>${title}</h1><p>${subtitle}</p></div>
           <div class="topbar-actions">
             <button class="btn btn-secondary" id="home-btn">${icon('home')}<span>首页</span></button>
+            ${treehole ? `<button class="btn btn-secondary" id="roommate-system-btn">${icon('users-round')}<span>室友双选</span></button>` : `<button class="btn btn-secondary" id="treehole-system-btn">${icon('trees')}<span>树洞道理</span></button>`}
             ${state.user.accountType === 'USER' && state.user.canManage ? `<button class="btn btn-secondary" id="switch-mode">${icon(management ? 'users-round' : 'layout-dashboard')}<span>${management ? '返回学生端' : '进入管理工作台'}</span></button>` : ''}
+            ${treehole && state.user.isSuperAdmin ? `<button class="btn btn-secondary" id="treehole-admin-btn">${icon('layout-dashboard')}<span>管理工作台</span></button>` : ''}
             <button class="btn btn-secondary" id="logout-btn">${icon('log-out')}<span>退出</span></button>
           </div>
         </header>
@@ -353,10 +393,19 @@ function renderShell() {
     </div>`;
   document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.view)));
   document.querySelector('#switch-mode')?.addEventListener('click', async () => {
-    state.mode = management ? 'student' : 'management';
-    await navigate(state.mode === 'management' ? 'overview' : 'discover');
+    if (management) await enterRoommateSystem();
+    else {
+      state.mode = 'management';
+      await navigate('overview');
+    }
   });
   document.querySelector('#home-btn').addEventListener('click', goHome);
+  document.querySelector('#treehole-system-btn')?.addEventListener('click', enterTreeholeSystem);
+  document.querySelector('#roommate-system-btn')?.addEventListener('click', enterRoommateSystem);
+  document.querySelector('#treehole-admin-btn')?.addEventListener('click', async () => {
+    state.mode = 'management';
+    await navigate('overview');
+  });
   document.querySelector('#logout-btn').addEventListener('click', logout);
   refreshIcons();
 }
@@ -366,6 +415,7 @@ async function navigate(view) {
   renderShell();
   try {
     if (state.mode === 'management') await loadAdminView(view);
+    else if (state.mode === 'treehole') await loadTreeholeView(view);
     else await loadStudentView(view);
   } catch (error) {
     setPage(emptyState('circle-alert', '页面加载失败', error.message, `<button class="btn btn-secondary" id="retry-view">${icon('refresh-cw')}重试</button>`));
@@ -374,7 +424,7 @@ async function navigate(view) {
 }
 
 function renderLoginPage() {
-  const continueToSystem = new URLSearchParams(window.location.search).get('next') === '/roommates';
+  const continuePath = requestedNextPath();
   closeModal();
   app.innerHTML = `
     <main class="login-shell">
@@ -405,10 +455,10 @@ function renderLoginPage() {
       state.mode = data.user.isSuperAdmin ? 'management' : 'student';
       state.view = state.mode === 'management' ? 'overview' : 'discover';
       if (data.user.mustChangePassword) {
-        showRequiredPasswordChange(continueToSystem);
-      } else if (continueToSystem) {
-        history.replaceState({}, '', '/roommates');
-        await enterRoommateSystem();
+        showRequiredPasswordChange(continuePath);
+      } else if (continuePath) {
+        history.replaceState({}, '', continuePath);
+        await enterRequestedPath(continuePath);
       } else {
         window.location.replace('/');
       }
@@ -428,7 +478,18 @@ async function logout() {
   goHome();
 }
 
-function showRequiredPasswordChange(continueToSystem = true) {
+function requestedNextPath() {
+  const next = new URLSearchParams(window.location.search).get('next');
+  return ['/roommates', '/shudong'].includes(next) ? next : '';
+}
+
+async function enterRequestedPath(path) {
+  if (path === '/shudong') await enterTreeholeSystem();
+  else if (path === '/roommates') await enterRoommateSystem();
+  else goHome();
+}
+
+function showRequiredPasswordChange(continuePath = '/roommates') {
   const modal = openModal('修改初始密码', `<p>这是首次登录。设置你自己的密码后才能继续使用系统。</p><form id="required-password-form" class="form-grid"><div class="form-field full"><label>当前初始密码</label><input name="currentPassword" type="password" autocomplete="current-password" required></div><div class="form-field full"><label>新密码</label><input name="newPassword" type="password" minlength="8" autocomplete="new-password" required></div><div class="form-actions"><button type="button" class="btn btn-secondary" data-logout>退出登录</button><button class="btn btn-primary">${icon('key-round')}设置新密码</button></div></form>`);
   modal.querySelector('[data-close]').remove();
   modal.querySelector('[data-logout]').addEventListener('click', logout);
@@ -439,7 +500,7 @@ function showRequiredPasswordChange(continueToSystem = true) {
       state.user.mustChangePassword = false;
       closeModal();
       toast('密码已更新');
-      if (continueToSystem) await enterRoommateSystem();
+      if (continuePath) await enterRequestedPath(continuePath);
       else goHome();
     } catch (error) { toast(error.message, 'error'); }
   });
@@ -453,6 +514,154 @@ async function loadStudentView(view) {
   if (view === 'history') return renderDormitoryHistory();
   if (view === 'settings') return renderSettings();
   return navigate('discover');
+}
+
+async function loadTreeholeView(view) {
+  if (view === 'treehole-public') return renderTreeholePublic();
+  if (view === 'treehole-mine' && state.user.accountType === 'USER') return renderMyTreehole();
+  return navigate('treehole-public');
+}
+
+function plainText(value) {
+  return escapeHtml(value || '').replace(/\r?\n/g, '<br>');
+}
+
+function treeholeStatus(post) {
+  const moderation = post.moderationStatus || post.moderation_status;
+  if (moderation === 'HIDDEN') return statusBadge('已隐藏', 'hidden', 'eye-off');
+  if (moderation === 'DELETED') return statusBadge('已删除', 'hidden', 'trash-2');
+  if (post.visibility === 'PUBLIC') return statusBadge('已公开', 'published', 'globe-2');
+  if (post.visibility === 'WITHDRAWN') return statusBadge('已撤回', 'closed', 'archive');
+  if (post.reviewedAt || post.reviewed_at) return statusBadge('可公开', 'active', 'badge-check');
+  return statusBadge('等待回复', 'pending', 'clock-3');
+}
+
+function treeholePublicCard(post) {
+  return `<article class="treehole-card" data-treehole-post="${post.id}" tabindex="0">
+    <div class="treehole-card-head"><span class="treehole-symbol">${icon('trees')}</span><div><h2>${escapeHtml(post.title)}</h2><p>匿名 1 号 · 楼主</p></div></div>
+    <p class="treehole-summary">${plainText(post.summary)}${post.summary?.length >= 220 ? '…' : ''}</p>
+    <footer><span>${icon('calendar-days')}${formatDate(post.published_at)}</span><span>${icon('message-circle')}${post.comment_count} 条交流</span></footer>
+  </article>`;
+}
+
+function bindTreeholeCards(container = document) {
+  container.querySelectorAll('[data-treehole-post]').forEach((card) => {
+    const open = () => showTreeholeDetail(Number(card.dataset.treeholePost));
+    card.addEventListener('click', open);
+    card.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') open(); });
+  });
+}
+
+async function renderTreeholePublic() {
+  const data = await api('/api/treehole/posts');
+  state.treeholeNextCursor = data.nextCursor;
+  setPage(`<section class="treehole-hero"><div><span class="eyebrow">SHUDONG STORIES</span><h2>有些问题，可以先在这里慢慢说</h2><p>私密记录在收到管理员回复后，由你决定是否匿名公开。</p></div>${data.canCreate ? `<button class="btn btn-primary" id="create-treehole-post">${icon('pen-line')}写一篇树洞</button>` : ''}</section>
+    <div class="treehole-grid" id="treehole-public-list">${data.posts.map(treeholePublicCard).join('')}</div>
+    ${data.posts.length ? '' : emptyState('trees', '公开树洞还是空的', '收到回复的新生可以选择把成长记录匿名分享给大家')}
+    ${data.nextCursor ? `<div class="load-more"><button class="btn btn-secondary" id="load-more-treehole">${icon('chevrons-down')}查看更多</button></div>` : ''}`);
+  bindTreeholeCards();
+  document.querySelector('#create-treehole-post')?.addEventListener('click', () => showTreeholeEditor());
+  document.querySelector('#load-more-treehole')?.addEventListener('click', loadMoreTreeholePosts);
+}
+
+async function loadMoreTreeholePosts() {
+  if (!state.treeholeNextCursor) return;
+  const button = document.querySelector('#load-more-treehole');
+  if (button) button.disabled = true;
+  try {
+    const data = await api(`/api/treehole/posts?cursor=${encodeURIComponent(state.treeholeNextCursor)}`);
+    const fragment = document.createElement('div');
+    fragment.innerHTML = data.posts.map(treeholePublicCard).join('');
+    bindTreeholeCards(fragment);
+    document.querySelector('#treehole-public-list').append(...fragment.children);
+    state.treeholeNextCursor = data.nextCursor;
+    if (!data.nextCursor) button?.remove();
+    else if (button) button.disabled = false;
+  } catch (error) {
+    if (button) button.disabled = false;
+    toast(error.message, 'error');
+  }
+}
+
+async function renderMyTreehole() {
+  const [{ posts }, eligibility] = await Promise.all([
+    api('/api/treehole/posts/mine'),
+    api('/api/treehole/posts?limit=1'),
+  ]);
+  setPage(`<div class="toolbar"><div class="field-hint">首次管理员正式回复前可以修改原文；公开后仍可撤回。</div><div class="toolbar-spacer"></div>${eligibility.canCreate ? `<button class="btn btn-primary" id="create-treehole-post">${icon('pen-line')}写一篇树洞</button>` : ''}</div>
+    ${posts.length ? `<div class="treehole-mine-list">${posts.map((post) => `<article class="panel treehole-mine-item" data-treehole-post="${post.id}" tabindex="0"><div><div class="treehole-item-status">${treeholeStatus(post)}<span>${formatDate(post.updated_at)}</span></div><h2>${escapeHtml(post.title)}</h2><p>${post.comment_count} 条交流${post.moderation_reason ? ` · ${escapeHtml(post.moderation_reason)}` : ''}</p></div>${icon('chevron-right')}</article>`).join('')}</div>` : emptyState('notebook-pen', eligibility.canCreate ? '还没有写过树洞' : '当前年级暂未开放发帖', eligibility.canCreate ? '你的帖子会先以私密状态与管理员交流' : '仍然可以浏览和参与公开树洞')}`);
+  bindTreeholeCards();
+  document.querySelector('#create-treehole-post')?.addEventListener('click', () => showTreeholeEditor());
+}
+
+function treeholeCommentMarkup(comment, replies) {
+  const unavailable = comment.moderationStatus !== 'NORMAL';
+  const controls = `${state.user.accountType === 'USER' && !unavailable ? `<button class="btn btn-quiet btn-sm" data-treehole-reply="${comment.id}">${icon('reply')}回复</button>` : ''}${state.user.accountType === 'USER' && !unavailable ? `<button class="btn btn-quiet btn-sm" data-treehole-report-comment="${comment.id}">${icon('flag')}举报</button>` : ''}${comment.canDelete ? `<button class="btn btn-quiet btn-sm" data-treehole-delete-comment="${comment.id}">${icon('trash-2')}删除</button>` : ''}`;
+  return `<article class="treehole-comment ${comment.isOfficial ? 'official' : ''}">
+    <header><strong>匿名 ${comment.aliasNumber} 号${comment.aliasNumber === 1 ? ' · 楼主' : ''}</strong>${comment.isOfficial ? '<span class="official-label">管理员</span>' : ''}<time>${formatDate(comment.createdAt)}</time></header>
+    <p>${unavailable ? '<span class="field-hint">该内容已不可见</span>' : plainText(comment.content)}</p><div class="treehole-comment-actions">${controls}</div>
+    ${replies.length ? `<div class="treehole-replies">${replies.map((reply) => `<article class="treehole-comment ${reply.isOfficial ? 'official' : ''}"><header><strong>匿名 ${reply.aliasNumber} 号${reply.aliasNumber === 1 ? ' · 楼主' : ''}</strong>${reply.isOfficial ? '<span class="official-label">管理员</span>' : ''}<span class="reply-target">回复匿名 ${reply.replyToAliasNumber} 号</span><time>${formatDate(reply.createdAt)}</time></header><p>${reply.moderationStatus === 'NORMAL' ? plainText(reply.content) : '<span class="field-hint">该内容已不可见</span>'}</p><div class="treehole-comment-actions">${state.user.accountType === 'USER' && reply.moderationStatus === 'NORMAL' ? `<button class="btn btn-quiet btn-sm" data-treehole-reply="${reply.id}">${icon('reply')}回复</button><button class="btn btn-quiet btn-sm" data-treehole-report-comment="${reply.id}">${icon('flag')}举报</button>` : ''}${reply.canDelete ? `<button class="btn btn-quiet btn-sm" data-treehole-delete-comment="${reply.id}">${icon('trash-2')}删除</button>` : ''}</div></article>`).join('')}</div>` : ''}
+  </article>`;
+}
+
+function treeholeDiscussion(post) {
+  const roots = post.comments.filter((comment) => !comment.parentCommentId);
+  return roots.map((comment) => treeholeCommentMarkup(
+    comment,
+    post.comments.filter((reply) => reply.parentCommentId === comment.id),
+  )).join('');
+}
+
+async function showTreeholeDetail(postId) {
+  try {
+    const { post } = await api(`/api/treehole/posts/${postId}`);
+    const canComment = state.user.accountType === 'USER' && post.moderationStatus === 'NORMAL' && post.visibility !== 'WITHDRAWN';
+    const actions = `${post.canEdit ? `<button class="btn btn-secondary" data-treehole-edit>${icon('pencil')}编辑</button>` : ''}${post.canPublish ? `<button class="btn btn-primary" data-treehole-publish>${icon('globe-2')}匿名公开</button>` : ''}${post.canWithdraw ? `<button class="btn btn-secondary" data-treehole-withdraw>${icon('archive')}撤回</button>` : ''}${state.user.accountType === 'USER' && post.moderationStatus === 'NORMAL' ? `<button class="btn btn-quiet" data-treehole-report-post>${icon('flag')}举报</button>` : ''}`;
+    const modal = openModal(post.title || '树洞帖子', `<article class="treehole-detail"><header><div>${treeholeStatus(post)}<span class="treehole-author">匿名 1 号 · 楼主</span></div><time>${formatDate(post.createdAt)}</time></header>${post.content == null ? `<div class="treehole-unavailable">${icon('eye-off')}<p>${escapeHtml(post.moderationReason || '该内容当前不可见')}</p></div>` : `<p class="treehole-body">${plainText(post.content)}</p>`}<div class="detail-actions">${actions}</div></article>
+      <section class="treehole-discussion"><div class="section-heading"><div><h2>交流</h2><p>${post.comments.length} 条评论与回复</p></div></div>${treeholeDiscussion(post) || '<p class="field-hint">还没有交流内容</p>'}${canComment ? `<form id="treehole-comment-form" class="treehole-comment-form"><label for="treehole-comment-content">写下你的想法</label><textarea id="treehole-comment-content" name="content" maxlength="2000" required></textarea><button class="btn btn-primary">${icon('send')}发表评论</button></form>` : ''}</section>`, { wide: true });
+    modal.querySelector('[data-treehole-edit]')?.addEventListener('click', () => showTreeholeEditor(post));
+    modal.querySelector('[data-treehole-publish]')?.addEventListener('click', async () => {
+      if (!window.confirm('公开后，正文和已有交流会一起匿名展示。确定公开吗？')) return;
+      try { await api(`/api/treehole/posts/${postId}/publish`, { method: 'POST', body: '{}' }); closeModal(); toast('帖子已匿名公开'); await navigate(state.view); } catch (error) { toast(error.message, 'error'); }
+    });
+    modal.querySelector('[data-treehole-withdraw]')?.addEventListener('click', async () => {
+      if (!window.confirm('撤回后帖子会从公开树洞消失，但已经公开过的内容可能已被阅读。确定撤回吗？')) return;
+      try { await api(`/api/treehole/posts/${postId}/withdraw`, { method: 'POST', body: '{}' }); closeModal(); toast('帖子已撤回'); await navigate(state.view); } catch (error) { toast(error.message, 'error'); }
+    });
+    modal.querySelector('[data-treehole-report-post]')?.addEventListener('click', () => showReportModal('TREEHOLE_POST', postId));
+    modal.querySelector('#treehole-comment-form')?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      try { await api(`/api/treehole/posts/${postId}/comments`, { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget))) }); await showTreeholeDetail(postId); toast('评论已发布'); } catch (error) { toast(error.message, 'error'); }
+    });
+    modal.querySelectorAll('[data-treehole-reply]').forEach((button) => button.addEventListener('click', () => showTreeholeReply(Number(button.dataset.treeholeReply), postId)));
+    modal.querySelectorAll('[data-treehole-report-comment]').forEach((button) => button.addEventListener('click', () => showReportModal('TREEHOLE_COMMENT', Number(button.dataset.treeholeReportComment))));
+    modal.querySelectorAll('[data-treehole-delete-comment]').forEach((button) => button.addEventListener('click', async () => {
+      if (!window.confirm('删除后原文不能恢复，确定删除吗？')) return;
+      try { await api(`/api/treehole/comments/${button.dataset.treeholeDeleteComment}`, { method: 'DELETE' }); await showTreeholeDetail(postId); toast('评论已删除'); } catch (error) { toast(error.message, 'error'); }
+    }));
+  } catch (error) { toast(error.message, 'error'); }
+}
+
+function showTreeholeReply(commentId, postId) {
+  const modal = openModal('回复匿名参与者', `<form id="treehole-reply-form"><div class="form-field"><label>回复内容</label><textarea name="content" maxlength="2000" required></textarea></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary">${icon('send')}发布回复</button></div></form>`);
+  modal.querySelector('[data-cancel]').addEventListener('click', () => showTreeholeDetail(postId));
+  modal.querySelector('#treehole-reply-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try { await api(`/api/treehole/comments/${commentId}/replies`, { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget))) }); await showTreeholeDetail(postId); toast('回复已发布'); } catch (error) { toast(error.message, 'error'); }
+  });
+}
+
+function showTreeholeEditor(post = null) {
+  const modal = openModal(post ? '编辑树洞' : '写一篇树洞', `<form id="treehole-editor"><div class="form-grid"><div class="form-field full"><label>标题</label><input name="title" minlength="2" maxlength="80" value="${escapeHtml(post?.title || '')}" required></div><div class="form-field full"><label>正文</label><textarea name="content" minlength="10" maxlength="5000" rows="10" required>${escapeHtml(post?.content || '')}</textarea><span class="field-hint">请不要填写姓名、联系方式等可识别身份的信息。帖子会先以私密状态与管理员交流。</span></div></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary">${icon('save')}${post ? '保存修改' : '发布私密帖'}</button></div></form>`, { wide: true });
+  modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
+  modal.querySelector('#treehole-editor').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      const target = post ? `/api/treehole/posts/${post.id}` : '/api/treehole/posts';
+      await api(target, { method: post ? 'PATCH' : 'POST', body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget))) });
+      closeModal(); toast(post ? '帖子已更新' : '私密帖已发布'); await navigate('treehole-mine');
+    } catch (error) { toast(error.message, 'error'); }
+  });
 }
 
 function roommateCard(card) {
@@ -1052,12 +1261,91 @@ async function loadAdminView(view) {
   if (view === 'overview') return renderAdminOverview();
   if (view === 'users') return renderAdminUsers();
   if (view === 'cards') return renderAdminCards();
+  if (view === 'treehole-replies') return renderAdminTreeholeReplies();
+  if (view === 'treehole-content') return renderAdminTreeholeContent();
   if (view === 'rounds') return renderAdminRounds();
   if (view === 'groups') return renderAdminGroups();
   if (view === 'reports') return renderAdminReports();
   if (view === 'audit') return renderAdminAudit();
   if (view === 'access') return renderAdminAccess();
   return navigate('overview');
+}
+
+async function renderAdminTreeholeReplies(status = 'ALL') {
+  const { posts } = await api(`/api/admin/treehole/private-posts?status=${status}`);
+  setPage(`<div class="toolbar"><select id="treehole-reply-status"><option value="ALL" ${status === 'ALL' ? 'selected' : ''}>全部私密帖</option><option value="WAITING" ${status === 'WAITING' ? 'selected' : ''}>等待首次回复</option><option value="REVIEWED" ${status === 'REVIEWED' ? 'selected' : ''}>已回复</option></select></div>
+    ${posts.length ? `<div class="treehole-admin-list">${posts.map((post) => `<article class="panel treehole-admin-item" data-admin-treehole-post="${post.id}" tabindex="0"><div class="treehole-item-status">${post.reviewed_at ? statusBadge('已回复', 'active', 'badge-check') : statusBadge('等待回复', 'pending', 'clock-3')}<span>${escapeHtml(post.author_name)} · ${escapeHtml(post.author_grade)} · ${formatDate(post.created_at)}</span></div><h2>${escapeHtml(post.title)}</h2><p>${plainText(post.content.slice(0, 180))}${post.content.length > 180 ? '…' : ''}</p><footer>${post.comment_count} 条交流</footer></article>`).join('')}</div>` : emptyState('messages-square', '没有待回复的私密树洞', '这里只展示当前权限覆盖年级的帖子')}`);
+  document.querySelector('#treehole-reply-status').addEventListener('change', (event) => renderAdminTreeholeReplies(event.target.value));
+  bindAdminTreeholeCards();
+}
+
+async function renderAdminTreeholeContent(visibility = 'ALL', moderationStatus = 'ALL') {
+  const { posts } = await api(`/api/admin/treehole/content?visibility=${visibility}&moderation_status=${moderationStatus}`);
+  setPage(`<div class="toolbar"><select id="treehole-content-visibility"><option value="ALL">全部可见性</option>${Object.entries(labels.treeholeVisibility).map(([value, text]) => `<option value="${value}" ${visibility === value ? 'selected' : ''}>${text}</option>`).join('')}</select><select id="treehole-content-moderation"><option value="ALL">全部治理状态</option>${Object.entries(labels.treeholeModeration).map(([value, text]) => `<option value="${value}" ${moderationStatus === value ? 'selected' : ''}>${text}</option>`).join('')}</select><div class="toolbar-spacer"></div>${state.user.isSuperAdmin ? `<button class="btn btn-secondary" id="configure-treehole-grades">${icon('graduation-cap')}配置发帖年级</button>` : ''}</div>
+    ${posts.length ? `<div class="treehole-admin-list">${posts.map((post) => `<article class="panel treehole-admin-item" data-admin-treehole-post="${post.id}" tabindex="0"><div class="treehole-item-status">${treeholeStatus(post)}<span>${escapeHtml(post.author_name || '已删除账号')} · ${escapeHtml(post.author_grade || '-')} · ${formatDate(post.updated_at)}</span></div><h2>${escapeHtml(post.title || '[已删除]')}</h2><p>${plainText((post.content || '').slice(0, 180))}${post.content?.length > 180 ? '…' : ''}</p>${post.moderation_reason ? `<footer>${escapeHtml(post.moderation_reason)}</footer>` : ''}</article>`).join('')}</div>` : emptyState('shield-check', '没有符合条件的树洞内容', '可以调整可见性和治理状态筛选')}`);
+  const rerender = () => renderAdminTreeholeContent(
+    document.querySelector('#treehole-content-visibility').value,
+    document.querySelector('#treehole-content-moderation').value,
+  );
+  document.querySelector('#treehole-content-visibility').addEventListener('change', rerender);
+  document.querySelector('#treehole-content-moderation').addEventListener('change', rerender);
+  document.querySelector('#configure-treehole-grades')?.addEventListener('click', showTreeholeGradeConfiguration);
+  bindAdminTreeholeCards();
+}
+
+function bindAdminTreeholeCards() {
+  document.querySelectorAll('[data-admin-treehole-post]').forEach((card) => {
+    const open = () => showAdminTreeholeDetail(Number(card.dataset.adminTreeholePost));
+    card.addEventListener('click', open);
+    card.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') open(); });
+  });
+}
+
+function adminTreeholeComment(comment, canModerate) {
+  const moderationAction = comment.moderationStatus === 'NORMAL' ? 'hide' : comment.moderationStatus === 'HIDDEN' ? 'restore' : '';
+  return `<article class="treehole-comment ${comment.isOfficial ? 'official' : ''}"><header><strong>匿名 ${comment.aliasNumber} 号 · ${escapeHtml(comment.authorName)}</strong>${comment.isOfficial ? '<span class="official-label">管理员</span>' : ''}${comment.replyToAliasNumber ? `<span class="reply-target">回复匿名 ${comment.replyToAliasNumber} 号</span>` : ''}<time>${formatDate(comment.createdAt)}</time></header><p>${comment.content ? plainText(comment.content) : '<span class="field-hint">该内容已删除</span>'}</p>${comment.moderationReason ? `<div class="field-hint">治理原因：${escapeHtml(comment.moderationReason)}</div>` : ''}<div class="treehole-comment-actions">${canModerate && moderationAction ? `<button class="btn btn-secondary btn-sm" data-admin-comment-action="${moderationAction}" data-comment-id="${comment.id}">${icon(moderationAction === 'hide' ? 'eye-off' : 'rotate-ccw')}${moderationAction === 'hide' ? '隐藏' : '恢复'}</button>` : ''}${canModerate && comment.moderationStatus !== 'DELETED' ? `<button class="btn btn-danger btn-sm" data-admin-comment-action="delete" data-comment-id="${comment.id}">${icon('trash-2')}删除</button>` : ''}</div></article>`;
+}
+
+async function showAdminTreeholeDetail(postId) {
+  try {
+    const { post } = await api(`/api/admin/treehole/posts/${postId}`);
+    const canReply = hasScopedPermission('TREEHOLE_PRIVATE_REPLY', post.managementGradeId)
+      && post.moderationStatus === 'NORMAL' && post.visibility !== 'WITHDRAWN';
+    const canModerate = hasScopedPermission('TREEHOLE_MODERATE', post.managementGradeId);
+    const postAction = post.moderationStatus === 'NORMAL' ? 'hide' : post.moderationStatus === 'HIDDEN' ? 'restore' : '';
+    const modal = openModal(post.title || '[已删除]', `<article class="treehole-detail admin"><header><div>${treeholeStatus(post)}<span class="treehole-author">${escapeHtml(post.author.name)} · ${escapeHtml(post.author.grade)}</span></div><time>${formatDate(post.createdAt)}</time></header><p class="treehole-body">${post.content ? plainText(post.content) : '<span class="field-hint">正文已删除</span>'}</p>${post.moderationReason ? `<p class="field-hint">治理原因：${escapeHtml(post.moderationReason)}</p>` : ''}<div class="detail-actions">${canModerate && postAction ? `<button class="btn btn-secondary" data-admin-post-action="${postAction}">${icon(postAction === 'hide' ? 'eye-off' : 'rotate-ccw')}${postAction === 'hide' ? '隐藏帖子' : '恢复帖子'}</button>` : ''}${canModerate && post.visibility === 'WITHDRAWN' && post.moderationStatus === 'NORMAL' ? `<button class="btn btn-secondary" data-admin-post-action="restore-withdrawn">${icon('undo-2')}恢复为私密</button>` : ''}${canModerate && post.moderationStatus !== 'DELETED' ? `<button class="btn btn-danger" data-admin-post-action="delete">${icon('trash-2')}删除帖子</button>` : ''}</div></article>
+      <section class="treehole-discussion"><div class="section-heading"><div><h2>交流记录</h2><p>管理员真实身份不会在公开树洞显示</p></div></div>${post.comments.map((comment) => adminTreeholeComment(comment, canModerate)).join('') || '<p class="field-hint">暂无交流</p>'}${canReply ? `<form id="official-treehole-reply" class="treehole-comment-form"><label>正式管理员回复</label><textarea name="content" maxlength="2000" required></textarea><button class="btn btn-primary">${icon('send')}提交正式回复</button></form>` : ''}</section>`, { wide: true });
+    modal.querySelector('#official-treehole-reply')?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      try { await api(`/api/admin/treehole/posts/${postId}/comments`, { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget))) }); await showAdminTreeholeDetail(postId); toast('正式回复已提交'); } catch (error) { toast(error.message, 'error'); }
+    });
+    modal.querySelectorAll('[data-admin-post-action]').forEach((button) => button.addEventListener('click', () => showTreeholeModeration('posts', postId, button.dataset.adminPostAction, postId)));
+    modal.querySelectorAll('[data-admin-comment-action]').forEach((button) => button.addEventListener('click', () => showTreeholeModeration('comments', Number(button.dataset.commentId), button.dataset.adminCommentAction, postId)));
+  } catch (error) { toast(error.message, 'error'); }
+}
+
+function showTreeholeModeration(targetType, targetId, action, postId) {
+  const actionName = { hide: '隐藏', restore: '恢复', delete: '删除', 'restore-withdrawn': '恢复撤回状态' }[action];
+  const modal = openModal(`${actionName}树洞内容`, `<form id="treehole-moderation-form"><p>${action === 'delete' ? '删除后正文不能通过管理界面恢复。' : '操作会立即影响学生端可见状态。'}</p><div class="form-field"><label>操作原因</label><textarea name="reason" maxlength="200" required></textarea></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn ${action === 'delete' ? 'btn-danger' : 'btn-primary'}">确认${actionName}</button></div></form>`);
+  modal.querySelector('[data-cancel]').addEventListener('click', () => showAdminTreeholeDetail(postId));
+  modal.querySelector('#treehole-moderation-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try { await api(`/api/admin/treehole/${targetType}/${targetId}/moderation`, { method: 'POST', body: JSON.stringify({ action, reason: event.currentTarget.reason.value }) }); toast(`内容已${actionName}`); await showAdminTreeholeDetail(postId); } catch (error) { toast(error.message, 'error'); }
+  });
+}
+
+async function showTreeholeGradeConfiguration() {
+  try {
+    const { grades } = await api('/api/admin/treehole/author-grades');
+    const modal = openModal('配置新生发帖年级', `<form id="treehole-grade-form"><p class="field-hint">配置变化只影响后续创建资格，不改变历史帖子的管理范围。</p><div class="candidate-grid">${grades.map((grade) => `<div class="candidate"><input type="checkbox" name="gradeIds" value="${grade.id}" id="treehole-grade-${grade.id}" ${grade.selected ? 'checked' : ''} ${grade.status !== 'ACTIVE' ? 'disabled' : ''}><label for="treehole-grade-${grade.id}">${icon('graduation-cap')}<span>${escapeHtml(grade.name)}<small>${grade.status === 'ACTIVE' ? '有效年级' : '已停用'}</small></span></label></div>`).join('')}</div><div class="form-field"><label>操作原因</label><textarea name="reason" maxlength="200" required></textarea></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary">${icon('save')}保存配置</button></div></form>`, { wide: true });
+    modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
+    modal.querySelector('#treehole-grade-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const gradeIds = [...form.querySelectorAll('input[name="gradeIds"]:checked')].map((input) => Number(input.value));
+      try { await api('/api/admin/treehole/author-grades', { method: 'PUT', body: JSON.stringify({ gradeIds, reason: form.reason.value }) }); closeModal(); toast('发帖年级配置已更新'); } catch (error) { toast(error.message, 'error'); }
+    });
+  } catch (error) { toast(error.message, 'error'); }
 }
 
 async function renderAdminOverview() {
@@ -1427,7 +1715,8 @@ function showCloseDormitory(dormitoryId) {
 
 async function renderAdminReports() {
   const { reports } = await api('/api/admin/reports');
-  setPage(reports.length ? `<div class="toolbar"><div class="search-field">${icon('search')}<input id="report-person-search" placeholder="按举报人姓名搜索"></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>举报人</th><th>对象</th><th>原因</th><th>提交时间</th><th>状态</th><th></th></tr></thead><tbody>${reports.map((report) => `<tr data-person-name="${escapeHtml(report.reporter_name.toLowerCase())}"><td>${escapeHtml(report.reporter_name)}</td><td>${report.target_type === 'ROOMMATE_CARD' ? '室友卡片' : '私信消息'} #${report.target_id}</td><td><strong>${escapeHtml(report.reason)}</strong><div class="field-hint">${escapeHtml(report.description)}</div></td><td>${formatDate(report.created_at)}</td><td>${statusBadge(labels.reportStatus[report.status], report.status.toLowerCase())}</td><td>${hasScopedPermission('REPORT_RESOLVE', report.target_grade_id) && report.status === 'PENDING' ? `<button class="btn btn-primary btn-sm" data-resolve="${report.id}">${icon('check')}处理</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : emptyState('shield-check', '没有待处理举报', '当前没有用户提交的举报记录'));
+  const targetLabels = { ROOMMATE_CARD: '室友卡片', MESSAGE: '私信消息', TREEHOLE_POST: '树洞帖子', TREEHOLE_COMMENT: '树洞评论' };
+  setPage(reports.length ? `<div class="toolbar"><div class="search-field">${icon('search')}<input id="report-person-search" placeholder="按举报人姓名搜索"></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>举报人</th><th>对象</th><th>原因</th><th>提交时间</th><th>状态</th><th></th></tr></thead><tbody>${reports.map((report) => `<tr data-person-name="${escapeHtml(report.reporter_name.toLowerCase())}"><td>${escapeHtml(report.reporter_name)}</td><td>${escapeHtml(targetLabels[report.target_type] || report.target_type)} #${report.target_id}</td><td><strong>${escapeHtml(report.reason)}</strong><div class="field-hint">${escapeHtml(report.description)}</div></td><td>${formatDate(report.created_at)}</td><td>${statusBadge(labels.reportStatus[report.status], report.status.toLowerCase())}</td><td>${hasScopedPermission('REPORT_RESOLVE', report.target_grade_id) && report.status === 'PENDING' ? `<button class="btn btn-primary btn-sm" data-resolve="${report.id}">${icon('check')}处理</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : emptyState('shield-check', '没有待处理举报', '当前没有用户提交的举报记录'));
   document.querySelector('#report-person-search')?.addEventListener('input', (event) => {
     const query = event.target.value.trim().toLowerCase();
     document.querySelectorAll('tr[data-person-name]').forEach((row) => { row.hidden = query && !row.dataset.personName.includes(query); });
@@ -1521,12 +1810,13 @@ async function init() {
     if (error.status !== 401) toast(error.message, 'error');
   }
   if (window.location.pathname === '/roommates') await enterRoommateSystem();
+  else if (window.location.pathname === '/shudong') await enterTreeholeSystem();
   else if (window.location.pathname === '/login') {
-    const continueToSystem = new URLSearchParams(window.location.search).get('next') === '/roommates';
+    const continuePath = requestedNextPath();
     if (!state.user) renderLoginPage();
-    else if (continueToSystem) {
-      history.replaceState({}, '', '/roommates');
-      await enterRoommateSystem();
+    else if (continuePath) {
+      history.replaceState({}, '', continuePath);
+      await enterRequestedPath(continuePath);
     } else {
       window.location.replace('/');
     }
@@ -1537,12 +1827,13 @@ async function init() {
 
 window.addEventListener('popstate', () => {
   if (window.location.pathname === '/roommates') enterRoommateSystem();
+  else if (window.location.pathname === '/shudong') enterTreeholeSystem();
   else if (window.location.pathname === '/login') {
-    const continueToSystem = new URLSearchParams(window.location.search).get('next') === '/roommates';
+    const continuePath = requestedNextPath();
     if (!state.user) renderLoginPage();
-    else if (continueToSystem) {
-      history.replaceState({}, '', '/roommates');
-      enterRoommateSystem();
+    else if (continuePath) {
+      history.replaceState({}, '', continuePath);
+      enterRequestedPath(continuePath);
     } else {
       window.location.replace('/');
     }

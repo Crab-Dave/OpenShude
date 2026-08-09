@@ -450,6 +450,54 @@ input:disabled { color: #62586d; background: #f0edf4; cursor: not-allowed; }
 .panel { padding: 20px; }
 .panel + .panel { margin-top: 16px; }
 
+.treehole-hero { margin-bottom: 22px; padding: 28px 30px; border: 1px solid #dfd2ef; border-radius: 10px; display: flex; align-items: center; justify-content: space-between; gap: 24px; color: #30203f; background: linear-gradient(130deg, #f2eafb 0%, #fff0f7 100%); box-shadow: var(--shadow); }
+.treehole-hero .eyebrow { color: var(--primary); font-size: 11px; font-weight: 800; letter-spacing: .14em; }
+.treehole-hero h2 { margin: 7px 0 8px; font-size: 24px; }
+.treehole-hero p { margin: 0; color: var(--muted); line-height: 1.7; }
+.treehole-hero .btn { flex: none; }
+.treehole-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.treehole-card { min-width: 0; padding: 22px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: 0 5px 16px rgba(70,45,96,.06); cursor: pointer; transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease; }
+.treehole-card:hover, .treehole-card:focus-visible { border-color: #bda8d8; outline: none; transform: translateY(-2px); box-shadow: var(--shadow); }
+.treehole-card-head { display: flex; align-items: center; gap: 12px; }
+.treehole-symbol { width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; color: var(--primary); background: var(--primary-soft); }
+.treehole-symbol svg { width: 20px; }
+.treehole-card h2, .treehole-mine-item h2, .treehole-admin-item h2 { margin: 0; font-size: 17px; line-height: 1.45; }
+.treehole-card-head p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+.treehole-summary { min-height: 74px; margin: 17px 0; color: #4b4056; line-height: 1.7; overflow-wrap: anywhere; }
+.treehole-card footer { padding-top: 13px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 12px; }
+.treehole-card footer span { display: inline-flex; align-items: center; gap: 5px; }
+.treehole-card footer svg { width: 14px; }
+.load-more { padding: 24px 0 4px; display: flex; justify-content: center; }
+.treehole-mine-list, .treehole-admin-list { display: grid; gap: 12px; }
+.treehole-mine-item { display: flex; align-items: center; justify-content: space-between; gap: 16px; cursor: pointer; }
+.treehole-mine-item:hover, .treehole-admin-item:hover { border-color: #baa4d3; }
+.treehole-mine-item > svg { width: 20px; color: var(--muted); }
+.treehole-mine-item p, .treehole-admin-item p { margin: 7px 0 0; color: var(--muted); line-height: 1.65; }
+.treehole-item-status { margin-bottom: 9px; display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
+.treehole-admin-item { cursor: pointer; }
+.treehole-admin-item footer { margin-top: 12px; color: var(--muted); font-size: 12px; }
+.treehole-detail > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--muted); font-size: 12px; }
+.treehole-detail > header > div { display: flex; align-items: center; gap: 9px; }
+.treehole-author { color: var(--muted); font-weight: 700; }
+.treehole-body { margin: 22px 0; color: #382d43; font-size: 16px; line-height: 1.82; overflow-wrap: anywhere; }
+.treehole-unavailable { min-height: 150px; display: grid; place-content: center; justify-items: center; color: var(--muted); }
+.treehole-unavailable svg { width: 30px; }
+.treehole-discussion { margin: 24px -20px -20px; padding: 22px 20px 2px; border-top: 1px solid var(--line); background: #fcfbfd; }
+.treehole-comment { padding: 15px 0; border-top: 1px solid var(--line); }
+.treehole-comment:first-of-type { border-top: 0; }
+.treehole-comment > header { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; color: var(--primary-dark); font-size: 12px; }
+.treehole-comment > header time { margin-left: auto; color: var(--muted); font-weight: 400; }
+.treehole-comment > p { margin: 9px 0; color: #43394d; line-height: 1.72; overflow-wrap: anywhere; }
+.treehole-comment.official { padding-left: 12px; border-left: 3px solid #9b77ce; }
+.official-label { padding: 2px 6px; border-radius: 3px; color: white; background: var(--primary); font-size: 10px; font-weight: 700; }
+.reply-target { color: var(--muted); font-weight: 400; }
+.treehole-replies { margin: 12px 0 0 22px; padding-left: 14px; border-left: 2px solid var(--line); }
+.treehole-comment-actions { min-height: 28px; display: flex; justify-content: flex-end; gap: 5px; }
+.treehole-comment-form { margin-top: 20px; padding: 16px; border: 1px solid var(--line); border-radius: 7px; display: grid; gap: 10px; background: white; }
+.treehole-comment-form label { font-size: 13px; font-weight: 700; }
+.treehole-comment-form textarea { min-height: 96px; resize: vertical; }
+.treehole-comment-form .btn { justify-self: end; }
+
 .empty-state { min-height: 260px; display: grid; place-content: center; justify-items: center; text-align: center; padding: 30px; color: var(--muted); }
 .empty-state svg { width: 38px; height: 38px; margin-bottom: 12px; color: #9b83b5; }
 .empty-state h3 { margin: 0 0 7px; color: var(--ink); font-size: 16px; }
@@ -481,6 +529,7 @@ input:disabled { color: #62586d; background: #f0edf4; cursor: not-allowed; }
   .dormitory-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .access-grid { grid-template-columns: 1fr; }
   .round-admin-grid { grid-template-columns: 1fr; }
+  .treehole-grid { grid-template-columns: 1fr; }
   .preview-panel { position: static; }
 }
 
@@ -518,6 +567,10 @@ input:disabled { color: #62586d; background: #f0edf4; cursor: not-allowed; }
   .round-metrics { grid-template-columns: 1fr; }
   .dormitory-grid { grid-template-columns: 1fr; }
   .application-card { width: 92%; }
+  .treehole-hero { padding: 22px; align-items: flex-start; flex-direction: column; }
+  .treehole-hero .btn { width: 100%; }
+  .treehole-replies { margin-left: 8px; padding-left: 10px; }
+  .treehole-comment > header time { width: 100%; margin-left: 0; }
   .stats-grid { grid-template-columns: 1fr 1fr; gap: 9px; }
   .stat { padding: 14px; }
   .stat strong { font-size: 23px; }

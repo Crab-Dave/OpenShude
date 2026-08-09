@@ -31,7 +31,7 @@ show_in_navigation = true
 order = 20
 ```
 
-`slug` 只能包含小写字母、数字和连字符。路由不能与 `/api`、`/assets`、`/login`、`/roommates`、`/static-pages` 或 `/vendor` 冲突。`show_in_navigation = false` 可以生成不显示在顶栏中的公开页面。
+`slug` 只能包含小写字母、数字和连字符。路由不能与 `/api`、`/assets`、`/login`、`/roommates`、`/shudong`、`/static-pages` 或 `/vendor` 冲突。`show_in_navigation = false` 可以生成不显示在顶栏中的公开页面。
 
 ## 本地构建
 

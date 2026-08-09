@@ -10,7 +10,7 @@ import nh3
 from markdown_it import MarkdownIt
 
 ROOT = Path(__file__).resolve().parents[1]
-RESERVED_ROUTES = {"/api", "/assets", "/login", "/roommates", "/static-pages", "/vendor"}
+RESERVED_ROUTES = {"/api", "/assets", "/login", "/roommates", "/shudong", "/static-pages", "/vendor"}
 REQUIRED_PAGE_FIELDS = {"slug", "route", "title", "description", "source", "show_in_navigation", "order"}
 MANIFEST_FIELDS = ("slug", "route", "title", "description", "show_in_navigation", "order")
 ALLOWED_TAGS = {
