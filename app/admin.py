@@ -134,7 +134,10 @@ def report_rows(db: Session) -> list[dict]:
         """SELECT r.*,reporter.name AS reporter_name,handler.name AS handler_name,
       CASE r.target_type WHEN 'ROOMMATE_CARD' THEN (SELECT u.grade_id FROM roommate_cards c JOIN users u
         ON u.id=c.user_id WHERE c.id=r.target_id) WHEN 'MESSAGE' THEN (SELECT u.grade_id FROM messages m
-        JOIN users u ON u.id=m.sender_id WHERE m.id=r.target_id) END AS target_grade_id
+        JOIN users u ON u.id=m.sender_id WHERE m.id=r.target_id)
+        WHEN 'TREEHOLE_POST' THEN (SELECT p.management_grade_id FROM treehole_posts p WHERE p.id=r.target_id)
+        WHEN 'TREEHOLE_COMMENT' THEN (SELECT p.management_grade_id FROM treehole_comments c
+          JOIN treehole_posts p ON p.id=c.post_id WHERE c.id=r.target_id) END AS target_grade_id
       FROM reports r JOIN users reporter ON reporter.id=r.reporter_id LEFT JOIN users handler ON handler.id=r.handled_by
       ORDER BY CASE r.status WHEN 'PENDING' THEN 0 ELSE 1 END,r.id DESC""",
     )
@@ -878,6 +881,23 @@ def delete_user(user_id: int, request: Request, body: dict, db: DB) -> dict:
         },
     )
     leave_dormitory(db, user_id, reason="管理员永久删除账号")
+    timestamp = now()
+    db.execute(
+        text(
+            """UPDATE treehole_comments SET content='',moderation_status='DELETED',
+            moderation_reason='账号已永久删除',deleted_at=:now
+            WHERE post_id IN (SELECT id FROM treehole_posts WHERE author_id=:id)
+            OR participant_id IN (SELECT id FROM treehole_participants WHERE user_id=:id)"""
+        ),
+        {"id": user_id, "now": timestamp},
+    )
+    db.execute(
+        text(
+            """UPDATE treehole_posts SET title='[已删除]',content='',moderation_status='DELETED',
+            moderation_reason='账号已永久删除',updated_at=:now WHERE author_id=:id"""
+        ),
+        {"id": user_id, "now": timestamp},
+    )
     nullable = (
         ("users", "imported_by"),
         ("admin_groups", "created_by"),

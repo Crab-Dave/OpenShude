@@ -19,6 +19,8 @@ PERMISSIONS = {
     "USER_STATUS_UPDATE": "修改用户状态",
     "CARD_READ": "查看卡片",
     "CARD_MODERATE": "隐藏或恢复卡片",
+    "TREEHOLE_PRIVATE_REPLY": "回复私密树洞",
+    "TREEHOLE_MODERATE": "治理树洞内容",
     "DORMITORY_READ": "查看宿舍",
     "DORMITORY_LOCATION_ASSIGN": "分配宿舍位置",
     "DORMITORY_CLOSE": "关闭宿舍",
