@@ -250,6 +250,12 @@ def enforce_comment_rate(request: Request, user_id: int) -> None:
     enforce_rate_limit("treehole-comment-minute-ip", ip_address, 60, 60, "TREEHOLE_COMMENT_RATE_LIMITED")
 
 
+def enforce_management_rate(request: Request, user_id: int) -> None:
+    ip_address = request.client.host if request.client else "unknown"
+    enforce_rate_limit("treehole-management-user", str(user_id), 30, 60, "TREEHOLE_MANAGEMENT_RATE_LIMITED")
+    enforce_rate_limit("treehole-management-ip", ip_address, 120, 60, "TREEHOLE_MANAGEMENT_RATE_LIMITED")
+
+
 @router.get("/posts")
 def public_posts(
     request: Request,
@@ -685,7 +691,7 @@ def official_comment(post_id: int, request: Request, body: dict, db: DB) -> dict
     grant = authorize(db, admin, "TREEHOLE_PRIVATE_REPLY", post["management_grade_id"])
     if post["moderation_status"] != "NORMAL" or post["visibility"] == "WITHDRAWN":
         raise ApiError(409, "TREEHOLE_COMMENTS_CLOSED", "当前帖子不能继续回复")
-    enforce_comment_rate(request, admin["id"])
+    enforce_management_rate(request, admin["id"])
     content = validated_text(body.get("content"), 1, 2000, "回复")
     comment_id = add_comment(db, post, admin, content, official=True)
     timestamp = now()
@@ -727,6 +733,7 @@ def moderate_treehole(target_type: str, target_id: int, request: Request, body: 
     action = body.get("action")
     if action not in ("hide", "restore", "delete", "restore-withdrawn"):
         raise ApiError(400, "INVALID_MODERATION_ACTION", "治理操作无效")
+    enforce_management_rate(request, admin["id"])
     reason = validated_text(body.get("reason"), 1, 200, "操作原因")
     timestamp = now()
     if target_type == "comments":

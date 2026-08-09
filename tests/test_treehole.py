@@ -325,3 +325,29 @@ def test_admin_treehole_queues_use_server_pagination_and_default_to_waiting_post
     ).json()
     assert len(content_first["posts"]) == 30
     assert len(content_second["posts"]) == 3
+
+
+def test_admin_treehole_actions_are_rate_limited(client: TestClient, monkeypatch):
+    import app.rate_limit as rate_limit_module
+
+    monkeypatch.setattr(rate_limit_module.time, "monotonic", lambda: 1000)
+    configure_author_grade(client)
+    login(client, "2026001")
+    created = client.post(
+        "/api/treehole/posts",
+        json={"title": "管理员限流测试", "content": "用于验证管理员正式回复存在独立的并发保护阈值。"},
+    )
+    post_id = created.json()["post"]["id"]
+    login(client, "admin", "Admin123!")
+    for index in range(30):
+        response = client.post(
+            f"/api/admin/treehole/posts/{post_id}/comments",
+            json={"content": f"管理员限流测试回复 {index + 1}"},
+        )
+        assert response.status_code == 201
+    limited = client.post(
+        f"/api/admin/treehole/posts/{post_id}/comments",
+        json={"content": "超过每分钟管理操作上限"},
+    )
+    assert limited.status_code == 429
+    assert limited.json()["error"]["code"] == "TREEHOLE_MANAGEMENT_RATE_LIMITED"
