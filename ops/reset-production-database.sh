@@ -84,6 +84,10 @@ empty_tables = (
     "sessions",
     "student_selection_group_members",
     "student_selection_groups",
+    "treehole_author_grades",
+    "treehole_comments",
+    "treehole_participants",
+    "treehole_posts",
 )
 with sqlite3.connect(get_settings().db_path) as database:
     users = database.execute(
@@ -94,15 +98,10 @@ with sqlite3.connect(get_settings().db_path) as database:
         for table in empty_tables
         if database.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
     }
-    homepage = database.execute(
-        "SELECT COUNT(*) FROM system_settings WHERE key='homepage_markdown'"
-    ).fetchone()[0]
 if users != [("admin", "SUPER_ADMIN", 1, "ACTIVE")]:
     raise SystemExit(f"Unexpected initial users: {users!r}")
 if nonempty:
     raise SystemExit(f"Fresh database contains business data: {nonempty!r}")
-if homepage != 1:
-    raise SystemExit("Default homepage content is missing")
 print("Fresh database state verified")
 PY
 

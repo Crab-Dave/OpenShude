@@ -61,7 +61,7 @@ def test_alembic_upgrades_a_legacy_database(tmp_path, monkeypatch):
             database.execute("SELECT account_type FROM users WHERE login_identifier='admin'").fetchone()[0]
             == "SUPER_ADMIN"
         )
-        assert database.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "20260807_02"
+        assert database.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "20260809_01"
         assert (
             database.execute(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='system_settings'"
@@ -142,6 +142,39 @@ def test_validation_reports_missing_constrained_tables_once(tmp_path, monkeypatc
     assert "reports:" not in str(validation_error.value)
 
 
+def test_validation_rejects_cross_post_treehole_aliases(tmp_path, monkeypatch):
+    database_path = tmp_path / "invalid-treehole.db"
+    monkeypatch.setenv("DB_PATH", str(database_path))
+    get_settings.cache_clear()
+    command.upgrade(Config("alembic.ini"), "head")
+    with sqlite3.connect(database_path) as database:
+        database.execute(
+            """INSERT INTO grades(id,code,name,created_at,updated_at)
+            VALUES(1,'2026','2026级','2026-01-01Z','2026-01-01Z')"""
+        )
+        database.execute(
+            """INSERT INTO users(id,login_identifier,password_hash,password_salt,role,name,grade,grade_id,
+            created_at,updated_at) VALUES(1,'student','hash','salt','STUDENT','学生','2026级',1,
+            '2026-01-01Z','2026-01-01Z')"""
+        )
+        for post_id in (1, 2):
+            database.execute(
+                """INSERT INTO treehole_posts(id,author_id,management_grade_id,title,content,created_at,updated_at)
+                VALUES(?,?,1,'测试帖子','用于完整性检查的测试正文','2026-01-01Z','2026-01-01Z')""",
+                (post_id, 1),
+            )
+        database.execute(
+            """INSERT INTO treehole_participants(id,post_id,user_id,alias_number,created_at)
+            VALUES(1,1,1,1,'2026-01-01Z')"""
+        )
+        database.execute(
+            """INSERT INTO treehole_comments(post_id,participant_id,content,created_at)
+            VALUES(2,1,'参与者来自另一个帖子','2026-01-01Z')"""
+        )
+    with pytest.raises(RuntimeError, match='"invalidTreeholeLinks": 1'):
+        validate_database(database_path)
+
+
 def test_hot_path_indexes_are_created_and_used(tmp_path, monkeypatch):
     database_path = tmp_path / "indexes.db"
     monkeypatch.setenv("DB_PATH", str(database_path))
@@ -156,12 +189,19 @@ def test_hot_path_indexes_are_created_and_used(tmp_path, monkeypatch):
         "idx_messages_conversation",
         "idx_blocks_blocked_blocker",
         "idx_reports_reporter_created",
+        "idx_reports_target",
+        "idx_reports_status_created",
+        "idx_pending_reporter_target",
         "idx_refresh_tokens_session",
         "idx_sessions_refresh_expiry",
         "idx_sessions_user",
         "idx_dormitories_round_gender_status_created",
         "idx_dormitory_applications_applicant_round_created",
         "idx_dormitory_result_members_source",
+        "idx_treehole_posts_public",
+        "idx_treehole_posts_author_updated",
+        "idx_treehole_posts_management",
+        "idx_treehole_comments_post_created",
     }
     with sqlite3.connect(database_path) as database:
         indexes = {row[0] for row in database.execute("SELECT name FROM sqlite_master WHERE type='index'")}
@@ -209,6 +249,10 @@ def test_fresh_production_database_bootstrap(tmp_path, monkeypatch):
         "sessions",
         "student_selection_group_members",
         "student_selection_groups",
+        "treehole_author_grades",
+        "treehole_comments",
+        "treehole_participants",
+        "treehole_posts",
     )
     with sqlite3.connect(database_path) as database:
         user = database.execute(
@@ -226,7 +270,7 @@ def test_fresh_production_database_bootstrap(tmp_path, monkeypatch):
 
 
 def test_models_map_all_current_tables():
-    assert len(Base.metadata.tables) == 24
+    assert len(Base.metadata.tables) == 28
     database_engine = create_database_engine()
     try:
         tables = set(inspect(database_engine).get_table_names())
