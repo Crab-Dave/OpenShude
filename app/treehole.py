@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -600,6 +600,7 @@ def private_posts(
     request: Request,
     db: DB,
     status: str = "WAITING",
+    grade_id: Annotated[int, Query(ge=0)] = 0,
     before_id: int = 0,
     limit: Annotated[int, Query(ge=1, le=50)] = 30,
 ) -> dict:
@@ -616,6 +617,10 @@ def private_posts(
     cursor_clause = "AND p.id<:before_id" if before_id > 0 else ""
     if before_id > 0:
         params["before_id"] = before_id
+    grade_clause = ""
+    if grade_id:
+        grade_clause = "AND p.management_grade_id=:selected_grade"
+        params["selected_grade"] = grade_id
     rows = all_rows(
         db,
         f"""SELECT p.id,p.title,p.content,p.reviewed_at,p.created_at,p.updated_at,
@@ -623,7 +628,7 @@ def private_posts(
           (SELECT COUNT(*) FROM treehole_comments c WHERE c.post_id=p.id AND c.moderation_status='NORMAL') AS comment_count
         FROM treehole_posts p LEFT JOIN users u ON u.id=p.author_id
         WHERE p.visibility='PRIVATE' AND p.moderation_status='NORMAL' AND {scope}
-        {status_clause} {cursor_clause} ORDER BY p.id DESC LIMIT :limit""",
+        {status_clause} {grade_clause} {cursor_clause} ORDER BY p.id DESC LIMIT :limit""",
         params,
     )
     has_more = len(rows) > limit
@@ -637,12 +642,18 @@ def managed_content(
     db: DB,
     visibility: str = "ALL",
     moderation_status: str = "ALL",
+    content_type: str = "POST",
+    grade_id: Annotated[int, Query(ge=0)] = 0,
+    date_from: str = "",
+    date_to: str = "",
     before_id: int = 0,
     limit: Annotated[int, Query(ge=1, le=50)] = 30,
 ) -> dict:
     admin = admin_user(request, db)
     params: dict = {"limit": limit + 1}
     scope = scope_sql(authorized_grade_ids(db, admin, "TREEHOLE_MODERATE"), params)
+    if content_type not in ("POST", "COMMENT"):
+        raise ApiError(400, "INVALID_TREEHOLE_FILTER", "内容类型筛选无效")
     filters = []
     if visibility != "ALL":
         if visibility not in ("PRIVATE", "PUBLIC", "WITHDRAWN"):
@@ -652,21 +663,44 @@ def managed_content(
     if moderation_status != "ALL":
         if moderation_status not in ("NORMAL", "HIDDEN", "DELETED"):
             raise ApiError(400, "INVALID_TREEHOLE_FILTER", "治理状态筛选无效")
-        filters.append("p.moderation_status=:moderation_status")
+        filters.append(f"{'p' if content_type == 'POST' else 'c'}.moderation_status=:moderation_status")
         params["moderation_status"] = moderation_status
+    if grade_id:
+        filters.append("p.management_grade_id=:selected_grade")
+        params["selected_grade"] = grade_id
+    try:
+        start = date.fromisoformat(date_from) if date_from else None
+        end = date.fromisoformat(date_to) if date_to else None
+    except ValueError:
+        raise ApiError(400, "INVALID_TREEHOLE_FILTER", "时间筛选无效") from None
+    if start and end and start > end:
+        raise ApiError(400, "INVALID_TREEHOLE_FILTER", "开始日期不能晚于结束日期")
+    content_alias = "p" if content_type == "POST" else "c"
+    if start:
+        filters.append(f"{content_alias}.created_at>=:date_from")
+        params["date_from"] = f"{start.isoformat()}T00:00:00.000Z"
+    if end:
+        filters.append(f"{content_alias}.created_at<:date_to")
+        params["date_to"] = f"{(end + timedelta(days=1)).isoformat()}T00:00:00.000Z"
     if before_id > 0:
-        filters.append("p.id<:before_id")
+        filters.append(f"{content_alias}.id<:before_id")
         params["before_id"] = before_id
     filter_sql = " AND ".join(filters) if filters else "1=1"
-    rows = all_rows(
-        db,
-        f"""SELECT p.id,p.title,p.content,p.visibility,p.moderation_status,p.moderation_reason,
-          p.reviewed_at,p.published_at,p.created_at,p.updated_at,p.management_grade_id,
-          u.name AS author_name,u.grade AS author_grade
+    if content_type == "POST":
+        query = f"""SELECT p.id,p.id AS post_id,'POST' AS content_type,p.title,p.content,p.visibility,
+          p.moderation_status,p.moderation_reason,p.reviewed_at,p.published_at,p.created_at,p.updated_at,
+          p.management_grade_id,u.name AS author_name,u.grade AS author_grade
         FROM treehole_posts p LEFT JOIN users u ON u.id=p.author_id
-        WHERE {scope} AND {filter_sql} ORDER BY p.id DESC LIMIT :limit""",
-        params,
-    )
+        WHERE {scope} AND {filter_sql} ORDER BY p.id DESC LIMIT :limit"""
+    else:
+        query = f"""SELECT c.id,c.post_id,'COMMENT' AS content_type,p.title,c.content,p.visibility,
+          c.moderation_status,c.moderation_reason,NULL AS reviewed_at,NULL AS published_at,c.created_at,
+          c.created_at AS updated_at,p.management_grade_id,u.name AS author_name,u.grade AS author_grade
+        FROM treehole_comments c JOIN treehole_posts p ON p.id=c.post_id
+        JOIN treehole_participants participant ON participant.id=c.participant_id
+        LEFT JOIN users u ON u.id=participant.user_id
+        WHERE {scope} AND {filter_sql} ORDER BY c.id DESC LIMIT :limit"""
+    rows = all_rows(db, query, params)
     has_more = len(rows) > limit
     rows = rows[:limit]
     return {"posts": rows, "nextBeforeId": rows[-1]["id"] if has_more and rows else None}

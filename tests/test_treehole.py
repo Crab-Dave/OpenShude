@@ -361,3 +361,30 @@ def test_admin_treehole_actions_are_rate_limited(client: TestClient, monkeypatch
     )
     assert limited.status_code == 429
     assert limited.json()["error"]["code"] == "TREEHOLE_MANAGEMENT_RATE_LIMITED"
+
+
+def test_admin_treehole_queues_filter_content_type_grade_and_date(client: TestClient):
+    configure_author_grade(client)
+    post_id = create_reviewed_post(client)
+
+    comments = client.get(
+        "/api/admin/treehole/content",
+        params={
+            "content_type": "COMMENT",
+            "grade_id": 1,
+            "date_from": "2026-01-01",
+            "date_to": "2099-12-31",
+        },
+    )
+    assert comments.status_code == 200
+    assert [(item["content_type"], item["post_id"]) for item in comments.json()["posts"]] == [("COMMENT", post_id)]
+    assert (
+        client.get("/api/admin/treehole/content", params={"content_type": "COMMENT", "grade_id": 2}).json()["posts"]
+        == []
+    )
+    assert client.get("/api/admin/treehole/private-posts", params={"grade_id": 2}).json()["posts"] == []
+    invalid_date = client.get(
+        "/api/admin/treehole/content", params={"date_from": "2099-01-02", "date_to": "2099-01-01"}
+    )
+    assert invalid_date.status_code == 400
+    assert invalid_date.json()["error"]["code"] == "INVALID_TREEHOLE_FILTER"

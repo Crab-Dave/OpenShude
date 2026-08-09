@@ -1277,21 +1277,33 @@ function adminTreeholeReplyCard(post) {
   return `<article class="panel treehole-admin-item" data-admin-treehole-post="${post.id}" tabindex="0"><div class="treehole-item-status">${post.reviewed_at ? statusBadge('已回复', 'active', 'badge-check') : statusBadge('等待回复', 'pending', 'clock-3')}<span>${escapeHtml(post.author_name)} · ${escapeHtml(post.author_grade)} · ${formatDate(post.created_at)}</span></div><h2>${escapeHtml(post.title)}</h2><p>${plainText(post.content.slice(0, 180))}${post.content.length > 180 ? '…' : ''}</p><footer>${post.comment_count} 条交流</footer></article>`;
 }
 
-async function renderAdminTreeholeReplies(status = 'WAITING') {
-  const { posts, nextBeforeId } = await api(`/api/admin/treehole/private-posts?status=${status}`);
+function treeholeGradeOptions(grades, selectedGradeId) {
+  return `<option value="0">全部授权年级</option>${grades.map((grade) => `<option value="${grade.id}" ${selectedGradeId === grade.id ? 'selected' : ''}>${escapeHtml(grade.name)}</option>`).join('')}`;
+}
+
+async function renderAdminTreeholeReplies(status = 'WAITING', gradeId = 0) {
+  const [{ posts, nextBeforeId }, { grades }] = await Promise.all([
+    api(`/api/admin/treehole/private-posts?status=${status}&grade_id=${gradeId}`),
+    api('/api/admin/grades'),
+  ]);
   state.treeholeAdminReplyCursor = nextBeforeId;
-  setPage(`<div class="toolbar"><select id="treehole-reply-status"><option value="ALL" ${status === 'ALL' ? 'selected' : ''}>全部私密帖</option><option value="WAITING" ${status === 'WAITING' ? 'selected' : ''}>等待首次回复</option><option value="REVIEWED" ${status === 'REVIEWED' ? 'selected' : ''}>已回复</option></select></div>
+  setPage(`<div class="toolbar"><select id="treehole-reply-status"><option value="ALL" ${status === 'ALL' ? 'selected' : ''}>全部私密帖</option><option value="WAITING" ${status === 'WAITING' ? 'selected' : ''}>等待首次回复</option><option value="REVIEWED" ${status === 'REVIEWED' ? 'selected' : ''}>已回复</option></select><select id="treehole-reply-grade">${treeholeGradeOptions(grades, gradeId)}</select></div>
     ${posts.length ? `<div class="treehole-admin-list" id="treehole-admin-reply-list">${posts.map(adminTreeholeReplyCard).join('')}</div>${nextBeforeId ? `<div class="load-more"><button class="btn btn-secondary" id="load-more-treehole-replies">${icon('chevrons-down')}查看更多</button></div>` : ''}` : emptyState('messages-square', '没有待回复的私密树洞', '这里只展示当前权限覆盖年级的帖子')}`);
-  document.querySelector('#treehole-reply-status').addEventListener('change', (event) => renderAdminTreeholeReplies(event.target.value));
-  document.querySelector('#load-more-treehole-replies')?.addEventListener('click', () => loadMoreAdminTreeholeReplies(status));
+  const rerender = () => renderAdminTreeholeReplies(
+    document.querySelector('#treehole-reply-status').value,
+    Number(document.querySelector('#treehole-reply-grade').value),
+  );
+  document.querySelector('#treehole-reply-status').addEventListener('change', rerender);
+  document.querySelector('#treehole-reply-grade').addEventListener('change', rerender);
+  document.querySelector('#load-more-treehole-replies')?.addEventListener('click', () => loadMoreAdminTreeholeReplies(status, gradeId));
   bindAdminTreeholeCards();
 }
 
-async function loadMoreAdminTreeholeReplies(status) {
+async function loadMoreAdminTreeholeReplies(status, gradeId) {
   const button = document.querySelector('#load-more-treehole-replies');
   button.disabled = true;
   try {
-    const { posts, nextBeforeId } = await api(`/api/admin/treehole/private-posts?status=${status}&before_id=${state.treeholeAdminReplyCursor}`);
+    const { posts, nextBeforeId } = await api(`/api/admin/treehole/private-posts?status=${status}&grade_id=${gradeId}&before_id=${state.treeholeAdminReplyCursor}`);
     document.querySelector('#treehole-admin-reply-list').insertAdjacentHTML('beforeend', posts.map(adminTreeholeReplyCard).join(''));
     state.treeholeAdminReplyCursor = nextBeforeId;
     bindAdminTreeholeCards();
@@ -1301,30 +1313,42 @@ async function loadMoreAdminTreeholeReplies(status) {
 }
 
 function adminTreeholeContentCard(post) {
-  return `<article class="panel treehole-admin-item" data-admin-treehole-post="${post.id}" tabindex="0"><div class="treehole-item-status">${treeholeStatus(post)}<span>${escapeHtml(post.author_name || '已删除账号')} · ${escapeHtml(post.author_grade || '-')} · ${formatDate(post.updated_at)}</span></div><h2>${escapeHtml(post.title || '[已删除]')}</h2><p>${plainText((post.content || '').slice(0, 180))}${post.content?.length > 180 ? '…' : ''}</p>${post.moderation_reason ? `<footer>${escapeHtml(post.moderation_reason)}</footer>` : ''}</article>`;
+  const status = post.content_type === 'COMMENT'
+    ? statusBadge(labels.treeholeModeration[post.moderation_status], post.moderation_status.toLowerCase(), 'message-circle')
+    : treeholeStatus(post);
+  const title = post.content_type === 'COMMENT' ? `评论 #${post.id} · ${post.title}` : post.title;
+  return `<article class="panel treehole-admin-item" data-admin-treehole-post="${post.post_id || post.id}" tabindex="0"><div class="treehole-item-status">${status}<span>${escapeHtml(post.author_name || '已删除账号')} · ${escapeHtml(post.author_grade || '-')} · ${formatDate(post.updated_at)}</span></div><h2>${escapeHtml(title || '[已删除]')}</h2><p>${plainText((post.content || '').slice(0, 180))}${post.content?.length > 180 ? '…' : ''}</p>${post.moderation_reason ? `<footer>${escapeHtml(post.moderation_reason)}</footer>` : ''}</article>`;
 }
 
-async function renderAdminTreeholeContent(visibility = 'ALL', moderationStatus = 'ALL') {
-  const { posts, nextBeforeId } = await api(`/api/admin/treehole/content?visibility=${visibility}&moderation_status=${moderationStatus}`);
+async function renderAdminTreeholeContent(filters = {}) {
+  const current = { visibility: 'ALL', moderationStatus: 'ALL', contentType: 'POST', gradeId: 0, dateFrom: '', dateTo: '', ...filters };
+  const query = `visibility=${current.visibility}&moderation_status=${current.moderationStatus}&content_type=${current.contentType}&grade_id=${current.gradeId}&date_from=${current.dateFrom}&date_to=${current.dateTo}`;
+  const [{ posts, nextBeforeId }, { grades }] = await Promise.all([
+    api(`/api/admin/treehole/content?${query}`),
+    api('/api/admin/grades'),
+  ]);
   state.treeholeAdminContentCursor = nextBeforeId;
-  setPage(`<div class="toolbar"><select id="treehole-content-visibility"><option value="ALL">全部可见性</option>${Object.entries(labels.treeholeVisibility).map(([value, text]) => `<option value="${value}" ${visibility === value ? 'selected' : ''}>${text}</option>`).join('')}</select><select id="treehole-content-moderation"><option value="ALL">全部治理状态</option>${Object.entries(labels.treeholeModeration).map(([value, text]) => `<option value="${value}" ${moderationStatus === value ? 'selected' : ''}>${text}</option>`).join('')}</select><div class="toolbar-spacer"></div>${state.user.isSuperAdmin ? `<button class="btn btn-secondary" id="configure-treehole-grades">${icon('graduation-cap')}配置发帖年级</button>` : ''}</div>
+  setPage(`<div class="toolbar"><select id="treehole-content-type"><option value="POST" ${current.contentType === 'POST' ? 'selected' : ''}>帖子</option><option value="COMMENT" ${current.contentType === 'COMMENT' ? 'selected' : ''}>评论与回复</option></select><select id="treehole-content-visibility"><option value="ALL">全部可见性</option>${Object.entries(labels.treeholeVisibility).map(([value, text]) => `<option value="${value}" ${current.visibility === value ? 'selected' : ''}>${text}</option>`).join('')}</select><select id="treehole-content-moderation"><option value="ALL">全部治理状态</option>${Object.entries(labels.treeholeModeration).map(([value, text]) => `<option value="${value}" ${current.moderationStatus === value ? 'selected' : ''}>${text}</option>`).join('')}</select><select id="treehole-content-grade">${treeholeGradeOptions(grades, current.gradeId)}</select><label class="compact-date">起始日期<input type="date" id="treehole-content-from" value="${current.dateFrom}"></label><label class="compact-date">结束日期<input type="date" id="treehole-content-to" value="${current.dateTo}"></label><div class="toolbar-spacer"></div>${state.user.isSuperAdmin ? `<button class="btn btn-secondary" id="configure-treehole-grades">${icon('graduation-cap')}配置发帖年级</button>` : ''}</div>
     ${posts.length ? `<div class="treehole-admin-list" id="treehole-admin-content-list">${posts.map(adminTreeholeContentCard).join('')}</div>${nextBeforeId ? `<div class="load-more"><button class="btn btn-secondary" id="load-more-treehole-content">${icon('chevrons-down')}查看更多</button></div>` : ''}` : emptyState('shield-check', '没有符合条件的树洞内容', '可以调整可见性和治理状态筛选')}`);
-  const rerender = () => renderAdminTreeholeContent(
-    document.querySelector('#treehole-content-visibility').value,
-    document.querySelector('#treehole-content-moderation').value,
-  );
-  document.querySelector('#treehole-content-visibility').addEventListener('change', rerender);
-  document.querySelector('#treehole-content-moderation').addEventListener('change', rerender);
+  const rerender = () => renderAdminTreeholeContent({
+    contentType: document.querySelector('#treehole-content-type').value,
+    visibility: document.querySelector('#treehole-content-visibility').value,
+    moderationStatus: document.querySelector('#treehole-content-moderation').value,
+    gradeId: Number(document.querySelector('#treehole-content-grade').value),
+    dateFrom: document.querySelector('#treehole-content-from').value,
+    dateTo: document.querySelector('#treehole-content-to').value,
+  });
+  document.querySelectorAll('#treehole-content-type,#treehole-content-visibility,#treehole-content-moderation,#treehole-content-grade,#treehole-content-from,#treehole-content-to').forEach((element) => element.addEventListener('change', rerender));
   document.querySelector('#configure-treehole-grades')?.addEventListener('click', showTreeholeGradeConfiguration);
-  document.querySelector('#load-more-treehole-content')?.addEventListener('click', () => loadMoreAdminTreeholeContent(visibility, moderationStatus));
+  document.querySelector('#load-more-treehole-content')?.addEventListener('click', () => loadMoreAdminTreeholeContent(query));
   bindAdminTreeholeCards();
 }
 
-async function loadMoreAdminTreeholeContent(visibility, moderationStatus) {
+async function loadMoreAdminTreeholeContent(query) {
   const button = document.querySelector('#load-more-treehole-content');
   button.disabled = true;
   try {
-    const { posts, nextBeforeId } = await api(`/api/admin/treehole/content?visibility=${visibility}&moderation_status=${moderationStatus}&before_id=${state.treeholeAdminContentCursor}`);
+    const { posts, nextBeforeId } = await api(`/api/admin/treehole/content?${query}&before_id=${state.treeholeAdminContentCursor}`);
     document.querySelector('#treehole-admin-content-list').insertAdjacentHTML('beforeend', posts.map(adminTreeholeContentCard).join(''));
     state.treeholeAdminContentCursor = nextBeforeId;
     bindAdminTreeholeCards();
