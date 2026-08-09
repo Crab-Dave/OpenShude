@@ -291,3 +291,37 @@ def test_public_pagination_and_concurrent_alias_assignment(client: TestClient):
             .all()
         )
     assert aliases == [1, 2, 3, 4, 5]
+
+
+def test_admin_treehole_queues_use_server_pagination_and_default_to_waiting_posts(client: TestClient):
+    configure_author_grade(client)
+    timestamp = now()
+    with SessionLocal.begin() as db:
+        for index in range(33):
+            db.execute(
+                text(
+                    """INSERT INTO treehole_posts(author_id,management_grade_id,title,content,reviewed_at,
+                    created_at,updated_at) VALUES(2,1,:title,:content,:reviewed,:now,:now)"""
+                ),
+                {
+                    "title": f"管理队列分页 {index:02d}",
+                    "content": "用于验证管理队列不会一次返回全部树洞内容。",
+                    "reviewed": timestamp if index == 32 else None,
+                    "now": timestamp,
+                },
+            )
+
+    login(client, "admin", "Admin123!")
+    first = client.get("/api/admin/treehole/private-posts").json()
+    second = client.get("/api/admin/treehole/private-posts", params={"before_id": first["nextBeforeId"]}).json()
+    assert len(first["posts"]) == 30
+    assert len(second["posts"]) == 2
+    assert all(post["reviewed_at"] is None for post in first["posts"] + second["posts"])
+    assert second["nextBeforeId"] is None
+
+    content_first = client.get("/api/admin/treehole/content").json()
+    content_second = client.get(
+        "/api/admin/treehole/content", params={"before_id": content_first["nextBeforeId"]}
+    ).json()
+    assert len(content_first["posts"]) == 30
+    assert len(content_second["posts"]) == 3
