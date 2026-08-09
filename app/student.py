@@ -17,7 +17,7 @@ from .config import get_settings
 from .database import get_db
 from .errors import ApiError
 from .rate_limit import enforce_rate_limit
-from .treehole import treehole_report_snapshot
+from .treehole import prune_treehole_report_snapshots, treehole_report_snapshot
 
 router = APIRouter(prefix="/api")
 DB = Annotated[Session, Depends(get_db)]
@@ -573,6 +573,7 @@ def blocks(request: Request, db: DB, search: str = "") -> dict:
 def report(request: Request, body: dict, db: DB) -> dict:
     user = current_user(request, db)
     require_user(user)
+    prune_treehole_report_snapshots(db)
     ip_address = request.client.host if request.client else "unknown"
     enforce_rate_limit("report-user", str(user["id"]), 5, 60, "REPORT_RATE_LIMITED")
     enforce_rate_limit("report-ip", ip_address, 30, 60, "REPORT_RATE_LIMITED")

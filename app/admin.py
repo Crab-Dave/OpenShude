@@ -40,6 +40,7 @@ from .dormitories import (
 from .errors import ApiError
 from .security import hash_password
 from .student import CARD_SELECT, card_by_id
+from .treehole import prune_treehole_report_snapshots
 
 router = APIRouter(prefix="/api/admin")
 DB = Annotated[Session, Depends(get_db)]
@@ -1485,6 +1486,8 @@ def close_dormitory(dormitory_id: int, request: Request, body: dict, db: DB) -> 
 @router.get("/reports")
 def reports(request: Request, db: DB, search: str = "") -> dict:
     admin = admin_user(request, db)
+    if prune_treehole_report_snapshots(db):
+        db.commit()
     rows = grade_filter(db, admin, report_rows(db), "REPORT_READ", "target_grade_id")
     if search.strip():
         rows = [row for row in rows if search.strip().lower() in row["reporter_name"].lower()]
