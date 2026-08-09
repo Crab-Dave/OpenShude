@@ -657,8 +657,10 @@ function treeholeMineCard(post) {
 function treeholeCommentControls(comment, canReply) {
   const controls = [];
   if (canReply) {
-    controls.push(`<button class="btn btn-quiet btn-sm" data-treehole-reply="${comment.id}">${icon('reply')}回复</button>`);
-    controls.push(`<button class="btn btn-quiet btn-sm" data-treehole-report-comment="${comment.id}">${icon('flag')}举报</button>`);
+    controls.push(
+      `<button class="btn btn-quiet btn-sm" data-treehole-reply="${comment.id}">${icon('reply')}回复</button>`,
+      `<button class="btn btn-quiet btn-sm" data-treehole-report-comment="${comment.id}">${icon('flag')}举报</button>`,
+    );
   }
   if (comment.canDelete) {
     controls.push(`<button class="btn btn-quiet btn-sm" data-treehole-delete-comment="${comment.id}">${icon('trash-2')}删除</button>`);
@@ -1538,37 +1540,43 @@ function adminTreeholeComment(comment, canModerate) {
   return `<article class="treehole-comment ${officialClass}"><header><strong>匿名 ${comment.aliasNumber} 号 · ${escapeHtml(comment.authorName)}</strong>${officialLabel}${replyTarget}<time>${formatDate(comment.createdAt)}</time></header><p>${content}</p>${moderationReason}<div class="treehole-comment-actions">${actions.join('')}</div></article>`;
 }
 
+function adminTreeholePostActions(post, canModerate) {
+  if (!canModerate) return '';
+  let postAction = '';
+  if (post.moderationStatus === 'NORMAL') postAction = 'hide';
+  else if (post.moderationStatus === 'HIDDEN') postAction = 'restore';
+  let actions = '';
+  if (postAction) {
+    const actionIcon = postAction === 'hide' ? 'eye-off' : 'rotate-ccw';
+    const actionText = postAction === 'hide' ? '隐藏帖子' : '恢复帖子';
+    actions += `<button class="btn btn-secondary" data-admin-post-action="${postAction}">${icon(actionIcon)}${actionText}</button>`;
+  }
+  if (post.visibility === 'WITHDRAWN' && post.moderationStatus === 'NORMAL') {
+    actions += `<button class="btn btn-secondary" data-admin-post-action="restore-withdrawn">${icon('undo-2')}恢复为私密</button>`;
+  }
+  if (post.moderationStatus !== 'DELETED') {
+    actions += `<button class="btn btn-danger" data-admin-post-action="delete">${icon('trash-2')}删除帖子</button>`;
+  }
+  return actions;
+}
+
 async function showAdminTreeholeDetail(postId) {
   try {
     const { post } = await api(`/api/admin/treehole/posts/${postId}`);
     const canReply = hasScopedPermission('TREEHOLE_PRIVATE_REPLY', post.managementGradeId)
       && post.moderationStatus === 'NORMAL' && post.visibility !== 'WITHDRAWN';
     const canModerate = hasScopedPermission('TREEHOLE_MODERATE', post.managementGradeId);
-    let postAction = '';
-    if (post.moderationStatus === 'NORMAL') postAction = 'hide';
-    else if (post.moderationStatus === 'HIDDEN') postAction = 'restore';
     const postContent = post.content ? plainText(post.content) : '<span class="field-hint">正文已删除</span>';
     const moderationReason = post.moderationReason
       ? `<p class="field-hint">治理原因：${escapeHtml(post.moderationReason)}</p>`
       : '';
-    const actions = [];
-    if (canModerate && postAction) {
-      const actionIcon = postAction === 'hide' ? 'eye-off' : 'rotate-ccw';
-      const actionText = postAction === 'hide' ? '隐藏帖子' : '恢复帖子';
-      actions.push(`<button class="btn btn-secondary" data-admin-post-action="${postAction}">${icon(actionIcon)}${actionText}</button>`);
-    }
-    if (canModerate && post.visibility === 'WITHDRAWN' && post.moderationStatus === 'NORMAL') {
-      actions.push(`<button class="btn btn-secondary" data-admin-post-action="restore-withdrawn">${icon('undo-2')}恢复为私密</button>`);
-    }
-    if (canModerate && post.moderationStatus !== 'DELETED') {
-      actions.push(`<button class="btn btn-danger" data-admin-post-action="delete">${icon('trash-2')}删除帖子</button>`);
-    }
+    const actions = adminTreeholePostActions(post, canModerate);
     const comments = post.comments.map((comment) => adminTreeholeComment(comment, canModerate)).join('')
       || '<p class="field-hint">暂无交流</p>';
     const replyForm = canReply
       ? `<form id="official-treehole-reply" class="treehole-comment-form"><label>正式管理员回复</label><textarea name="content" maxlength="2000" required></textarea><button class="btn btn-primary">${icon('send')}提交正式回复</button></form>`
       : '';
-    const detail = `<article class="treehole-detail admin"><header><div>${treeholeStatus(post)}<span class="treehole-author">${escapeHtml(post.author.name)} · ${escapeHtml(post.author.grade)}</span></div><time>${formatDate(post.createdAt)}</time></header><p class="treehole-body">${postContent}</p>${moderationReason}<div class="detail-actions">${actions.join('')}</div></article>`;
+    const detail = `<article class="treehole-detail admin"><header><div>${treeholeStatus(post)}<span class="treehole-author">${escapeHtml(post.author.name)} · ${escapeHtml(post.author.grade)}</span></div><time>${formatDate(post.createdAt)}</time></header><p class="treehole-body">${postContent}</p>${moderationReason}<div class="detail-actions">${actions}</div></article>`;
     const discussion = `<section class="treehole-discussion"><div class="section-heading"><div><h2>交流记录</h2><p>管理员真实身份不会在公开树洞显示</p></div></div>${comments}${replyForm}</section>`;
     const modal = openModal(post.title || '[已删除]', detail + discussion, { wide: true });
     modal.querySelector('#official-treehole-reply')?.addEventListener('submit', async (event) => {
