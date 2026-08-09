@@ -21,6 +21,7 @@ from .treehole import prune_treehole_report_snapshots, treehole_report_snapshot
 
 router = APIRouter(prefix="/api")
 DB = Annotated[Session, Depends(get_db)]
+REPORT_REASONS = {"人身攻击", "隐私泄露", "不当内容", "广告或诈骗", "骚扰行为", "身份信息异常", "其他"}
 MESSAGE_PAGE_SIZE = 50
 CARD_NOT_FOUND_MESSAGE = "室友卡片不存在"
 AVATAR_NOT_FOUND_MESSAGE = "头像不存在"
@@ -592,6 +593,9 @@ def report(request: Request, body: dict, db: DB) -> dict:
         target_id = 0
     if target_type not in ("ROOMMATE_CARD", "MESSAGE", "TREEHOLE_POST", "TREEHOLE_COMMENT") or not target_id:
         raise ApiError(400, "INVALID_REPORT_TARGET", "举报对象无效")
+    reason = clean_text(body.get("reason"), 50, True)
+    if reason not in REPORT_REASONS:
+        raise ApiError(400, "INVALID_REPORT_REASON", "请选择有效的举报原因")
     if target_type == "ROOMMATE_CARD":
         card = card_by_id(db, target_id)
         if not card:
@@ -628,7 +632,7 @@ def report(request: Request, body: dict, db: DB) -> dict:
                 "reporter": user["id"],
                 "type": target_type,
                 "target": target_id,
-                "reason": clean_text(body.get("reason"), 50, True),
+                "reason": reason,
                 "description": clean_text(body.get("description"), 500),
                 "snapshot": json.dumps(snapshot, ensure_ascii=False),
                 "now": now(),
