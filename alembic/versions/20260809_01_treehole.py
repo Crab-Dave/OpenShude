@@ -10,6 +10,8 @@ branch_labels = None
 depends_on = None
 
 REPORT_TARGET_CHECK = "target_type IN ('ROOMMATE_CARD','MESSAGE','TREEHOLE_POST','TREEHOLE_COMMENT')"
+USER_ID = "users.id"
+SET_NULL = "SET NULL"
 
 
 def _tables() -> set[str]:
@@ -81,24 +83,24 @@ def upgrade() -> None:
         op.create_table(
             "treehole_author_grades",
             sa.Column("grade_id", sa.Integer(), sa.ForeignKey("grades.id", ondelete="CASCADE"), primary_key=True),
-            sa.Column("created_by", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL")),
+            sa.Column("created_by", sa.Integer(), sa.ForeignKey(USER_ID, ondelete=SET_NULL)),
             sa.Column("created_at", sa.Text(), nullable=False),
         )
     if "treehole_posts" not in tables:
         op.create_table(
             "treehole_posts",
             sa.Column("id", sa.Integer(), primary_key=True),
-            sa.Column("author_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL")),
+            sa.Column("author_id", sa.Integer(), sa.ForeignKey(USER_ID, ondelete=SET_NULL)),
             sa.Column("management_grade_id", sa.Integer(), sa.ForeignKey("grades.id"), nullable=False),
             sa.Column("title", sa.Text(), nullable=False),
             sa.Column("content", sa.Text(), nullable=False),
             sa.Column("visibility", sa.Text(), nullable=False, server_default="PRIVATE"),
             sa.Column("moderation_status", sa.Text(), nullable=False, server_default="NORMAL"),
             sa.Column("moderation_reason", sa.Text(), nullable=False, server_default=""),
-            sa.Column("moderated_by", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL")),
+            sa.Column("moderated_by", sa.Integer(), sa.ForeignKey(USER_ID, ondelete=SET_NULL)),
             sa.Column("moderated_at", sa.Text()),
             sa.Column("reviewed_at", sa.Text()),
-            sa.Column("reviewed_by", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL")),
+            sa.Column("reviewed_by", sa.Integer(), sa.ForeignKey(USER_ID, ondelete=SET_NULL)),
             sa.Column("published_at", sa.Text()),
             sa.Column("withdrawn_at", sa.Text()),
             sa.Column("created_at", sa.Text(), nullable=False),
@@ -128,17 +130,17 @@ def upgrade() -> None:
                 sa.ForeignKey("treehole_participants.id", ondelete="CASCADE"),
                 nullable=False,
             ),
-            sa.Column("parent_comment_id", sa.Integer(), sa.ForeignKey("treehole_comments.id", ondelete="SET NULL")),
+            sa.Column("parent_comment_id", sa.Integer(), sa.ForeignKey("treehole_comments.id", ondelete=SET_NULL)),
             sa.Column(
                 "reply_to_participant_id",
                 sa.Integer(),
-                sa.ForeignKey("treehole_participants.id", ondelete="SET NULL"),
+                sa.ForeignKey("treehole_participants.id", ondelete=SET_NULL),
             ),
             sa.Column("content", sa.Text(), nullable=False),
             sa.Column("is_official", sa.Integer(), nullable=False, server_default="0"),
             sa.Column("moderation_status", sa.Text(), nullable=False, server_default="NORMAL"),
             sa.Column("moderation_reason", sa.Text(), nullable=False, server_default=""),
-            sa.Column("moderated_by", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL")),
+            sa.Column("moderated_by", sa.Integer(), sa.ForeignKey(USER_ID, ondelete=SET_NULL)),
             sa.Column("moderated_at", sa.Text()),
             sa.Column("created_at", sa.Text(), nullable=False),
             sa.Column("deleted_at", sa.Text()),
@@ -151,7 +153,7 @@ def upgrade() -> None:
             "treehole_participants",
             sa.Column("id", sa.Integer(), primary_key=True),
             sa.Column("post_id", sa.Integer(), sa.ForeignKey("treehole_posts.id", ondelete="CASCADE"), nullable=False),
-            sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL")),
+            sa.Column("user_id", sa.Integer(), sa.ForeignKey(USER_ID, ondelete=SET_NULL)),
             sa.Column("alias_number", sa.Integer(), nullable=False),
             sa.Column("created_at", sa.Text(), nullable=False),
             sa.UniqueConstraint("post_id", "user_id"),
