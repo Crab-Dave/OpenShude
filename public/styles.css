@@ -190,6 +190,8 @@ img { display: block; max-width: 100%; }
 .search-field svg { position: absolute; left: 12px; top: 11px; width: 18px; color: var(--muted); }
 .search-field input { padding-left: 40px; }
 .toolbar > select { width: auto; min-width: 160px; flex: 0 0 180px; }
+.compact-date { display: grid; gap: 3px; color: var(--muted); font-size: 11px; }
+.compact-date input { width: 150px; padding-block: 7px; }
 
 .form-field { display: grid; gap: 7px; min-width: 0; }
 .form-field > label, .field-label { font-size: 13px; font-weight: 700; color: #44394f; }
@@ -545,6 +547,8 @@ input:disabled { color: #62586d; background: #f0edf4; cursor: not-allowed; }
   .toolbar { flex-wrap: wrap; }
   .search-field { max-width: none; min-width: 100%; }
   .toolbar > select { flex: 1 1 180px; width: auto; }
+  .compact-date { flex: 1 1 150px; }
+  .compact-date input { width: 100%; }
   .form-grid, .detail-grid { grid-template-columns: 1fr; }
   .form-grid .full { grid-column: auto; }
   .profile-form { padding: 18px; }
