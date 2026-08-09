@@ -1375,11 +1375,19 @@ async function loadAdminView(view) {
 }
 
 function adminTreeholeReplyCard(post) {
-  return `<article class="panel treehole-admin-item" data-admin-treehole-post="${post.id}" tabindex="0"><div class="treehole-item-status">${post.reviewed_at ? statusBadge('已回复', 'active', 'badge-check') : statusBadge('等待回复', 'pending', 'clock-3')}<span>${escapeHtml(post.author_name)} · ${escapeHtml(post.author_grade)} · ${formatDate(post.created_at)}</span></div><h2>${escapeHtml(post.title)}</h2><p>${plainText(post.content.slice(0, 180))}${post.content.length > 180 ? '…' : ''}</p><footer>${post.comment_count} 条交流</footer></article>`;
+  const status = post.reviewed_at
+    ? statusBadge('已回复', 'active', 'badge-check')
+    : statusBadge('等待回复', 'pending', 'clock-3');
+  const summarySuffix = post.content.length > 180 ? '…' : '';
+  return `<article class="panel treehole-admin-item" data-admin-treehole-post="${post.id}" tabindex="0"><div class="treehole-item-status">${status}<span>${escapeHtml(post.author_name)} · ${escapeHtml(post.author_grade)} · ${formatDate(post.created_at)}</span></div><h2>${escapeHtml(post.title)}</h2><p>${plainText(post.content.slice(0, 180))}${summarySuffix}</p><footer>${post.comment_count} 条交流</footer></article>`;
 }
 
 function treeholeGradeOptions(grades, selectedGradeId) {
-  return `<option value="0">全部授权年级</option>${grades.map((grade) => `<option value="${grade.id}" ${selectedGradeId === grade.id ? 'selected' : ''}>${escapeHtml(grade.name)}</option>`).join('')}`;
+  const options = grades.map((grade) => {
+    const selected = selectedGradeId === grade.id ? 'selected' : '';
+    return `<option value="${grade.id}" ${selected}>${escapeHtml(grade.name)}</option>`;
+  }).join('');
+  return '<option value="0">全部授权年级</option>' + options;
 }
 
 async function renderAdminTreeholeReplies(status = 'WAITING', gradeId = 0) {
@@ -1388,8 +1396,23 @@ async function renderAdminTreeholeReplies(status = 'WAITING', gradeId = 0) {
     api('/api/admin/grades'),
   ]);
   state.treeholeAdminReplyCursor = nextBeforeId;
-  setPage(`<div class="toolbar"><select id="treehole-reply-status"><option value="ALL" ${status === 'ALL' ? 'selected' : ''}>全部私密帖</option><option value="WAITING" ${status === 'WAITING' ? 'selected' : ''}>等待首次回复</option><option value="REVIEWED" ${status === 'REVIEWED' ? 'selected' : ''}>已回复</option></select><select id="treehole-reply-grade">${treeholeGradeOptions(grades, gradeId)}</select></div>
-    ${posts.length ? `<div class="treehole-admin-list" id="treehole-admin-reply-list">${posts.map(adminTreeholeReplyCard).join('')}</div>${nextBeforeId ? `<div class="load-more"><button class="btn btn-secondary" id="load-more-treehole-replies">${icon('chevrons-down')}查看更多</button></div>` : ''}` : emptyState('messages-square', '没有待回复的私密树洞', '这里只展示当前权限覆盖年级的帖子')}`);
+  const statusOptions = [
+    ['ALL', '全部私密帖'],
+    ['WAITING', '等待首次回复'],
+    ['REVIEWED', '已回复'],
+  ].map(([value, label]) => {
+    const selected = status === value ? 'selected' : '';
+    return `<option value="${value}" ${selected}>${label}</option>`;
+  }).join('');
+  const gradeOptions = treeholeGradeOptions(grades, gradeId);
+  let content = emptyState('messages-square', '没有待回复的私密树洞', '这里只展示当前权限覆盖年级的帖子');
+  if (posts.length) {
+    const loadMore = nextBeforeId
+      ? `<div class="load-more"><button class="btn btn-secondary" id="load-more-treehole-replies">${icon('chevrons-down')}查看更多</button></div>`
+      : '';
+    content = `<div class="treehole-admin-list" id="treehole-admin-reply-list">${posts.map(adminTreeholeReplyCard).join('')}</div>${loadMore}`;
+  }
+  setPage(`<div class="toolbar"><select id="treehole-reply-status">${statusOptions}</select><select id="treehole-reply-grade">${gradeOptions}</select></div>${content}`);
   const rerender = () => renderAdminTreeholeReplies(
     document.querySelector('#treehole-reply-status').value,
     Number(document.querySelector('#treehole-reply-grade').value),
@@ -1418,7 +1441,16 @@ function adminTreeholeContentCard(post) {
     ? statusBadge(labels.treeholeModeration[post.moderation_status], post.moderation_status.toLowerCase(), 'message-circle')
     : treeholeStatus(post);
   const title = post.content_type === 'COMMENT' ? `评论 #${post.id} · ${post.title}` : post.title;
-  return `<article class="panel treehole-admin-item" data-admin-treehole-post="${post.post_id || post.id}" tabindex="0"><div class="treehole-item-status">${status}<span>${escapeHtml(post.author_name || '已删除账号')} · ${escapeHtml(post.author_grade || '-')} · ${formatDate(post.updated_at)}</span></div><h2>${escapeHtml(title || '[已删除]')}</h2><p>${plainText((post.content || '').slice(0, 180))}${post.content?.length > 180 ? '…' : ''}</p>${post.moderation_reason ? `<footer>${escapeHtml(post.moderation_reason)}</footer>` : ''}</article>`;
+  const summarySuffix = post.content?.length > 180 ? '…' : '';
+  const moderationReason = post.moderation_reason ? `<footer>${escapeHtml(post.moderation_reason)}</footer>` : '';
+  return `<article class="panel treehole-admin-item" data-admin-treehole-post="${post.post_id || post.id}" tabindex="0"><div class="treehole-item-status">${status}<span>${escapeHtml(post.author_name || '已删除账号')} · ${escapeHtml(post.author_grade || '-')} · ${formatDate(post.updated_at)}</span></div><h2>${escapeHtml(title || '[已删除]')}</h2><p>${plainText((post.content || '').slice(0, 180))}${summarySuffix}</p>${moderationReason}</article>`;
+}
+
+function treeholeFilterOptions(entries, selectedValue) {
+  return entries.map(([value, text]) => {
+    const selected = selectedValue === value ? 'selected' : '';
+    return `<option value="${value}" ${selected}>${text}</option>`;
+  }).join('');
 }
 
 async function renderAdminTreeholeContent(filters = {}) {
@@ -1429,8 +1461,23 @@ async function renderAdminTreeholeContent(filters = {}) {
     api('/api/admin/grades'),
   ]);
   state.treeholeAdminContentCursor = nextBeforeId;
-  setPage(`<div class="toolbar"><select id="treehole-content-type"><option value="POST" ${current.contentType === 'POST' ? 'selected' : ''}>帖子</option><option value="COMMENT" ${current.contentType === 'COMMENT' ? 'selected' : ''}>评论与回复</option></select><select id="treehole-content-visibility"><option value="ALL">全部可见性</option>${Object.entries(labels.treeholeVisibility).map(([value, text]) => `<option value="${value}" ${current.visibility === value ? 'selected' : ''}>${text}</option>`).join('')}</select><select id="treehole-content-moderation"><option value="ALL">全部治理状态</option>${Object.entries(labels.treeholeModeration).map(([value, text]) => `<option value="${value}" ${current.moderationStatus === value ? 'selected' : ''}>${text}</option>`).join('')}</select><select id="treehole-content-grade">${treeholeGradeOptions(grades, current.gradeId)}</select><label class="compact-date">起始日期<input type="date" id="treehole-content-from" value="${current.dateFrom}"></label><label class="compact-date">结束日期<input type="date" id="treehole-content-to" value="${current.dateTo}"></label><div class="toolbar-spacer"></div>${state.user.isSuperAdmin ? `<button class="btn btn-secondary" id="configure-treehole-grades">${icon('graduation-cap')}配置发帖年级</button>` : ''}</div>
-    ${posts.length ? `<div class="treehole-admin-list" id="treehole-admin-content-list">${posts.map(adminTreeholeContentCard).join('')}</div>${nextBeforeId ? `<div class="load-more"><button class="btn btn-secondary" id="load-more-treehole-content">${icon('chevrons-down')}查看更多</button></div>` : ''}` : emptyState('shield-check', '没有符合条件的树洞内容', '可以调整可见性和治理状态筛选')}`);
+  const typeOptions = treeholeFilterOptions([['POST', '帖子'], ['COMMENT', '评论与回复']], current.contentType);
+  const visibilityOptions = '<option value="ALL">全部可见性</option>'
+    + treeholeFilterOptions(Object.entries(labels.treeholeVisibility), current.visibility);
+  const moderationOptions = '<option value="ALL">全部治理状态</option>'
+    + treeholeFilterOptions(Object.entries(labels.treeholeModeration), current.moderationStatus);
+  const gradeOptions = treeholeGradeOptions(grades, current.gradeId);
+  const configureButton = state.user.isSuperAdmin
+    ? `<button class="btn btn-secondary" id="configure-treehole-grades">${icon('graduation-cap')}配置发帖年级</button>`
+    : '';
+  let content = emptyState('shield-check', '没有符合条件的树洞内容', '可以调整可见性和治理状态筛选');
+  if (posts.length) {
+    const loadMore = nextBeforeId
+      ? `<div class="load-more"><button class="btn btn-secondary" id="load-more-treehole-content">${icon('chevrons-down')}查看更多</button></div>`
+      : '';
+    content = `<div class="treehole-admin-list" id="treehole-admin-content-list">${posts.map(adminTreeholeContentCard).join('')}</div>${loadMore}`;
+  }
+  setPage(`<div class="toolbar"><select id="treehole-content-type">${typeOptions}</select><select id="treehole-content-visibility">${visibilityOptions}</select><select id="treehole-content-moderation">${moderationOptions}</select><select id="treehole-content-grade">${gradeOptions}</select><label class="compact-date">起始日期<input type="date" id="treehole-content-from" value="${current.dateFrom}"></label><label class="compact-date">结束日期<input type="date" id="treehole-content-to" value="${current.dateTo}"></label><div class="toolbar-spacer"></div>${configureButton}</div>${content}`);
   const rerender = () => renderAdminTreeholeContent({
     contentType: document.querySelector('#treehole-content-type').value,
     visibility: document.querySelector('#treehole-content-visibility').value,
@@ -1467,8 +1514,28 @@ function bindAdminTreeholeCards() {
 }
 
 function adminTreeholeComment(comment, canModerate) {
-  const moderationAction = comment.moderationStatus === 'NORMAL' ? 'hide' : comment.moderationStatus === 'HIDDEN' ? 'restore' : '';
-  return `<article class="treehole-comment ${comment.isOfficial ? 'official' : ''}"><header><strong>匿名 ${comment.aliasNumber} 号 · ${escapeHtml(comment.authorName)}</strong>${comment.isOfficial ? '<span class="official-label">管理员</span>' : ''}${comment.replyToAliasNumber ? `<span class="reply-target">回复匿名 ${comment.replyToAliasNumber} 号</span>` : ''}<time>${formatDate(comment.createdAt)}</time></header><p>${comment.content ? plainText(comment.content) : '<span class="field-hint">该内容已删除</span>'}</p>${comment.moderationReason ? `<div class="field-hint">治理原因：${escapeHtml(comment.moderationReason)}</div>` : ''}<div class="treehole-comment-actions">${canModerate && moderationAction ? `<button class="btn btn-secondary btn-sm" data-admin-comment-action="${moderationAction}" data-comment-id="${comment.id}">${icon(moderationAction === 'hide' ? 'eye-off' : 'rotate-ccw')}${moderationAction === 'hide' ? '隐藏' : '恢复'}</button>` : ''}${canModerate && comment.moderationStatus !== 'DELETED' ? `<button class="btn btn-danger btn-sm" data-admin-comment-action="delete" data-comment-id="${comment.id}">${icon('trash-2')}删除</button>` : ''}</div></article>`;
+  let moderationAction = '';
+  if (comment.moderationStatus === 'NORMAL') moderationAction = 'hide';
+  else if (comment.moderationStatus === 'HIDDEN') moderationAction = 'restore';
+  const officialClass = comment.isOfficial ? 'official' : '';
+  const officialLabel = comment.isOfficial ? '<span class="official-label">管理员</span>' : '';
+  const replyTarget = comment.replyToAliasNumber
+    ? `<span class="reply-target">回复匿名 ${comment.replyToAliasNumber} 号</span>`
+    : '';
+  const content = comment.content ? plainText(comment.content) : '<span class="field-hint">该内容已删除</span>';
+  const moderationReason = comment.moderationReason
+    ? `<div class="field-hint">治理原因：${escapeHtml(comment.moderationReason)}</div>`
+    : '';
+  const actions = [];
+  if (canModerate && moderationAction) {
+    const actionIcon = moderationAction === 'hide' ? 'eye-off' : 'rotate-ccw';
+    const actionText = moderationAction === 'hide' ? '隐藏' : '恢复';
+    actions.push(`<button class="btn btn-secondary btn-sm" data-admin-comment-action="${moderationAction}" data-comment-id="${comment.id}">${icon(actionIcon)}${actionText}</button>`);
+  }
+  if (canModerate && comment.moderationStatus !== 'DELETED') {
+    actions.push(`<button class="btn btn-danger btn-sm" data-admin-comment-action="delete" data-comment-id="${comment.id}">${icon('trash-2')}删除</button>`);
+  }
+  return `<article class="treehole-comment ${officialClass}"><header><strong>匿名 ${comment.aliasNumber} 号 · ${escapeHtml(comment.authorName)}</strong>${officialLabel}${replyTarget}<time>${formatDate(comment.createdAt)}</time></header><p>${content}</p>${moderationReason}<div class="treehole-comment-actions">${actions.join('')}</div></article>`;
 }
 
 async function showAdminTreeholeDetail(postId) {
@@ -1477,9 +1544,33 @@ async function showAdminTreeholeDetail(postId) {
     const canReply = hasScopedPermission('TREEHOLE_PRIVATE_REPLY', post.managementGradeId)
       && post.moderationStatus === 'NORMAL' && post.visibility !== 'WITHDRAWN';
     const canModerate = hasScopedPermission('TREEHOLE_MODERATE', post.managementGradeId);
-    const postAction = post.moderationStatus === 'NORMAL' ? 'hide' : post.moderationStatus === 'HIDDEN' ? 'restore' : '';
-    const modal = openModal(post.title || '[已删除]', `<article class="treehole-detail admin"><header><div>${treeholeStatus(post)}<span class="treehole-author">${escapeHtml(post.author.name)} · ${escapeHtml(post.author.grade)}</span></div><time>${formatDate(post.createdAt)}</time></header><p class="treehole-body">${post.content ? plainText(post.content) : '<span class="field-hint">正文已删除</span>'}</p>${post.moderationReason ? `<p class="field-hint">治理原因：${escapeHtml(post.moderationReason)}</p>` : ''}<div class="detail-actions">${canModerate && postAction ? `<button class="btn btn-secondary" data-admin-post-action="${postAction}">${icon(postAction === 'hide' ? 'eye-off' : 'rotate-ccw')}${postAction === 'hide' ? '隐藏帖子' : '恢复帖子'}</button>` : ''}${canModerate && post.visibility === 'WITHDRAWN' && post.moderationStatus === 'NORMAL' ? `<button class="btn btn-secondary" data-admin-post-action="restore-withdrawn">${icon('undo-2')}恢复为私密</button>` : ''}${canModerate && post.moderationStatus !== 'DELETED' ? `<button class="btn btn-danger" data-admin-post-action="delete">${icon('trash-2')}删除帖子</button>` : ''}</div></article>
-      <section class="treehole-discussion"><div class="section-heading"><div><h2>交流记录</h2><p>管理员真实身份不会在公开树洞显示</p></div></div>${post.comments.map((comment) => adminTreeholeComment(comment, canModerate)).join('') || '<p class="field-hint">暂无交流</p>'}${canReply ? `<form id="official-treehole-reply" class="treehole-comment-form"><label>正式管理员回复</label><textarea name="content" maxlength="2000" required></textarea><button class="btn btn-primary">${icon('send')}提交正式回复</button></form>` : ''}</section>`, { wide: true });
+    let postAction = '';
+    if (post.moderationStatus === 'NORMAL') postAction = 'hide';
+    else if (post.moderationStatus === 'HIDDEN') postAction = 'restore';
+    const postContent = post.content ? plainText(post.content) : '<span class="field-hint">正文已删除</span>';
+    const moderationReason = post.moderationReason
+      ? `<p class="field-hint">治理原因：${escapeHtml(post.moderationReason)}</p>`
+      : '';
+    const actions = [];
+    if (canModerate && postAction) {
+      const actionIcon = postAction === 'hide' ? 'eye-off' : 'rotate-ccw';
+      const actionText = postAction === 'hide' ? '隐藏帖子' : '恢复帖子';
+      actions.push(`<button class="btn btn-secondary" data-admin-post-action="${postAction}">${icon(actionIcon)}${actionText}</button>`);
+    }
+    if (canModerate && post.visibility === 'WITHDRAWN' && post.moderationStatus === 'NORMAL') {
+      actions.push(`<button class="btn btn-secondary" data-admin-post-action="restore-withdrawn">${icon('undo-2')}恢复为私密</button>`);
+    }
+    if (canModerate && post.moderationStatus !== 'DELETED') {
+      actions.push(`<button class="btn btn-danger" data-admin-post-action="delete">${icon('trash-2')}删除帖子</button>`);
+    }
+    const comments = post.comments.map((comment) => adminTreeholeComment(comment, canModerate)).join('')
+      || '<p class="field-hint">暂无交流</p>';
+    const replyForm = canReply
+      ? `<form id="official-treehole-reply" class="treehole-comment-form"><label>正式管理员回复</label><textarea name="content" maxlength="2000" required></textarea><button class="btn btn-primary">${icon('send')}提交正式回复</button></form>`
+      : '';
+    const detail = `<article class="treehole-detail admin"><header><div>${treeholeStatus(post)}<span class="treehole-author">${escapeHtml(post.author.name)} · ${escapeHtml(post.author.grade)}</span></div><time>${formatDate(post.createdAt)}</time></header><p class="treehole-body">${postContent}</p>${moderationReason}<div class="detail-actions">${actions.join('')}</div></article>`;
+    const discussion = `<section class="treehole-discussion"><div class="section-heading"><div><h2>交流记录</h2><p>管理员真实身份不会在公开树洞显示</p></div></div>${comments}${replyForm}</section>`;
+    const modal = openModal(post.title || '[已删除]', detail + discussion, { wide: true });
     modal.querySelector('#official-treehole-reply')?.addEventListener('submit', async (event) => {
       event.preventDefault();
       try { await api(`/api/admin/treehole/posts/${postId}/comments`, { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget))) }); await showAdminTreeholeDetail(postId); toast('正式回复已提交'); } catch (error) { toast(error.message, 'error'); }
@@ -1491,7 +1582,10 @@ async function showAdminTreeholeDetail(postId) {
 
 function showTreeholeModeration(targetType, targetId, action, postId) {
   const actionName = { hide: '隐藏', restore: '恢复', delete: '删除', 'restore-withdrawn': '恢复撤回状态' }[action];
-  const modal = openModal(`${actionName}树洞内容`, `<form id="treehole-moderation-form"><p>${action === 'delete' ? '删除后正文不能通过管理界面恢复。' : '操作会立即影响学生端可见状态。'}</p><div class="form-field"><label>操作原因</label><textarea name="reason" maxlength="200" required></textarea></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn ${action === 'delete' ? 'btn-danger' : 'btn-primary'}">确认${actionName}</button></div></form>`);
+  const guidance = action === 'delete' ? '删除后正文不能通过管理界面恢复。' : '操作会立即影响学生端可见状态。';
+  const buttonClass = action === 'delete' ? 'btn-danger' : 'btn-primary';
+  const form = `<form id="treehole-moderation-form"><p>${guidance}</p><div class="form-field"><label>操作原因</label><textarea name="reason" maxlength="200" required></textarea></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn ${buttonClass}">确认${actionName}</button></div></form>`;
+  const modal = openModal(`${actionName}树洞内容`, form);
   modal.querySelector('[data-cancel]').addEventListener('click', () => showAdminTreeholeDetail(postId));
   modal.querySelector('#treehole-moderation-form').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -1502,7 +1596,14 @@ function showTreeholeModeration(targetType, targetId, action, postId) {
 async function showTreeholeGradeConfiguration() {
   try {
     const { grades } = await api('/api/admin/treehole/author-grades');
-    const modal = openModal('配置新生发帖年级', `<form id="treehole-grade-form"><p class="field-hint">配置变化只影响后续创建资格，不改变历史帖子的管理范围。</p><div class="candidate-grid">${grades.map((grade) => `<div class="candidate"><input type="checkbox" name="gradeIds" value="${grade.id}" id="treehole-grade-${grade.id}" ${grade.selected ? 'checked' : ''} ${grade.status !== 'ACTIVE' ? 'disabled' : ''}><label for="treehole-grade-${grade.id}">${icon('graduation-cap')}<span>${escapeHtml(grade.name)}<small>${grade.status === 'ACTIVE' ? '有效年级' : '已停用'}</small></span></label></div>`).join('')}</div><div class="form-field"><label>操作原因</label><textarea name="reason" maxlength="200" required></textarea></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary">${icon('save')}保存配置</button></div></form>`, { wide: true });
+    const candidates = grades.map((grade) => {
+      const checked = grade.selected ? 'checked' : '';
+      const disabled = grade.status !== 'ACTIVE' ? 'disabled' : '';
+      const status = grade.status === 'ACTIVE' ? '有效年级' : '已停用';
+      return `<div class="candidate"><input type="checkbox" name="gradeIds" value="${grade.id}" id="treehole-grade-${grade.id}" ${checked} ${disabled}><label for="treehole-grade-${grade.id}">${icon('graduation-cap')}<span>${escapeHtml(grade.name)}<small>${status}</small></span></label></div>`;
+    }).join('');
+    const form = `<form id="treehole-grade-form"><p class="field-hint">配置变化只影响后续创建资格，不改变历史帖子的管理范围。</p><div class="candidate-grid">${candidates}</div><div class="form-field"><label>操作原因</label><textarea name="reason" maxlength="200" required></textarea></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary">${icon('save')}保存配置</button></div></form>`;
+    const modal = openModal('配置新生发帖年级', form, { wide: true });
     modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
     modal.querySelector('#treehole-grade-form').addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -1878,10 +1979,24 @@ function showCloseDormitory(dormitoryId) {
   });
 }
 
+function adminReportRow(report, targetLabels) {
+  const targetLabel = targetLabels[report.target_type] || report.target_type;
+  const canResolve = hasScopedPermission('REPORT_RESOLVE', report.target_grade_id) && report.status === 'PENDING';
+  const resolveButton = canResolve
+    ? `<button class="btn btn-primary btn-sm" data-resolve="${report.id}">${icon('check')}处理</button>`
+    : '';
+  return `<tr data-person-name="${escapeHtml(report.reporter_name.toLowerCase())}"><td>${escapeHtml(report.reporter_name)}</td><td>${escapeHtml(targetLabel)} #${report.target_id}</td><td><strong>${escapeHtml(report.reason)}</strong><div class="field-hint">${escapeHtml(report.description)}</div></td><td>${formatDate(report.created_at)}</td><td>${statusBadge(labels.reportStatus[report.status], report.status.toLowerCase())}</td><td>${resolveButton}</td></tr>`;
+}
+
 async function renderAdminReports() {
   const { reports } = await api('/api/admin/reports');
   const targetLabels = { ROOMMATE_CARD: '室友卡片', MESSAGE: '私信消息', TREEHOLE_POST: '树洞帖子', TREEHOLE_COMMENT: '树洞评论' };
-  setPage(reports.length ? `<div class="toolbar"><div class="search-field">${icon('search')}<input id="report-person-search" placeholder="按举报人姓名搜索"></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>举报人</th><th>对象</th><th>原因</th><th>提交时间</th><th>状态</th><th></th></tr></thead><tbody>${reports.map((report) => `<tr data-person-name="${escapeHtml(report.reporter_name.toLowerCase())}"><td>${escapeHtml(report.reporter_name)}</td><td>${escapeHtml(targetLabels[report.target_type] || report.target_type)} #${report.target_id}</td><td><strong>${escapeHtml(report.reason)}</strong><div class="field-hint">${escapeHtml(report.description)}</div></td><td>${formatDate(report.created_at)}</td><td>${statusBadge(labels.reportStatus[report.status], report.status.toLowerCase())}</td><td>${hasScopedPermission('REPORT_RESOLVE', report.target_grade_id) && report.status === 'PENDING' ? `<button class="btn btn-primary btn-sm" data-resolve="${report.id}">${icon('check')}处理</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : emptyState('shield-check', '没有待处理举报', '当前没有用户提交的举报记录'));
+  let content = emptyState('shield-check', '没有待处理举报', '当前没有用户提交的举报记录');
+  if (reports.length) {
+    const rows = reports.map((report) => adminReportRow(report, targetLabels)).join('');
+    content = `<div class="toolbar"><div class="search-field">${icon('search')}<input id="report-person-search" placeholder="按举报人姓名搜索"></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>举报人</th><th>对象</th><th>原因</th><th>提交时间</th><th>状态</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+  setPage(content);
   document.querySelector('#report-person-search')?.addEventListener('input', (event) => {
     const query = event.target.value.trim().toLowerCase();
     document.querySelectorAll('tr[data-person-name]').forEach((row) => { row.hidden = query && !row.dataset.personName.includes(query); });
@@ -1890,8 +2005,13 @@ async function renderAdminReports() {
 }
 
 function showResolveReport(report) {
-  const snapshot = Object.entries(report.snapshot || {}).map(([key, value]) => `<div class="detail-item"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(typeof value === 'object' ? JSON.stringify(value) : value)}</dd></div>`).join('');
-  const modal = openModal('处理举报', `<div class="section"><div class="section-heading"><div><h2>举报快照</h2><p>仅展示用户主动提交的被举报内容</p></div></div><dl class="detail-grid">${snapshot || '<div class="field-hint">无可用快照</div>'}</dl></div><form id="resolve-form" class="form-grid"><div class="form-field full"><label>处理结论</label><select name="status"><option value="RESOLVED">举报成立</option><option value="REJECTED">举报不成立</option></select></div><div class="form-field full"><label>处理说明</label><textarea name="resolution" required></textarea></div><div class="form-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary">${icon('check')}完成处理</button></div></form>`, { wide: true });
+  const snapshot = Object.entries(report.snapshot || {}).map(([key, value]) => {
+    const displayValue = typeof value === 'object' ? JSON.stringify(value) : value;
+    return `<div class="detail-item"><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(displayValue)}</dd></div>`;
+  }).join('');
+  const snapshotContent = snapshot || '<div class="field-hint">无可用快照</div>';
+  const content = `<div class="section"><div class="section-heading"><div><h2>举报快照</h2><p>仅展示用户主动提交的被举报内容</p></div></div><dl class="detail-grid">${snapshotContent}</dl></div><form id="resolve-form" class="form-grid"><div class="form-field full"><label>处理结论</label><select name="status"><option value="RESOLVED">举报成立</option><option value="REJECTED">举报不成立</option></select></div><div class="form-field full"><label>处理说明</label><textarea name="resolution" required></textarea></div><div class="form-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary">${icon('check')}完成处理</button></div></form>`;
+  const modal = openModal('处理举报', content, { wide: true });
   modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
   modal.querySelector('#resolve-form').addEventListener('submit', async (event) => {
     event.preventDefault();
