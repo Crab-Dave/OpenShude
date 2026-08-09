@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     database_pool_size: int = Field(default=5, ge=1, le=100)
     database_pool_timeout_seconds: float = Field(default=2, gt=0, le=30)
     login_password_concurrency: int = Field(default=2, ge=1, le=32)
+    treehole_report_retention_days: int = Field(default=180, ge=30, le=3650)
 
     @field_validator("allowed_hosts", "allowed_origins", mode="before")
     @classmethod

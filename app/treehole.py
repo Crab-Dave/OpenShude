@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -17,6 +18,7 @@ from .common import (
     require_super_admin,
     require_user,
 )
+from .config import get_settings
 from .database import get_db
 from .errors import ApiError
 from .rate_limit import enforce_rate_limit
@@ -26,6 +28,18 @@ admin_router = APIRouter(prefix="/api/admin/treehole")
 DB = Annotated[Session, Depends(get_db)]
 POST_NOT_FOUND = "树洞帖子不存在"
 COMMENT_NOT_FOUND = "评论不存在"
+
+
+def prune_treehole_report_snapshots(db: Session) -> int:
+    cutoff = datetime.now(UTC) - timedelta(days=get_settings().treehole_report_retention_days)
+    result = db.execute(
+        text(
+            """UPDATE reports SET snapshot='{}' WHERE target_type IN ('TREEHOLE_POST','TREEHOLE_COMMENT')
+            AND status IN ('RESOLVED','REJECTED') AND handled_at IS NOT NULL AND handled_at<:cutoff AND snapshot<>'{}'"""
+        ),
+        {"cutoff": cutoff.isoformat(timespec="milliseconds").replace("+00:00", "Z")},
+    )
+    return result.rowcount
 
 
 def validated_text(value: object, minimum: int, maximum: int, field: str) -> str:
