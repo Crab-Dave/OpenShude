@@ -1650,23 +1650,36 @@ async function renderAdminUsers() {
   document.querySelector('#manage-selection-groups')?.addEventListener('click', openSelectionGroupManager);
 }
 
-async function downloadUserExport() {
+function downloadUserExport(event) {
+  return downloadExport('/api/admin/users/export', 'users.xlsx', '用户信息已导出', event.currentTarget);
+}
+
+async function downloadExport(requestUrl, fallbackFilename, successMessage, button) {
+  button.disabled = true;
   try {
-    const response = await fetch('/api/admin/users/export', { credentials: 'same-origin' });
+    const response = await fetch(requestUrl, { credentials: 'same-origin' });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       throw new Error(data.error?.message || '导出失败，请稍后重试');
     }
-    const blob = await response.blob();
     const disposition = response.headers.get('content-disposition') || '';
-    const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || 'users.xlsx';
+    const encodedFilename = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+    const headerFilename = /filename="?([^";]+)"?/i.exec(disposition)?.[1];
+    const filename = encodedFilename ? decodeURIComponent(encodedFilename) : headerFilename || fallbackFilename;
+    const objectUrl = URL.createObjectURL(await response.blob());
     const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
+    link.href = objectUrl;
     link.download = filename;
+    document.body.append(link);
     link.click();
-    URL.revokeObjectURL(link.href);
-    toast('用户信息已导出');
-  } catch (error) { toast(error.message, 'error'); }
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+    toast(successMessage);
+  } catch (error) {
+    toast(error.message, 'error');
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function userRow(user) {
@@ -1864,36 +1877,8 @@ function showSelectionGroups() {
   modal.querySelectorAll('[data-delete-selection-group]').forEach((button) => button.addEventListener('click', () => showDeleteSelectionGroup(groups.find((group) => group.id === Number(button.dataset.deleteSelectionGroup)))));
 }
 
-async function downloadSelectionGroupCards(group, button) {
-  button.disabled = true;
-  try {
-    const response = await fetch(`/api/admin/student-selection-groups/${group.id}/cards/export`, { credentials: 'same-origin' });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      throw new Error(data.error?.message || '导出失败，请稍后重试');
-    }
-    const disposition = response.headers.get('content-disposition') || '';
-    const encodedFilename = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
-    let filename = `group-${group.id}-cards.xlsx`;
-    if (encodedFilename) {
-      filename = decodeURIComponent(encodedFilename);
-    } else {
-      filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || filename;
-    }
-    const url = URL.createObjectURL(await response.blob());
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
-    toast('群组卡片已导出');
-  } catch (error) {
-    toast(error.message, 'error');
-  } finally {
-    button.disabled = false;
-  }
+function downloadSelectionGroupCards(group, button) {
+  return downloadExport(`/api/admin/student-selection-groups/${group.id}/cards/export`, `group-${group.id}-cards.xlsx`, '群组卡片已导出', button);
 }
 
 function showSelectionGroupForm(group = null) {
@@ -1975,30 +1960,8 @@ async function renderAdminGroups(selectedRoundId = state.adminRoundId) {
   document.querySelectorAll('[data-close-dorm]').forEach((button) => button.addEventListener('click', () => showCloseDormitory(Number(button.dataset.closeDorm))));
 }
 
-async function downloadDormitoryExport(event) {
-  const button = event.currentTarget;
-  button.disabled = true;
-  try {
-    const response = await fetch(`/api/admin/dormitories/export?roundId=${state.adminRoundId}`, { credentials: 'same-origin' });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      throw new Error(data.error?.message || '导出失败，请稍后重试');
-    }
-    const filename = response.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1] || 'dormitories.xlsx';
-    const url = URL.createObjectURL(await response.blob());
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
-    toast('宿舍列表已导出');
-  } catch (error) {
-    toast(error.message, 'error');
-  } finally {
-    button.disabled = false;
-  }
+function downloadDormitoryExport(event) {
+  return downloadExport(`/api/admin/dormitories/export?roundId=${state.adminRoundId}`, 'dormitories.xlsx', '宿舍列表已导出', event.currentTarget);
 }
 
 function showAssignDormitory(dormitory) {
