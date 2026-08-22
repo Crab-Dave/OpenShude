@@ -1850,7 +1850,7 @@ async function openSelectionGroupManager() {
 
 function showSelectionGroups() {
   const groups = state.selectionGroups;
-  const modal = openModal('预设学生群组', `<div class="toolbar"><div class="search-field">${icon('search')}<input id="selection-group-search" placeholder="按成员姓名搜索"></div><div class="toolbar-spacer"></div><button class="btn btn-primary" id="create-selection-group">${icon('plus')}新建群组</button></div><div class="selection-group-list">${groups.length ? groups.map((group) => `<section class="selection-group-item" data-selection-group-card="${group.id}"><div><strong>${escapeHtml(group.name)}</strong><p>${escapeHtml(group.description || '暂无说明')}</p><span>${group.members.map((member) => escapeHtml(member.name)).join('、')}</span></div><div class="cell-actions"><button class="btn btn-secondary btn-sm" data-edit-selection-group="${group.id}">${icon('pencil')}编辑</button><button class="btn btn-danger btn-sm" data-delete-selection-group="${group.id}">${icon('trash-2')}删除</button></div></section>`).join('') : emptyState('users-round', '暂无预设群组', '新建群组后，可在选人界面一键添加成员')}</div>`, { wide: true });
+  const modal = openModal('预设学生群组', `<div class="toolbar"><div class="search-field">${icon('search')}<input id="selection-group-search" placeholder="按成员姓名搜索"></div><div class="toolbar-spacer"></div><button class="btn btn-primary" id="create-selection-group">${icon('plus')}新建群组</button></div><div class="selection-group-list">${groups.length ? groups.map((group) => `<section class="selection-group-item" data-selection-group-card="${group.id}"><div><strong>${escapeHtml(group.name)}</strong><p>${escapeHtml(group.description || '暂无说明')}</p><span>${group.members.map((member) => escapeHtml(member.name)).join('、')}</span></div><div class="cell-actions"><button class="btn btn-secondary btn-sm" data-export-selection-group="${group.id}">${icon('file-spreadsheet')}导出卡片</button><button class="btn btn-secondary btn-sm" data-edit-selection-group="${group.id}">${icon('pencil')}编辑</button><button class="btn btn-danger btn-sm" data-delete-selection-group="${group.id}">${icon('trash-2')}删除</button></div></section>`).join('') : emptyState('users-round', '暂无预设群组', '新建群组后，可在选人界面一键添加成员')}</div>`, { wide: true });
   modal.querySelector('#selection-group-search').addEventListener('input', (event) => {
     const query = event.target.value.trim().toLowerCase();
     modal.querySelectorAll('[data-selection-group-card]').forEach((card) => {
@@ -1859,8 +1859,41 @@ function showSelectionGroups() {
     });
   });
   modal.querySelector('#create-selection-group').addEventListener('click', () => showSelectionGroupForm());
+  modal.querySelectorAll('[data-export-selection-group]').forEach((button) => button.addEventListener('click', () => downloadSelectionGroupCards(groups.find((group) => group.id === Number(button.dataset.exportSelectionGroup)), button)));
   modal.querySelectorAll('[data-edit-selection-group]').forEach((button) => button.addEventListener('click', () => showSelectionGroupForm(groups.find((group) => group.id === Number(button.dataset.editSelectionGroup)))));
   modal.querySelectorAll('[data-delete-selection-group]').forEach((button) => button.addEventListener('click', () => showDeleteSelectionGroup(groups.find((group) => group.id === Number(button.dataset.deleteSelectionGroup)))));
+}
+
+async function downloadSelectionGroupCards(group, button) {
+  button.disabled = true;
+  try {
+    const response = await fetch(`/api/admin/student-selection-groups/${group.id}/cards/export`, { credentials: 'same-origin' });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error?.message || '导出失败，请稍后重试');
+    }
+    const disposition = response.headers.get('content-disposition') || '';
+    const encodedFilename = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+    let filename = `group-${group.id}-cards.xlsx`;
+    if (encodedFilename) {
+      filename = decodeURIComponent(encodedFilename);
+    } else {
+      filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] || filename;
+    }
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    toast('群组卡片已导出');
+  } catch (error) {
+    toast(error.message, 'error');
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function showSelectionGroupForm(group = null) {
