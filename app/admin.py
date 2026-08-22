@@ -53,6 +53,8 @@ PERMISSION_DENIED_MESSAGE = "当前账号缺少所需管理权限"
 NOT_FOUND_MESSAGE = "接口不存在"
 USER_NOT_FOUND_MESSAGE = "用户账号不存在"
 DORMITORY_ROUND_NOT_FOUND_MESSAGE = "选宿舍轮次不存在"
+SELECTION_GROUP_NOT_FOUND_MESSAGE = "预设群组不存在"
+XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 GENDER_LABELS = {"MALE": "男", "FEMALE": "女", "UNSPECIFIED": "未设置"}
 USER_STATUS_LABELS = {
     "PENDING_ACTIVATION": "待激活",
@@ -484,7 +486,7 @@ def export_users(request: Request, db: DB) -> StreamingResponse:
     filename = f"users-{date.today().isoformat()}.xlsx"
     return StreamingResponse(
         output,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        media_type=XLSX_MEDIA_TYPE,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
@@ -1121,7 +1123,7 @@ def export_selection_group_cards(group_id: int, request: Request, db: DB) -> Str
     grant = require_super_admin(admin)
     group = one(db, SELECTION_GROUP_BY_ID, {"id": group_id})
     if not group:
-        raise ApiError(404, "SELECTION_GROUP_NOT_FOUND", "预设群组不存在")
+        raise ApiError(404, "SELECTION_GROUP_NOT_FOUND", SELECTION_GROUP_NOT_FOUND_MESSAGE)
     rows = group_card_rows(db, group_id)
     workbook = group_card_workbook(group["name"], rows)
     audit(
@@ -1145,7 +1147,7 @@ def export_selection_group_cards(group_id: int, request: Request, db: DB) -> Str
     fallback = f"group-{group_id}-cards-{today}.xlsx"
     return StreamingResponse(
         io.BytesIO(workbook),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        media_type=XLSX_MEDIA_TYPE,
         headers={"Content-Disposition": f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{unicode_filename}"},
     )
 
@@ -1191,7 +1193,7 @@ def update_selection_group(group_id: int, request: Request, body: dict, db: DB) 
     grant = require_super_admin(admin)
     before = one(db, SELECTION_GROUP_BY_ID, {"id": group_id})
     if not before:
-        raise ApiError(404, "SELECTION_GROUP_NOT_FOUND", "预设群组不存在")
+        raise ApiError(404, "SELECTION_GROUP_NOT_FOUND", SELECTION_GROUP_NOT_FOUND_MESSAGE)
     name, description, member_ids = validate_selection_group(db, body)
     reason = clean_text(body.get("reason"), 200, True)
     if one(
@@ -1233,7 +1235,7 @@ def delete_selection_group(group_id: int, request: Request, body: dict, db: DB) 
     grant = require_super_admin(admin)
     group = one(db, SELECTION_GROUP_BY_ID, {"id": group_id})
     if not group:
-        raise ApiError(404, "SELECTION_GROUP_NOT_FOUND", "预设群组不存在")
+        raise ApiError(404, "SELECTION_GROUP_NOT_FOUND", SELECTION_GROUP_NOT_FOUND_MESSAGE)
     reason = clean_text(body.get("reason"), 200, True)
     audit(
         db,
@@ -1570,7 +1572,7 @@ def export_dormitories(
     filename = f"dormitories-{round_row['code']}-{date.today().isoformat()}.xlsx"
     return StreamingResponse(
         io.BytesIO(workbook_bytes(dormitories)),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        media_type=XLSX_MEDIA_TYPE,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
