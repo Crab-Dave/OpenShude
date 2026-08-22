@@ -3,6 +3,7 @@ import json
 import re
 from datetime import date
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
@@ -52,6 +53,14 @@ PERMISSION_DENIED_MESSAGE = "当前账号缺少所需管理权限"
 NOT_FOUND_MESSAGE = "接口不存在"
 USER_NOT_FOUND_MESSAGE = "用户账号不存在"
 DORMITORY_ROUND_NOT_FOUND_MESSAGE = "选宿舍轮次不存在"
+GENDER_LABELS = {"MALE": "男", "FEMALE": "女", "UNSPECIFIED": "未设置"}
+USER_STATUS_LABELS = {
+    "PENDING_ACTIVATION": "待激活",
+    "ACTIVE": "正常",
+    "SUSPENDED": "已停用",
+    "BANNED": "已封禁",
+}
+CARD_STATUS_LABELS = {"DRAFT": "草稿", "PUBLISHED": "已发布", "HIDDEN": "已隐藏"}
 
 
 def admin_user(request: Request, db: Session) -> dict:
@@ -425,25 +434,17 @@ def export_users(request: Request, db: DB) -> StreamingResponse:
     sheet.append(
         ["登录标识", "姓名", "年级", "性别", "专业", "院服尺码", "账号状态", "卡片状态", "最近登录", "创建时间"]
     )
-    gender_labels = {"MALE": "男", "FEMALE": "女", "UNSPECIFIED": "未设置"}
-    status_labels = {
-        "PENDING_ACTIVATION": "待激活",
-        "ACTIVE": "正常",
-        "SUSPENDED": "已停用",
-        "BANNED": "已封禁",
-    }
-    card_status_labels = {"DRAFT": "草稿", "PUBLISHED": "已发布", "HIDDEN": "已隐藏"}
     for row in rows:
         sheet.append(
             [
                 spreadsheet_text(row["login_identifier"]),
                 spreadsheet_text(row["name"]),
                 spreadsheet_text(row["grade"]),
-                gender_labels.get(row["gender"], row["gender"]),
+                GENDER_LABELS.get(row["gender"], row["gender"]),
                 spreadsheet_text(row["major"]),
                 spreadsheet_text(row["clothing_size"]),
-                status_labels.get(row["status"], row["status"]),
-                card_status_labels.get(row["card_status"], row["card_status"] or "未创建"),
+                USER_STATUS_LABELS.get(row["status"], row["status"]),
+                CARD_STATUS_LABELS.get(row["card_status"], row["card_status"] or "未创建"),
                 row["last_login_at"] or "",
                 row["created_at"],
             ]
@@ -982,6 +983,171 @@ def validate_selection_group(db: Session, body: dict) -> tuple[str, str, list[in
     if not member_ids:
         raise ApiError(400, "SELECTION_GROUP_MEMBERS_REQUIRED", "请至少选择一名学生")
     return name, description, member_ids
+
+
+GROUP_CARD_HEADERS = [
+    "登录标识",
+    "姓名",
+    "年级",
+    "性别",
+    "专业",
+    "账号状态",
+    "卡片状态",
+    "头像地址",
+    "来自省份",
+    "来自城市",
+    "院服尺码",
+    "一句话介绍",
+    "个人性格",
+    "自认为的缺点",
+    "期望室友性格",
+    "兴趣爱好、喜欢的运动等",
+    "夏季空调下限（℃）",
+    "夏季空调上限（℃）",
+    "冬季空调下限（℃）",
+    "冬季空调上限（℃）",
+    "早上起床",
+    "晚上睡觉",
+    "午休习惯",
+    "本人宿舍整理习惯",
+    "对室友卫生的最低要求",
+    "公共空间维护方式",
+    "不太能接受的卫生情况",
+    "对自己打游戏的要求",
+    "对室友打游戏的要求",
+    "是否介意键鼠声音",
+    "是否介意声音外放",
+    "还想要对大家说",
+    "卡片更新时间",
+]
+
+
+def group_card_rows(db: Session, group_id: int) -> list[dict]:
+    return all_rows(
+        db,
+        """SELECT u.login_identifier,u.name,u.grade,u.gender,u.major,u.status AS user_status,
+        c.id AS card_id,c.status AS card_status,c.avatar_url,c.origin_province,c.origin_city,c.clothing_size,
+        c.one_sentence_intro,c.personality_text,c.self_acknowledged_shortcoming,c.roommate_personality_text,
+        c.interests_text,c.summer_temp_min,c.summer_temp_max,c.winter_temp_min,c.winter_temp_max,
+        c.wake_up_time,c.sleep_time,c.nap_habit,c.personal_cleanliness,c.roommate_cleanliness,
+        c.common_space_maintenance,c.unacceptable_hygiene,c.gaming_self,c.gaming_roommate,
+        c.keyboard_noise_text,c.media_noise_text,c.additional_note,c.updated_at AS card_updated_at
+        FROM student_selection_group_members member JOIN users u ON u.id=member.user_id
+        LEFT JOIN roommate_cards c ON c.user_id=u.id WHERE member.group_id=:group
+        ORDER BY u.name,u.login_identifier""",
+        {"group": group_id},
+    )
+
+
+def group_card_workbook(group_name: str, rows: list[dict]) -> bytes:
+    workbook = Workbook()
+    sheet = workbook.active
+    safe_title = re.sub(r"[\\/*?:\[\]]", "_", group_name).strip()[:31]
+    sheet.title = safe_title or "群组卡片"
+    sheet.append(GROUP_CARD_HEADERS)
+    cleanliness_labels = {
+        "BASIC": "乱中有序自由整理，不产生异味或虫害即可",
+        "TIDY": "大部分时间整齐，物品不过度堆积",
+        "STRICT": "长期保持整洁，物品及时归位",
+    }
+    common_space_labels = {
+        "USABLE": "不影响正常使用即可，不需要固定规则",
+        "RESTORE": "使用后基本恢复原状，保持公共区域基本整洁",
+        "CLEAN_TOGETHER": "共同制定定期打扫计划，保持较高整洁度",
+        "NEGOTIABLE": "都可以，愿意与室友具体协商",
+    }
+    text_fields = (
+        "login_identifier",
+        "name",
+        "grade",
+        "major",
+        "avatar_url",
+        "origin_province",
+        "origin_city",
+        "clothing_size",
+        "one_sentence_intro",
+        "personality_text",
+        "self_acknowledged_shortcoming",
+        "roommate_personality_text",
+        "interests_text",
+    )
+    for row in rows:
+        values = {field: spreadsheet_text(row[field]) for field in text_fields}
+        sheet.append(
+            [
+                values["login_identifier"],
+                values["name"],
+                values["grade"],
+                GENDER_LABELS.get(row["gender"], row["gender"]),
+                values["major"],
+                USER_STATUS_LABELS.get(row["user_status"], row["user_status"]),
+                CARD_STATUS_LABELS.get(row["card_status"], "未创建"),
+                values["avatar_url"],
+                values["origin_province"],
+                values["origin_city"],
+                values["clothing_size"],
+                values["one_sentence_intro"],
+                values["personality_text"],
+                values["self_acknowledged_shortcoming"],
+                values["roommate_personality_text"],
+                values["interests_text"],
+                row["summer_temp_min"],
+                row["summer_temp_max"],
+                row["winter_temp_min"],
+                row["winter_temp_max"],
+                spreadsheet_text(row["wake_up_time"]),
+                spreadsheet_text(row["sleep_time"]),
+                spreadsheet_text(row["nap_habit"]),
+                cleanliness_labels.get(row["personal_cleanliness"], ""),
+                cleanliness_labels.get(row["roommate_cleanliness"], ""),
+                common_space_labels.get(row["common_space_maintenance"], ""),
+                spreadsheet_text(row["unacceptable_hygiene"]),
+                spreadsheet_text(row["gaming_self"]),
+                spreadsheet_text(row["gaming_roommate"]),
+                spreadsheet_text(row["keyboard_noise_text"]),
+                spreadsheet_text(row["media_noise_text"]),
+                spreadsheet_text(row["additional_note"]),
+                row["card_updated_at"] or "",
+            ]
+        )
+    output = io.BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
+@router.get("/student-selection-groups/{group_id}/cards/export")
+def export_selection_group_cards(group_id: int, request: Request, db: DB) -> StreamingResponse:
+    admin = admin_user(request, db)
+    grant = require_super_admin(admin)
+    group = one(db, SELECTION_GROUP_BY_ID, {"id": group_id})
+    if not group:
+        raise ApiError(404, "SELECTION_GROUP_NOT_FOUND", "预设群组不存在")
+    rows = group_card_rows(db, group_id)
+    workbook = group_card_workbook(group["name"], rows)
+    audit(
+        db,
+        admin,
+        request,
+        "EXPORT_STUDENT_GROUP_CARDS",
+        "STUDENT_SELECTION_GROUP",
+        group_id,
+        metadata={
+            "groupName": group["name"],
+            "memberCount": len(rows),
+            "cardCount": sum(row["card_id"] is not None for row in rows),
+        },
+        grant=grant,
+    )
+    db.commit()
+    safe_name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", group["name"]).strip(" .")[:60] or f"group-{group_id}"
+    today = date.today().isoformat()
+    unicode_filename = quote(f"{safe_name}-cards-{today}.xlsx")
+    fallback = f"group-{group_id}-cards-{today}.xlsx"
+    return StreamingResponse(
+        io.BytesIO(workbook),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{unicode_filename}"},
+    )
 
 
 @router.post("/student-selection-groups", status_code=201)
