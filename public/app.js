@@ -1802,7 +1802,8 @@ async function renderAdminCards() {
     state.user.isSuperAdmin ? api('/api/admin/student-selection-groups') : Promise.resolve({ groups: [] }),
   ]);
   const exportButton = state.user.isSuperAdmin ? `<button class="btn btn-primary" id="export-group-cards">${icon('file-spreadsheet')}导出群组卡片</button>` : '';
-  setPage(`<div class="toolbar"><div class="search-field">${icon('search')}<input id="admin-card-search" placeholder="按姓名搜索"></div><div class="toolbar-spacer"></div>${exportButton}</div><div class="table-wrap"><table class="data-table"><thead><tr><th>学生</th><th>地区</th><th>起床 / 睡觉</th><th>本人整理习惯</th><th>状态</th><th>更新时间</th><th></th></tr></thead><tbody>${cards.map((card) => `<tr data-person-name="${escapeHtml(card.name.toLowerCase())}"><td><div class="cell-user">${avatar(card.avatar_url, card.name, 'avatar-sm')}<div><strong>${escapeHtml(card.name)}</strong><div class="field-hint">${escapeHtml(card.grade)} · ${escapeHtml(card.major || '-')}</div></div></div></td><td>${escapeHtml([card.origin_province, card.origin_city].filter(Boolean).join(' ') || '-')}</td><td>${escapeHtml(card.wake_up_time || '-')} / ${escapeHtml(card.sleep_time || '-')}</td><td>${escapeHtml(labels.cleanliness[card.personal_cleanliness] || '-')}</td><td>${statusBadge(labels.cardStatus[card.status], card.status === 'PUBLISHED' ? 'published' : card.status.toLowerCase())}</td><td>${formatDate(card.updated_at)}</td><td><div class="cell-actions"><button class="btn btn-secondary btn-sm" data-view-card="${card.id}">${icon('eye')}查看</button>${hasScopedPermission('CARD_MODERATE', card.grade_id) ? (card.status === 'HIDDEN' ? `<button class="btn btn-secondary btn-sm" data-card-action="restore" data-id="${card.id}">${icon('rotate-ccw')}恢复</button>` : `<button class="btn btn-danger btn-sm" data-card-action="hide" data-id="${card.id}">${icon('eye-off')}隐藏</button>`) : ''}</div></td></tr>`).join('')}</tbody></table></div>`);
+  const cardRows = cards.map(adminCardRow).join('');
+  setPage(`<div class="toolbar"><div class="search-field">${icon('search')}<input id="admin-card-search" placeholder="按姓名搜索"></div><div class="toolbar-spacer"></div>${exportButton}</div><div class="table-wrap"><table class="data-table"><thead><tr><th>学生</th><th>地区</th><th>起床 / 睡觉</th><th>本人整理习惯</th><th>状态</th><th>更新时间</th><th></th></tr></thead><tbody>${cardRows}</tbody></table></div>`);
   document.querySelector('#admin-card-search').addEventListener('input', (event) => {
     const query = event.target.value.trim().toLowerCase();
     document.querySelectorAll('tr[data-person-name]').forEach((row) => { row.hidden = query && !row.dataset.personName.includes(query); });
@@ -1810,6 +1811,20 @@ async function renderAdminCards() {
   document.querySelector('#export-group-cards')?.addEventListener('click', () => showGroupCardExport(groups));
   document.querySelectorAll('[data-view-card]').forEach((button) => button.addEventListener('click', () => showAdminCardDetail(cards.find((card) => card.id === Number(button.dataset.viewCard)))));
   document.querySelectorAll('[data-card-action]').forEach((button) => button.addEventListener('click', () => showCardAction(Number(button.dataset.id), button.dataset.cardAction)));
+}
+
+function adminCardRow(card) {
+  let moderationButton = '';
+  if (hasScopedPermission('CARD_MODERATE', card.grade_id)) {
+    if (card.status === 'HIDDEN') {
+      moderationButton = `<button class="btn btn-secondary btn-sm" data-card-action="restore" data-id="${card.id}">${icon('rotate-ccw')}恢复</button>`;
+    } else {
+      moderationButton = `<button class="btn btn-danger btn-sm" data-card-action="hide" data-id="${card.id}">${icon('eye-off')}隐藏</button>`;
+    }
+  }
+  const region = [card.origin_province, card.origin_city].filter(Boolean).join(' ') || '-';
+  const statusType = card.status === 'PUBLISHED' ? 'published' : card.status.toLowerCase();
+  return `<tr data-person-name="${escapeHtml(card.name.toLowerCase())}"><td><div class="cell-user">${avatar(card.avatar_url, card.name, 'avatar-sm')}<div><strong>${escapeHtml(card.name)}</strong><div class="field-hint">${escapeHtml(card.grade)} · ${escapeHtml(card.major || '-')}</div></div></div></td><td>${escapeHtml(region)}</td><td>${escapeHtml(card.wake_up_time || '-')} / ${escapeHtml(card.sleep_time || '-')}</td><td>${escapeHtml(labels.cleanliness[card.personal_cleanliness] || '-')}</td><td>${statusBadge(labels.cardStatus[card.status], statusType)}</td><td>${formatDate(card.updated_at)}</td><td><div class="cell-actions"><button class="btn btn-secondary btn-sm" data-view-card="${card.id}">${icon('eye')}查看</button>${moderationButton}</div></td></tr>`;
 }
 
 function showGroupCardExport(groups) {
