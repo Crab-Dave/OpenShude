@@ -1654,10 +1654,14 @@ function downloadUserExport(event) {
   return downloadExport('/api/admin/users/export', 'users.xlsx', '用户信息已导出', event.currentTarget);
 }
 
-async function downloadExport(requestUrl, fallbackFilename, successMessage, button) {
+async function downloadExport(requestUrl, fallbackFilename, successMessage, button, options = {}) {
   button.disabled = true;
   try {
-    const response = await fetch(requestUrl, { credentials: 'same-origin' });
+    const response = await fetch(apiRequestUrl(requestUrl), {
+      credentials: 'same-origin',
+      ...options,
+      headers: apiRequestHeaders(options),
+    });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       throw new Error(data.error?.message || '导出失败，请稍后重试');
@@ -1675,8 +1679,10 @@ async function downloadExport(requestUrl, fallbackFilename, successMessage, butt
     link.remove();
     setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
     toast(successMessage);
+    return true;
   } catch (error) {
     toast(error.message, 'error');
+    return false;
   } finally {
     button.disabled = false;
   }
@@ -1791,14 +1797,38 @@ function showDeleteUser(user) {
 }
 
 async function renderAdminCards() {
-  const { cards } = await api('/api/admin/roommate-cards');
-  setPage(`<div class="toolbar"><div class="search-field">${icon('search')}<input id="admin-card-search" placeholder="按姓名搜索"></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>学生</th><th>地区</th><th>起床 / 睡觉</th><th>本人整理习惯</th><th>状态</th><th>更新时间</th><th></th></tr></thead><tbody>${cards.map((card) => `<tr data-person-name="${escapeHtml(card.name.toLowerCase())}"><td><div class="cell-user">${avatar(card.avatar_url, card.name, 'avatar-sm')}<div><strong>${escapeHtml(card.name)}</strong><div class="field-hint">${escapeHtml(card.grade)} · ${escapeHtml(card.major || '-')}</div></div></div></td><td>${escapeHtml([card.origin_province, card.origin_city].filter(Boolean).join(' ') || '-')}</td><td>${escapeHtml(card.wake_up_time || '-')} / ${escapeHtml(card.sleep_time || '-')}</td><td>${escapeHtml(labels.cleanliness[card.personal_cleanliness] || '-')}</td><td>${statusBadge(labels.cardStatus[card.status], card.status === 'PUBLISHED' ? 'published' : card.status.toLowerCase())}</td><td>${formatDate(card.updated_at)}</td><td><div class="cell-actions"><button class="btn btn-secondary btn-sm" data-view-card="${card.id}">${icon('eye')}查看</button>${hasScopedPermission('CARD_MODERATE', card.grade_id) ? (card.status === 'HIDDEN' ? `<button class="btn btn-secondary btn-sm" data-card-action="restore" data-id="${card.id}">${icon('rotate-ccw')}恢复</button>` : `<button class="btn btn-danger btn-sm" data-card-action="hide" data-id="${card.id}">${icon('eye-off')}隐藏</button>`) : ''}</div></td></tr>`).join('')}</tbody></table></div>`);
+  const [{ cards }, { groups }] = await Promise.all([
+    api('/api/admin/roommate-cards'),
+    state.user.isSuperAdmin ? api('/api/admin/student-selection-groups') : Promise.resolve({ groups: [] }),
+  ]);
+  const exportButton = state.user.isSuperAdmin ? `<button class="btn btn-primary" id="export-group-cards">${icon('file-spreadsheet')}导出群组卡片</button>` : '';
+  setPage(`<div class="toolbar"><div class="search-field">${icon('search')}<input id="admin-card-search" placeholder="按姓名搜索"></div><div class="toolbar-spacer"></div>${exportButton}</div><div class="table-wrap"><table class="data-table"><thead><tr><th>学生</th><th>地区</th><th>起床 / 睡觉</th><th>本人整理习惯</th><th>状态</th><th>更新时间</th><th></th></tr></thead><tbody>${cards.map((card) => `<tr data-person-name="${escapeHtml(card.name.toLowerCase())}"><td><div class="cell-user">${avatar(card.avatar_url, card.name, 'avatar-sm')}<div><strong>${escapeHtml(card.name)}</strong><div class="field-hint">${escapeHtml(card.grade)} · ${escapeHtml(card.major || '-')}</div></div></div></td><td>${escapeHtml([card.origin_province, card.origin_city].filter(Boolean).join(' ') || '-')}</td><td>${escapeHtml(card.wake_up_time || '-')} / ${escapeHtml(card.sleep_time || '-')}</td><td>${escapeHtml(labels.cleanliness[card.personal_cleanliness] || '-')}</td><td>${statusBadge(labels.cardStatus[card.status], card.status === 'PUBLISHED' ? 'published' : card.status.toLowerCase())}</td><td>${formatDate(card.updated_at)}</td><td><div class="cell-actions"><button class="btn btn-secondary btn-sm" data-view-card="${card.id}">${icon('eye')}查看</button>${hasScopedPermission('CARD_MODERATE', card.grade_id) ? (card.status === 'HIDDEN' ? `<button class="btn btn-secondary btn-sm" data-card-action="restore" data-id="${card.id}">${icon('rotate-ccw')}恢复</button>` : `<button class="btn btn-danger btn-sm" data-card-action="hide" data-id="${card.id}">${icon('eye-off')}隐藏</button>`) : ''}</div></td></tr>`).join('')}</tbody></table></div>`);
   document.querySelector('#admin-card-search').addEventListener('input', (event) => {
     const query = event.target.value.trim().toLowerCase();
     document.querySelectorAll('tr[data-person-name]').forEach((row) => { row.hidden = query && !row.dataset.personName.includes(query); });
   });
+  document.querySelector('#export-group-cards')?.addEventListener('click', () => showGroupCardExport(groups));
   document.querySelectorAll('[data-view-card]').forEach((button) => button.addEventListener('click', () => showAdminCardDetail(cards.find((card) => card.id === Number(button.dataset.viewCard)))));
   document.querySelectorAll('[data-card-action]').forEach((button) => button.addEventListener('click', () => showCardAction(Number(button.dataset.id), button.dataset.cardAction)));
+}
+
+function showGroupCardExport(groups) {
+  const groupOptions = groups.length ? groups.map((group) => `<div class="candidate"><input type="checkbox" name="groupIds" value="${group.id}" id="export-group-${group.id}"><label for="export-group-${group.id}">${icon('users-round')}<span>${escapeHtml(group.name)}<small>${group.members.length} 名成员</small></span></label></div>`).join('') : emptyState('users-round', '暂无预设学生群组', '请先在选宿舍轮次页面创建预设学生群组');
+  const modal = openModal('导出群组卡片', `<form id="group-card-export-form"><p class="field-hint">选择需要导出的预设学生群组。重叠成员只导出一次，并注明其所属群组。</p><div class="candidate-grid">${groupOptions}</div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary" ${groups.length ? '' : 'disabled'}>${icon('file-spreadsheet')}导出 Excel</button></div></form>`, { wide: true });
+  modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
+  modal.querySelector('#group-card-export-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const groupIds = [...form.querySelectorAll('[name="groupIds"]:checked')].map((input) => Number(input.value));
+    if (!groupIds.length) {
+      toast('请至少选择一个预设学生群组', 'error');
+      return;
+    }
+    const success = await downloadExport('/api/admin/roommate-cards/export', 'selected-group-cards.xlsx', '群组卡片已导出', form.querySelector('.btn-primary'), {
+      method: 'POST', body: JSON.stringify({ groupIds }),
+    });
+    if (success) closeModal();
+  });
 }
 
 function showAdminCardDetail(card) {
@@ -1863,7 +1893,7 @@ async function openSelectionGroupManager() {
 
 function showSelectionGroups() {
   const groups = state.selectionGroups;
-  const groupList = groups.length ? groups.map((group) => `<section class="selection-group-item" data-selection-group-card="${group.id}"><div><strong>${escapeHtml(group.name)}</strong><p>${escapeHtml(group.description || '暂无说明')}</p><span>${group.members.map((member) => escapeHtml(member.name)).join('、')}</span></div><div class="cell-actions"><button class="btn btn-secondary btn-sm" data-export-selection-group="${group.id}">${icon('file-spreadsheet')}导出卡片</button><button class="btn btn-secondary btn-sm" data-edit-selection-group="${group.id}">${icon('pencil')}编辑</button><button class="btn btn-danger btn-sm" data-delete-selection-group="${group.id}">${icon('trash-2')}删除</button></div></section>`).join('') : emptyState('users-round', '暂无预设群组', '新建群组后，可在选人界面一键添加成员');
+  const groupList = groups.length ? groups.map((group) => `<section class="selection-group-item" data-selection-group-card="${group.id}"><div><strong>${escapeHtml(group.name)}</strong><p>${escapeHtml(group.description || '暂无说明')}</p><span>${group.members.map((member) => escapeHtml(member.name)).join('、')}</span></div><div class="cell-actions"><button class="btn btn-secondary btn-sm" data-edit-selection-group="${group.id}">${icon('pencil')}编辑</button><button class="btn btn-danger btn-sm" data-delete-selection-group="${group.id}">${icon('trash-2')}删除</button></div></section>`).join('') : emptyState('users-round', '暂无预设群组', '新建群组后，可在选人界面一键添加成员');
   const modal = openModal('预设学生群组', `<div class="toolbar"><div class="search-field">${icon('search')}<input id="selection-group-search" placeholder="按成员姓名搜索"></div><div class="toolbar-spacer"></div><button class="btn btn-primary" id="create-selection-group">${icon('plus')}新建群组</button></div><div class="selection-group-list">${groupList}</div>`, { wide: true });
   modal.querySelector('#selection-group-search').addEventListener('input', (event) => {
     const query = event.target.value.trim().toLowerCase();
@@ -1873,13 +1903,8 @@ function showSelectionGroups() {
     });
   });
   modal.querySelector('#create-selection-group').addEventListener('click', () => showSelectionGroupForm());
-  modal.querySelectorAll('[data-export-selection-group]').forEach((button) => button.addEventListener('click', () => downloadSelectionGroupCards(groups.find((group) => group.id === Number(button.dataset.exportSelectionGroup)), button)));
   modal.querySelectorAll('[data-edit-selection-group]').forEach((button) => button.addEventListener('click', () => showSelectionGroupForm(groups.find((group) => group.id === Number(button.dataset.editSelectionGroup)))));
   modal.querySelectorAll('[data-delete-selection-group]').forEach((button) => button.addEventListener('click', () => showDeleteSelectionGroup(groups.find((group) => group.id === Number(button.dataset.deleteSelectionGroup)))));
-}
-
-function downloadSelectionGroupCards(group, button) {
-  return downloadExport(`/api/admin/student-selection-groups/${group.id}/cards/export`, `group-${group.id}-cards.xlsx`, '群组卡片已导出', button);
 }
 
 function showSelectionGroupForm(group = null) {
