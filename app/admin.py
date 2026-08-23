@@ -3,7 +3,6 @@ import json
 import re
 from datetime import date
 from typing import Annotated
-from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
@@ -988,6 +987,7 @@ def validate_selection_group(db: Session, body: dict) -> tuple[str, str, list[in
 
 
 GROUP_CARD_HEADERS = [
+    "所属预设学生群组",
     "登录标识",
     "姓名",
     "年级",
@@ -1027,7 +1027,7 @@ GROUP_CARD_HEADERS = [
 def group_card_rows(db: Session, group_id: int) -> list[dict]:
     return all_rows(
         db,
-        """SELECT u.login_identifier,u.name,u.grade,u.gender,u.major,u.status AS user_status,
+        """SELECT u.id AS user_id,u.login_identifier,u.name,u.grade,u.gender,u.major,u.status AS user_status,
         c.id AS card_id,c.status AS card_status,c.avatar_url,c.origin_province,c.origin_city,c.clothing_size,
         c.one_sentence_intro,c.personality_text,c.self_acknowledged_shortcoming,c.roommate_personality_text,
         c.interests_text,c.summer_temp_min,c.summer_temp_max,c.winter_temp_min,c.winter_temp_max,
@@ -1041,11 +1041,21 @@ def group_card_rows(db: Session, group_id: int) -> list[dict]:
     )
 
 
-def group_card_workbook(group_name: str, rows: list[dict]) -> bytes:
+def selected_group_card_rows(db: Session, groups: list[dict]) -> list[dict]:
+    rows_by_user = {}
+    for group in groups:
+        for row in group_card_rows(db, group["id"]):
+            if row["user_id"] in rows_by_user:
+                rows_by_user[row["user_id"]]["group_names"].append(group["name"])
+            else:
+                rows_by_user[row["user_id"]] = {**row, "group_names": [group["name"]]}
+    return sorted(rows_by_user.values(), key=lambda row: (row["name"], row["login_identifier"]))
+
+
+def group_card_workbook(rows: list[dict]) -> bytes:
     workbook = Workbook()
     sheet = workbook.active
-    safe_title = re.sub(r"[\\/*?:\[\]]", "_", group_name).strip()[:31]
-    sheet.title = safe_title or "群组卡片"
+    sheet.title = "群组卡片"
     sheet.append(GROUP_CARD_HEADERS)
     cleanliness_labels = {
         "BASIC": "乱中有序自由整理，不产生异味或虫害即可",
@@ -1077,6 +1087,7 @@ def group_card_workbook(group_name: str, rows: list[dict]) -> bytes:
         values = {field: spreadsheet_text(row[field]) for field in text_fields}
         sheet.append(
             [
+                spreadsheet_text("、".join(row["group_names"])),
                 values["login_identifier"],
                 values["name"],
                 values["grade"],
@@ -1117,38 +1128,48 @@ def group_card_workbook(group_name: str, rows: list[dict]) -> bytes:
     return output.getvalue()
 
 
-@router.get("/student-selection-groups/{group_id}/cards/export")
-def export_selection_group_cards(group_id: int, request: Request, db: DB) -> StreamingResponse:
+@router.post("/roommate-cards/export")
+def export_selection_group_cards(request: Request, body: dict, db: DB) -> StreamingResponse:
     admin = admin_user(request, db)
     grant = require_super_admin(admin)
-    group = one(db, SELECTION_GROUP_BY_ID, {"id": group_id})
-    if not group:
-        raise ApiError(404, "SELECTION_GROUP_NOT_FOUND", SELECTION_GROUP_NOT_FOUND_MESSAGE)
-    rows = group_card_rows(db, group_id)
-    workbook = group_card_workbook(group["name"], rows)
+    values = body.get("groupIds")
+    group_ids = sorted({int(value) for value in values if str(value).isdigit()}) if isinstance(values, list) else []
+    if not group_ids:
+        raise ApiError(400, "SELECTION_GROUPS_REQUIRED", "请至少选择一个预设学生群组")
+    if len(group_ids) > 50:
+        raise ApiError(400, "TOO_MANY_SELECTION_GROUPS", "一次最多导出 50 个预设学生群组")
+    groups = []
+    for group_id in group_ids:
+        group = one(db, SELECTION_GROUP_BY_ID, {"id": group_id})
+        if not group:
+            raise ApiError(404, "SELECTION_GROUP_NOT_FOUND", SELECTION_GROUP_NOT_FOUND_MESSAGE)
+        groups.append(group)
+    rows = selected_group_card_rows(db, groups)
+    workbook = group_card_workbook(rows)
     audit(
         db,
         admin,
         request,
         "EXPORT_STUDENT_GROUP_CARDS",
-        "STUDENT_SELECTION_GROUP",
-        group_id,
+        "STUDENT_SELECTION_GROUP_COLLECTION",
+        ",".join(map(str, group_ids)),
         metadata={
-            "groupName": group["name"],
+            "groupIds": group_ids,
+            "groupNames": [group["name"] for group in groups],
+            "groupCount": len(groups),
             "memberCount": len(rows),
+            "membershipCount": sum(len(row["group_names"]) for row in rows),
             "cardCount": sum(row["card_id"] is not None for row in rows),
         },
         grant=grant,
     )
     db.commit()
-    safe_name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", group["name"]).strip(" .")[:60] or f"group-{group_id}"
     today = date.today().isoformat()
-    unicode_filename = quote(f"{safe_name}-cards-{today}.xlsx")
-    fallback = f"group-{group_id}-cards-{today}.xlsx"
+    filename = f"selected-group-cards-{today}.xlsx"
     return StreamingResponse(
         io.BytesIO(workbook),
         media_type=XLSX_MEDIA_TYPE,
-        headers={"Content-Disposition": f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{unicode_filename}"},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
