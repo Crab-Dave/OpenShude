@@ -186,7 +186,7 @@ def card_input(body: dict) -> dict:
 
 @router.get("/avatars/{filename}")
 def avatar_file(filename: str, request: Request, db: DB) -> FileResponse:
-    require_user(current_user(request, db))
+    current_user(request, db)
     match = AVATAR_URL_PATTERN.fullmatch(f"/api/avatars/{filename}")
     if not match:
         raise ApiError(404, "AVATAR_NOT_FOUND", AVATAR_NOT_FOUND_MESSAGE)
