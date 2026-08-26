@@ -3,6 +3,8 @@ const modalRoot = document.querySelector('#modal-root');
 const toastRoot = document.querySelector('#toast-root');
 const API_PATH_CHARACTERS = 'abcdefghijklmnopqrstuvwxyz0123456789-';
 const API_QUERY_CHARACTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~%=&+*';
+const DEFAULT_AVATAR_URL = '/assets/avatar-1.png';
+const AVATAR_CACHE_VERSION = '20260826';
 
 const state = {
   user: null,
@@ -71,9 +73,18 @@ function statusBadge(text, type, iconName = 'circle-dot') {
 }
 
 function avatar(url, name, size = '') {
-  const safe = url || '/assets/avatar-1.png';
-  return `<img class="avatar ${size}" src="${escapeHtml(safe)}" alt="${escapeHtml(name)}的头像">`;
+  const safe = url || DEFAULT_AVATAR_URL;
+  const source = safe.startsWith('/api/avatars/') ? `${safe}?v=${AVATAR_CACHE_VERSION}` : safe;
+  return `<img class="avatar ${size}" src="${escapeHtml(source)}" alt="${escapeHtml(name)}的头像">`;
 }
+
+function replaceBrokenAvatar(event) {
+  const image = event.target;
+  if (!(image instanceof HTMLImageElement) || !image.classList.contains('avatar')) return;
+  if (image.getAttribute('src') !== DEFAULT_AVATAR_URL) image.src = DEFAULT_AVATAR_URL;
+}
+
+document.addEventListener('error', replaceBrokenAvatar, true);
 
 function toast(message, kind = 'success') {
   const item = document.createElement('div');

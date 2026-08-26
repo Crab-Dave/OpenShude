@@ -67,6 +67,22 @@ let browser;
 
   await login(desktop, '2026001', 'Student123!');
   await desktop.waitForSelector('.roommate-card');
+  const avatarRecovery = await desktop.evaluate(() => {
+    const host = document.createElement('div');
+    host.innerHTML = avatar(`/api/avatars/${'0'.repeat(64)}.png`, '头像恢复测试');
+    document.body.append(host);
+    const image = host.querySelector('img');
+    const initialSource = image.getAttribute('src');
+    image.dispatchEvent(new Event('error'));
+    const fallbackSource = image.getAttribute('src');
+    image.dispatchEvent(new Event('error'));
+    const repeatedFallbackSource = image.getAttribute('src');
+    host.remove();
+    return { initialSource, fallbackSource, repeatedFallbackSource };
+  });
+  assert.match(avatarRecovery.initialSource, /^\/api\/avatars\/[0-9a-f]{64}\.png\?v=20260826$/);
+  assert.equal(avatarRecovery.fallbackSource, '/assets/avatar-1.png');
+  assert.equal(avatarRecovery.repeatedFallbackSource, '/assets/avatar-1.png');
   const authenticationCookies = await desktop.context().cookies(`${baseUrl}/api/auth/refresh`);
   const accessCookie = authenticationCookies.find((cookie) => cookie.name === 'access_token');
   const refreshCookie = authenticationCookies.find((cookie) => cookie.name === 'refresh_token');
