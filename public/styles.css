@@ -481,6 +481,27 @@ input:disabled { color: #62586d; background: #f0edf4; cursor: not-allowed; }
 .treehole-detail > header > div { display: flex; align-items: center; gap: 9px; }
 .treehole-author { color: var(--muted); font-weight: 700; }
 .treehole-body { margin: 22px 0; color: #382d43; font-size: 16px; line-height: 1.82; overflow-wrap: anywhere; }
+.treehole-body h1, .treehole-body h2, .treehole-body h3, .treehole-body h4, .treehole-body h5, .treehole-body h6 { margin: 26px 0 12px; color: #2d1c3e; line-height: 1.4; }
+.treehole-body h1 { margin-top: 0; font-size: 26px; }
+.treehole-body h2 { font-size: 22px; }
+.treehole-body h3 { font-size: 19px; }
+.treehole-body p { margin: 0 0 14px; }
+.treehole-body p:last-child { margin-bottom: 0; }
+.treehole-body ul, .treehole-body ol { margin: 0 0 16px; padding-left: 26px; }
+.treehole-body li + li { margin-top: 5px; }
+.treehole-body blockquote { margin: 18px 0; padding: 2px 0 2px 16px; border-left: 3px solid var(--accent); color: var(--muted); }
+.treehole-body blockquote p:last-child { margin-bottom: 0; }
+.treehole-body a { color: var(--primary); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.treehole-body code { padding: 2px 5px; border-radius: 4px; color: #6d2f89; background: var(--primary-soft); font-size: .9em; }
+.treehole-body pre { margin: 18px 0; padding: 14px; overflow-x: auto; border-radius: 6px; color: #f2edf6; background: #261c2e; }
+.treehole-body pre code { padding: 0; color: inherit; background: transparent; }
+.treehole-body table { width: 100%; margin: 18px 0; border-collapse: collapse; }
+.treehole-body th, .treehole-body td { padding: 8px 10px; border: 1px solid var(--line); text-align: left; }
+.treehole-body th { background: var(--surface-soft); }
+.treehole-body del, .treehole-body s { color: var(--muted); }
+.field-label-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.treehole-markdown-preview { min-height: 188px; margin-top: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 6px; background: #fcfbfd; }
+.treehole-markdown-preview[hidden] { display: none; }
 .treehole-unavailable { min-height: 150px; display: grid; place-content: center; justify-items: center; color: var(--muted); }
 .treehole-unavailable svg { width: 30px; }
 .treehole-discussion { margin: 24px -20px -20px; padding: 22px 20px 2px; border-top: 1px solid var(--line); background: #fcfbfd; }

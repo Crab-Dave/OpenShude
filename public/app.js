@@ -583,7 +583,7 @@ function treeholeStatus(post) {
 }
 
 function treeholePublicCard(post) {
-  const summarySuffix = post.summary?.length >= 220 ? '…' : '';
+  const summarySuffix = post.summaryTruncated ? '…' : '';
   return `<article class="treehole-card" data-treehole-post="${post.id}" tabindex="0">
     <div class="treehole-card-head"><span class="treehole-symbol">${icon('trees')}</span><div><h2>${escapeHtml(post.title)}</h2><p>匿名 1 号 · 楼主</p></div></div>
     <p class="treehole-summary">${plainText(post.summary)}${summarySuffix}</p>
@@ -725,9 +725,9 @@ async function showTreeholeDetail(postId) {
     if (state.user.accountType === 'USER' && post.moderationStatus === 'NORMAL') {
       actions.push(`<button class="btn btn-quiet" data-treehole-report-post>${icon('flag')}举报</button>`);
     }
-    const postContent = post.content == null
+    const postContent = post.contentHtml == null
       ? `<div class="treehole-unavailable">${icon('eye-off')}<p>${escapeHtml(post.moderationReason || '该内容当前不可见')}</p></div>`
-      : `<p class="treehole-body">${plainText(post.content)}</p>`;
+      : `<div class="treehole-body">${post.contentHtml}</div>`;
     const discussion = treeholeDiscussion(post) || '<p class="field-hint">还没有交流内容</p>';
     const commentForm = canComment
       ? `<form id="treehole-comment-form" class="treehole-comment-form"><label for="treehole-comment-content">写下你的想法</label><textarea id="treehole-comment-content" name="content" maxlength="2000" required></textarea><button class="btn btn-primary">${icon('send')}发表评论</button></form>`
@@ -768,9 +768,33 @@ function showTreeholeReply(commentId, postId) {
 }
 
 function showTreeholeEditor(post = null) {
-  const modal = openModal(post ? '编辑树洞' : '写一篇树洞', `<form id="treehole-editor"><div class="form-grid"><div class="form-field full"><label>标题</label><input name="title" minlength="2" maxlength="80" value="${escapeHtml(post?.title || '')}" required></div><div class="form-field full"><label>正文</label><textarea name="content" minlength="10" maxlength="5000" rows="10" required>${escapeHtml(post?.content || '')}</textarea><span class="field-hint">请不要填写姓名、联系方式等可识别身份的信息。帖子会先以私密状态与管理员交流。</span></div></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary">${icon('save')}${post ? '保存修改' : '发布私密帖'}</button></div></form>`, { wide: true });
+  const modal = openModal(post ? '编辑树洞' : '写一篇树洞', `<form id="treehole-editor"><div class="form-grid"><div class="form-field full"><label>标题</label><input name="title" minlength="2" maxlength="80" value="${escapeHtml(post?.title || '')}" required></div><div class="form-field full"><div class="field-label-row"><label for="treehole-editor-content">正文</label><button type="button" class="btn btn-quiet btn-sm" data-treehole-preview>${icon('eye')}预览</button></div><textarea id="treehole-editor-content" name="content" minlength="10" maxlength="5000" rows="10" required>${escapeHtml(post?.content || '')}</textarea><div class="treehole-body treehole-markdown-preview" data-treehole-preview-area hidden></div><span class="field-hint">支持常用 Markdown（标题、列表、引用、表格、代码和链接），不会执行 HTML 或图片。请不要填写姓名、联系方式等可识别身份的信息。帖子会先以私密状态与管理员交流。</span></div></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary">${icon('save')}${post ? '保存修改' : '发布私密帖'}</button></div></form>`, { wide: true });
   modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
-  modal.querySelector('#treehole-editor').addEventListener('submit', async (event) => {
+  const editor = modal.querySelector('#treehole-editor');
+  const contentInput = editor.querySelector('[name="content"]');
+  const previewButton = editor.querySelector('[data-treehole-preview]');
+  const previewArea = editor.querySelector('[data-treehole-preview-area]');
+  previewButton.addEventListener('click', () => {
+    if (previewButton.dataset.previewing === 'true') {
+      previewArea.hidden = true;
+      contentInput.hidden = false;
+      previewButton.innerHTML = `${icon('eye')}预览`;
+      previewButton.dataset.previewing = 'false';
+      return;
+    }
+    previewButton.disabled = true;
+    api('/api/treehole/markdown/preview', { method: 'POST', body: JSON.stringify({ content: contentInput.value }) })
+      .then(({ html }) => {
+        previewArea.innerHTML = html;
+        previewArea.hidden = false;
+        contentInput.hidden = true;
+        previewButton.innerHTML = `${icon('pencil')}返回编辑`;
+        previewButton.dataset.previewing = 'true';
+      })
+      .catch((error) => toast(error.message, 'error'))
+      .finally(() => { previewButton.disabled = false; });
+  });
+  editor.addEventListener('submit', async (event) => {
     event.preventDefault();
     try {
       const target = post ? `/api/treehole/posts/${post.id}` : '/api/treehole/posts';
@@ -1391,8 +1415,8 @@ function adminTreeholeReplyCard(post) {
   const status = post.reviewed_at
     ? statusBadge('已回复', 'active', 'badge-check')
     : statusBadge('等待回复', 'pending', 'clock-3');
-  const summarySuffix = post.content.length > 180 ? '…' : '';
-  return `<article class="panel treehole-admin-item" data-admin-treehole-post="${post.id}" tabindex="0"><div class="treehole-item-status">${status}<span>${escapeHtml(post.author_name)} · ${escapeHtml(post.author_grade)} · ${formatDate(post.created_at)}</span></div><h2>${escapeHtml(post.title)}</h2><p>${plainText(post.content.slice(0, 180))}${summarySuffix}</p><footer>${post.comment_count} 条交流</footer></article>`;
+  const summarySuffix = post.summaryTruncated ? '…' : '';
+  return `<article class="panel treehole-admin-item" data-admin-treehole-post="${post.id}" tabindex="0"><div class="treehole-item-status">${status}<span>${escapeHtml(post.author_name)} · ${escapeHtml(post.author_grade)} · ${formatDate(post.created_at)}</span></div><h2>${escapeHtml(post.title)}</h2><p>${escapeHtml(post.summary || '')}${summarySuffix}</p><footer>${post.comment_count} 条交流</footer></article>`;
 }
 
 function treeholeGradeOptions(grades, selectedGradeId) {
@@ -1454,9 +1478,9 @@ function adminTreeholeContentCard(post) {
     ? statusBadge(labels.treeholeModeration[post.moderation_status], post.moderation_status.toLowerCase(), 'message-circle')
     : treeholeStatus(post);
   const title = post.content_type === 'COMMENT' ? `评论 #${post.id} · ${post.title}` : post.title;
-  const summarySuffix = post.content?.length > 180 ? '…' : '';
+  const summarySuffix = post.summaryTruncated ? '…' : '';
   const moderationReason = post.moderation_reason ? `<footer>${escapeHtml(post.moderation_reason)}</footer>` : '';
-  return `<article class="panel treehole-admin-item" data-admin-treehole-post="${post.post_id || post.id}" tabindex="0"><div class="treehole-item-status">${status}<span>${escapeHtml(post.author_name || '已删除账号')} · ${escapeHtml(post.author_grade || '-')} · ${formatDate(post.updated_at)}</span></div><h2>${escapeHtml(title || '[已删除]')}</h2><p>${plainText((post.content || '').slice(0, 180))}${summarySuffix}</p>${moderationReason}</article>`;
+  return `<article class="panel treehole-admin-item" data-admin-treehole-post="${post.post_id || post.id}" tabindex="0"><div class="treehole-item-status">${status}<span>${escapeHtml(post.author_name || '已删除账号')} · ${escapeHtml(post.author_grade || '-')} · ${formatDate(post.updated_at)}</span></div><h2>${escapeHtml(title || '[已删除]')}</h2><p>${escapeHtml(post.summary || '')}${summarySuffix}</p>${moderationReason}</article>`;
 }
 
 function treeholeFilterOptions(entries, selectedValue) {
@@ -1577,7 +1601,7 @@ async function showAdminTreeholeDetail(postId) {
     const canReply = hasScopedPermission('TREEHOLE_PRIVATE_REPLY', post.managementGradeId)
       && post.moderationStatus === 'NORMAL' && post.visibility !== 'WITHDRAWN';
     const canModerate = hasScopedPermission('TREEHOLE_MODERATE', post.managementGradeId);
-    const postContent = post.content ? plainText(post.content) : '<span class="field-hint">正文已删除</span>';
+    const postContent = post.contentHtml || '<span class="field-hint">正文已删除</span>';
     const moderationReason = post.moderationReason
       ? `<p class="field-hint">治理原因：${escapeHtml(post.moderationReason)}</p>`
       : '';
@@ -1587,7 +1611,7 @@ async function showAdminTreeholeDetail(postId) {
     const replyForm = canReply
       ? `<form id="official-treehole-reply" class="treehole-comment-form"><label>正式管理员回复</label><textarea name="content" maxlength="2000" required></textarea><button class="btn btn-primary">${icon('send')}提交正式回复</button></form>`
       : '';
-    const detail = `<article class="treehole-detail admin"><header><div>${treeholeStatus(post)}<span class="treehole-author">${escapeHtml(post.author.name)} · ${escapeHtml(post.author.grade)}</span></div><time>${formatDate(post.createdAt)}</time></header><p class="treehole-body">${postContent}</p>${moderationReason}<div class="detail-actions">${actions}</div></article>`;
+    const detail = `<article class="treehole-detail admin"><header><div>${treeholeStatus(post)}<span class="treehole-author">${escapeHtml(post.author.name)} · ${escapeHtml(post.author.grade)}</span></div><time>${formatDate(post.createdAt)}</time></header><div class="treehole-body">${postContent}</div>${moderationReason}<div class="detail-actions">${actions}</div></article>`;
     const discussion = `<section class="treehole-discussion"><div class="section-heading"><div><h2>交流记录</h2><p>管理员真实身份不会在公开树洞显示</p></div></div>${comments}${replyForm}</section>`;
     const modal = openModal(post.title || '[已删除]', detail + discussion, { wide: true });
     modal.querySelector('#official-treehole-reply')?.addEventListener('submit', async (event) => {
