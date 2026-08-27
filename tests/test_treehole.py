@@ -136,6 +136,62 @@ def test_private_review_publish_and_anonymous_public_discussion(client: TestClie
     assert client.post(f"/api/treehole/posts/{post_id}/publish").status_code == 200
 
 
+def test_treehole_post_markdown_is_safely_rendered_and_summarized(client: TestClient):
+    configure_author_grade(client)
+    login(client, "2026001")
+    markdown = """# 给自己的提醒
+第一行
+第二行
+
+- **慢一点**也没关系
+- ~~不必比较~~
+
+> 先照顾好自己的节奏。
+
+| 本周 | 目标 |
+| --- | --- |
+| 作息 | 稳定 |
+
+`记录`和[安全链接](https://example.com "示例")。
+[危险链接](javascript:alert(1))
+![跟踪图片](https://example.com/tracker.png)
+<img src=x onerror=alert(1)><script>alert(2)</script>
+"""
+    created = client.post("/api/treehole/posts", json={"title": "Markdown 安全测试", "content": markdown})
+    assert created.status_code == 201, created.text
+    post = created.json()["post"]
+    assert post["content"] == markdown.strip()
+    rendered = post["contentHtml"]
+    assert all(fragment in rendered for fragment in ("<h1>", "<br>", "<strong>", "<s>", "<blockquote>", "<table>"))
+    assert 'href="https://example.com"' in rendered
+    assert 'rel="noopener noreferrer nofollow"' in rendered
+    assert 'href="javascript:' not in rendered
+    assert all(fragment not in rendered for fragment in ("<img", "<script"))
+    assert "&lt;img" in rendered
+
+    preview = client.post("/api/treehole/markdown/preview", json={"content": markdown})
+    assert preview.status_code == 200
+    assert preview.json()["html"] == rendered
+    assert client.post("/api/treehole/markdown/preview", json={"content": "x" * 5001}).status_code == 400
+
+    post_id = post["id"]
+    login(client, "admin", "Admin123!")
+    admin_detail = client.get(f"/api/admin/treehole/posts/{post_id}").json()["post"]
+    assert admin_detail["contentHtml"] == rendered
+    assert (
+        client.post(f"/api/admin/treehole/posts/{post_id}/comments", json={"content": "完成安全渲染检查。"}).status_code
+        == 201
+    )
+    login(client, "2026001")
+    assert client.post(f"/api/treehole/posts/{post_id}/publish").status_code == 200
+    login(client, "2026002")
+    listing = client.get("/api/treehole/posts").json()["posts"]
+    summary = next(item for item in listing if item["id"] == post_id)
+    assert summary["summaryTruncated"] is False
+    assert "给自己的提醒 第一行 第二行 慢一点也没关系" in summary["summary"]
+    assert all(marker not in summary["summary"] for marker in ("#", "**", "~~"))
+
+
 def test_scoped_permissions_and_author_grade_configuration(client: TestClient):
     configure_author_grade(client)
     post_id = create_reviewed_post(client)
@@ -193,6 +249,7 @@ def test_moderation_hides_content_and_preserves_audit(client: TestClient):
     login(client, "2026001")
     hidden_detail = client.get(f"/api/treehole/posts/{post_id}").json()["post"]
     assert hidden_detail["title"] is None
+    assert hidden_detail["contentHtml"] is None
     assert hidden_detail["comments"] == []
     login(client, "2026002")
     assert client.get(f"/api/treehole/posts/{post_id}").status_code == 404

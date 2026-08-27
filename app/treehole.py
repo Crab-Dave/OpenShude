@@ -1,7 +1,10 @@
+import html
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 
+import nh3
 from fastapi import APIRouter, Depends, Query, Request
+from markdown_it import MarkdownIt
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -28,6 +31,54 @@ admin_router = APIRouter(prefix="/api/admin/treehole")
 DB = Annotated[Session, Depends(get_db)]
 POST_NOT_FOUND = "树洞帖子不存在"
 COMMENT_NOT_FOUND = "评论不存在"
+TREEHOLE_MARKDOWN_TAGS = {
+    "a",
+    "blockquote",
+    "br",
+    "code",
+    "del",
+    "em",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "hr",
+    "li",
+    "ol",
+    "p",
+    "pre",
+    "s",
+    "strong",
+    "table",
+    "tbody",
+    "td",
+    "th",
+    "thead",
+    "tr",
+    "ul",
+}
+TREEHOLE_MARKDOWN = MarkdownIt(
+    "commonmark", {"html": False, "linkify": False, "typographer": False, "breaks": True}
+).enable(["table", "strikethrough"])
+
+
+def render_post_markdown(content: str) -> str:
+    return nh3.clean(
+        TREEHOLE_MARKDOWN.render(content),
+        tags=TREEHOLE_MARKDOWN_TAGS,
+        attributes={"a": {"href", "title"}},
+        url_schemes={"http", "https", "mailto"},
+        link_rel="noopener noreferrer nofollow",
+    )
+
+
+def post_markdown_summary(content: str, limit: int) -> tuple[str, bool]:
+    rendered = render_post_markdown(content)
+    plain = html.unescape(nh3.clean(rendered, tags=set(), attributes={}, url_schemes=set()))
+    normalized = " ".join(plain.split())
+    return normalized[:limit], len(normalized) > limit
 
 
 def prune_treehole_report_snapshots(db: Session) -> int:
@@ -128,10 +179,12 @@ def comments_for_post(db: Session, post_id: int, user_id: int, management: bool 
 def post_payload(db: Session, post: dict, user: dict, management: bool = False) -> dict:
     own = post["author_id"] == user["id"]
     unavailable = post["moderation_status"] != "NORMAL"
+    content = None if unavailable and not management else post["content"]
     payload = {
         "id": post["id"],
         "title": None if unavailable and not management else post["title"],
-        "content": None if unavailable and not management else post["content"],
+        "content": content,
+        "contentHtml": render_post_markdown(content) if content is not None else None,
         "visibility": post["visibility"],
         "moderationStatus": post["moderation_status"],
         "reviewedAt": post["reviewed_at"],
@@ -256,6 +309,17 @@ def enforce_management_rate(request: Request, user_id: int) -> None:
     enforce_rate_limit("treehole-management-ip", ip_address, 120, 60, "TREEHOLE_MANAGEMENT_RATE_LIMITED")
 
 
+@router.post("/markdown/preview")
+def preview_markdown(request: Request, body: dict, db: DB) -> dict:
+    user = current_user(request, db)
+    active_student(user)
+    ip_address = request.client.host if request.client else "unknown"
+    enforce_rate_limit("treehole-preview-user", str(user["id"]), 30, 60, "TREEHOLE_PREVIEW_RATE_LIMITED")
+    enforce_rate_limit("treehole-preview-ip", ip_address, 120, 60, "TREEHOLE_PREVIEW_RATE_LIMITED")
+    content = validated_text(body.get("content"), 0, 5000, "正文")
+    return {"html": render_post_markdown(content) if content else ""}
+
+
 @router.get("/posts")
 def public_posts(
     request: Request,
@@ -272,7 +336,7 @@ def public_posts(
         cursor_clause = "AND (p.published_at<:cursor_time OR (p.published_at=:cursor_time AND p.id<:cursor_id))"
     rows = all_rows(
         db,
-        f"""SELECT p.id,p.title,substr(p.content,1,220) AS summary,p.published_at,p.updated_at,
+        f"""SELECT p.id,p.title,p.content AS summary,p.published_at,p.updated_at,
           COALESCE(comment_counts.total,0) AS comment_count
         FROM treehole_posts p LEFT JOIN (
           SELECT post_id,COUNT(*) AS total FROM treehole_comments
@@ -284,6 +348,8 @@ def public_posts(
     )
     has_more = len(rows) > limit
     rows = rows[:limit]
+    for row in rows:
+        row["summary"], row["summaryTruncated"] = post_markdown_summary(row["summary"], 220)
     next_cursor = f"{rows[-1]['published_at']}|{rows[-1]['id']}" if has_more and rows else None
     eligible = bool(
         user["account_type"] == "USER"
@@ -633,6 +699,8 @@ def private_posts(
     )
     has_more = len(rows) > limit
     rows = rows[:limit]
+    for row in rows:
+        row["summary"], row["summaryTruncated"] = post_markdown_summary(row["content"], 180)
     return {"posts": rows, "nextBeforeId": rows[-1]["id"] if has_more and rows else None}
 
 
@@ -718,6 +786,12 @@ def managed_content(
     rows = all_rows(db, query, params)
     has_more = len(rows) > limit
     rows = rows[:limit]
+    for row in rows:
+        if row["content_type"] == "POST":
+            row["summary"], row["summaryTruncated"] = post_markdown_summary(row["content"], 180)
+        else:
+            summary = " ".join((row["content"] or "").split())
+            row["summary"], row["summaryTruncated"] = summary[:180], len(summary) > 180
     return {"posts": rows, "nextBeforeId": rows[-1]["id"] if has_more and rows else None}
 
 
