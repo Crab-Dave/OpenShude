@@ -454,6 +454,11 @@ def main() -> None:
         )
         for index in range(16):
             published_at = f"2026-08-09T01:{index:02d}:00.000Z"
+            content = (
+                "## 慢慢适应\n\n**先照顾好自己**，再处理新的选择。\n\n> 成长没有统一进度。"
+                if index == 15
+                else "进入大学以后遇到了一些新的选择，也在慢慢学习怎样照顾自己的节奏。"
+            )
             post_id = db.execute(
                 text(
                     """INSERT INTO treehole_posts(author_id,management_grade_id,title,content,visibility,
@@ -465,7 +470,7 @@ def main() -> None:
                     "author": student_ids["2026001"],
                     "grade": grade_ids["2026级"],
                     "title": f"匿名成长记录 {index + 1}",
-                    "content": "进入大学以后遇到了一些新的选择，也在慢慢学习怎样照顾自己的节奏。",
+                    "content": content,
                     "published": published_at,
                     "admin": admin_id,
                 },
