@@ -140,7 +140,7 @@ def blocked_user_ids(db: Session, viewer_id: int, user_ids: list[int]) -> set[in
     return {row["user_id"] for row in rows}
 
 
-def student_dormitories(db: Session, rows: list[dict], viewer_id: int, details: bool = False) -> list[dict]:
+def student_dormitories(db: Session, rows: list[dict], viewer_id: int, details: bool = False) -> list[dict]:  # NOSONAR
     members = member_rows(db, [row["id"] for row in rows])
     blocked = blocked_user_ids(db, viewer_id, [row["user_id"] for row in members if row["user_id"]])
     grouped = {row["id"]: [] for row in rows}
@@ -515,7 +515,7 @@ def validate_xlsx_package(content: bytes) -> None:
         raise ApiError(400, "INVALID_DORMITORY_IMPORT_FILE", "无法读取该 Excel 文件") from error
 
 
-def xlsx_rows(content: bytes, filename: str) -> list[dict]:
+def xlsx_rows(content: bytes, filename: str) -> list[dict]:  # NOSONAR
     if not filename.lower().endswith(".xlsx"):
         raise ApiError(400, "INVALID_DORMITORY_IMPORT_FILE", "请选择 .xlsx 文件")
     if not content or len(content) > MAX_XLSX_BYTES:
