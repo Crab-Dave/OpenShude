@@ -43,6 +43,20 @@ REQUIRED_CHECKS = {
         "moderation_status IN ('NORMAL','HIDDEN','DELETED')",
     ),
     "treehole_participants": ("alias_number > 0",),
+    "official_dormitories": (
+        "nickname_status IN ('NORMAL','HIDDEN')",
+        "description_status IN ('NORMAL','HIDDEN')",
+        "rules_status IN ('NORMAL','HIDDEN')",
+        "version > 0",
+    ),
+    "official_dormitory_members": (
+        "role IN ('LEADER','MEMBER')",
+        "position BETWEEN 1 AND 4",
+    ),
+    "official_dormitory_revisions": (
+        "field_name IN ('NICKNAME','DESCRIPTION','RULES')",
+        "to_version > from_version",
+    ),
 }
 
 
@@ -162,6 +176,9 @@ def validate_database(filename: Path) -> dict:
         "treehole_posts",
         "treehole_comments",
         "treehole_participants",
+        "official_dormitories",
+        "official_dormitory_members",
+        "official_dormitory_revisions",
         "alembic_version",
     } | set(REQUIRED_CHECKS)
     with closing(sqlite3.connect(filename)) as database:
@@ -196,6 +213,15 @@ def validate_database(filename: Path) -> dict:
               WHERE participant.post_id<>comment.post_id
               OR (parent.id IS NOT NULL AND (parent.post_id<>comment.post_id OR parent.parent_comment_id IS NOT NULL))
               OR (reply_target.id IS NOT NULL AND reply_target.post_id<>comment.post_id)""").fetchone()[0]
+        invalid_official_dormitories = database.execute(
+            """SELECT COUNT(*) FROM (
+              SELECT dormitory.id FROM official_dormitories dormitory
+              LEFT JOIN official_dormitory_members member ON member.official_dormitory_id=dormitory.id
+              GROUP BY dormitory.id
+              HAVING COUNT(member.id) NOT BETWEEN 1 AND 4
+              OR SUM(CASE WHEN member.role='LEADER' THEN 1 ELSE 0 END)<>1
+            )"""
+        ).fetchone()[0]
     missing = sorted(required - tables)
     if (
         quick_check != ["ok"]
@@ -206,6 +232,7 @@ def validate_database(filename: Path) -> dict:
         or oversized
         or duplicate_memberships
         or invalid_treehole_links
+        or invalid_official_dormitories
     ):
         raise RuntimeError(
             "Database validation failed: "
@@ -219,6 +246,7 @@ def validate_database(filename: Path) -> dict:
                     "oversizedDormitories": oversized,
                     "duplicateMemberships": duplicate_memberships,
                     "invalidTreeholeLinks": invalid_treehole_links,
+                    "invalidOfficialDormitories": invalid_official_dormitories,
                 }
             )
         )
