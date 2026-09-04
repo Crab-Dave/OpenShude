@@ -18,6 +18,8 @@ from .config import get_settings
 from .database import SessionLocal
 from .dormitories import router as dormitories_router
 from .errors import ApiError, api_error_handler, validation_error_handler
+from .official_dormitories import admin_router as official_dormitories_admin_router
+from .official_dormitories import router as official_dormitories_router
 from .student import router as student_router
 from .treehole import admin_router as treehole_admin_router
 from .treehole import router as treehole_router
@@ -152,8 +154,13 @@ class SecurityMiddleware:
             if message["type"] == "http.response.start":
                 response_status = message["status"]
                 response_headers = list(message.get("headers", []))
+                protected_page = request.url.path in ("/roommates", "/shudong", "/sude") or request.url.path.startswith(
+                    "/sude/dormitories/"
+                )
                 api_request = (
-                    "avatar" if request.url.path.startswith("/api/avatars/") else request.url.path.startswith("/api/")
+                    "avatar"
+                    if request.url.path.startswith("/api/avatars/")
+                    else (request.url.path.startswith("/api/") or protected_page)
                 )
                 response_headers.extend(response_security_headers(api_request, request_id, response_status))
                 message["headers"] = response_headers
@@ -197,6 +204,8 @@ app.include_router(student_router)
 app.include_router(dormitories_router)
 app.include_router(treehole_router)
 app.include_router(treehole_admin_router)
+app.include_router(official_dormitories_router)
+app.include_router(official_dormitories_admin_router)
 
 
 @app.get("/api/health")
@@ -224,7 +233,7 @@ def static_file(path: str) -> FileResponse:
     generated_page = (generated / path / "index.html").resolve() if path else generated / "index.html"
     if generated_page.is_file() and generated_page.is_relative_to(generated):
         return FileResponse(generated_page)
-    if path in ("login", "roommates", "shudong"):
+    if path in ("login", "roommates", "shudong", "sude") or path.startswith("sude/dormitories/"):
         application = public / "app.html"
         if application.is_file():
             return FileResponse(application)
