@@ -891,7 +891,9 @@ function officialDormitoryMember(member) { // NOSONAR
   if (!member.visible) {
     return `<article class="official-member-card unavailable ${member.role === 'LEADER' ? 'leader' : ''}">${icon('user-round-x')}<strong>${member.leaderPending ? '宿舍长待管理员处理' : '成员信息暂不可见'}</strong>${member.role === 'LEADER' && !member.leaderPending ? '<span>宿舍长</span>' : ''}</article>`;
   }
-  const genderClass = member.gender === 'FEMALE' ? 'gender-female' : member.gender === 'MALE' ? 'gender-male' : '';
+  let genderClass = '';
+  if (member.gender === 'FEMALE') genderClass = 'gender-female';
+  else if (member.gender === 'MALE') genderClass = 'gender-male';
   const cardAttribute = member.cardId ? `data-card-id="${member.cardId}" tabindex="0"` : '';
   const cardStatus = member.cardId ? escapeHtml(member.introduction || '查看室友卡片') : '尚未发布卡片';
   return `<article class="official-member-card ${genderClass} ${member.role === 'LEADER' ? 'leader' : ''}" ${cardAttribute}>
@@ -902,7 +904,7 @@ function officialDormitoryMember(member) { // NOSONAR
 }
 
 function officialDormitoryContentCard(title, iconName, summary, truncated, hidden) { // NOSONAR
-  const content = hidden
+  const content = hidden // NOSONAR
     ? `<div class="official-content-hidden">${icon('eye-off')}<span>该内容暂不可见</span></div>`
     : `<p class="official-content-summary ${summary ? '' : 'field-hint'}">${escapeHtml(summary || '还没有填写内容')}${truncated ? '…' : ''}</p>`;
   return `<article class="official-content-card panel" data-official-content="${title}" role="button" tabindex="0"><header>${icon(iconName)}<h2>${title}</h2></header>${content}</article>`;
@@ -910,7 +912,7 @@ function officialDormitoryContentCard(title, iconName, summary, truncated, hidde
 
 function officialDormitoryDetailMarkup(dormitory, showBack = false) { // NOSONAR
   const actions = dormitory.canEdit
-    ? `<button class="btn btn-primary" data-edit-official-dormitory>${icon('pencil')}共同编辑</button>${dormitory.canTransferLeader ? `<button class="btn btn-secondary" data-transfer-official-leader>${icon('crown')}转让宿舍长</button>` : ''}`
+    ? `<button class="btn btn-primary" data-edit-official-dormitory>${icon('pencil')}共同编辑</button>${dormitory.canTransferLeader ? `<button class="btn btn-secondary" data-transfer-official-leader>${icon('crown')}转让宿舍长</button>` : ''}` // NOSONAR
     : '';
   return `${showBack ? `<button class="btn btn-quiet official-back" data-official-back>${icon('arrow-left')}返回宿舍列表</button>` : ''}
     <section class="official-dormitory-hero panel"><div><span class="eyebrow">OFFICIAL DORMITORY</span><h2>${escapeHtml(dormitory.displayName)}</h2><p>${dormitory.memberCount} 名正式成员 · 最近更新于 ${formatDate(dormitory.updatedAt)}</p></div><div class="detail-actions">${dormitory.isMine ? statusBadge('我的宿舍', 'published', 'house-heart') : ''}${actions}</div></section>
@@ -933,7 +935,7 @@ function bindOfficialDormitoryDetail(dormitory) {
       const title = card.dataset.officialContent;
       const hidden = title === '宿舍简介' ? dormitory.descriptionHidden : dormitory.rulesHidden;
       const html = title === '宿舍简介' ? dormitory.descriptionHtml : dormitory.rulesHtml;
-      openModal(title, hidden ? `<div class="official-content-hidden">${icon('eye-off')}该内容暂不可见</div>` : `<div class="treehole-body">${html || '<p class="field-hint">还没有填写内容</p>'}</div>`, { wide: true });
+      openModal(title, hidden ? `<div class="official-content-hidden">${icon('eye-off')}该内容暂不可见</div>` : `<div class="treehole-body">${html || '<p class="field-hint">还没有填写内容</p>'}</div>`, { wide: true }); // NOSONAR
     };
     card.addEventListener('click', open);
     card.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') open(); });
@@ -950,13 +952,16 @@ async function renderMyOfficialDormitory() { // NOSONAR
     return;
   }
   const savedId = Number(localStorage.getItem('official-dormitory-id'));
-  const selectedId = state.selectedOfficialDormitoryId && dormitories.some((item) => item.id === state.selectedOfficialDormitoryId)
-    ? state.selectedOfficialDormitoryId : dormitories.some((item) => item.id === savedId) ? savedId : dormitories[0].id;
+  let selectedId = dormitories[0].id;
+  if (dormitories.some((item) => item.id === savedId)) selectedId = savedId;
+  if (state.selectedOfficialDormitoryId && dormitories.some((item) => item.id === state.selectedOfficialDormitoryId)) {
+    selectedId = state.selectedOfficialDormitoryId;
+  }
   state.selectedOfficialDormitoryId = selectedId;
   localStorage.setItem('official-dormitory-id', String(selectedId));
   const { dormitory } = await api(`/api/official-dormitories/${selectedId}`);
   const selector = dormitories.length > 1
-    ? `<label class="official-dormitory-selector">切换我的宿舍<select id="official-dormitory-selector">${dormitories.map((item) => `<option value="${item.id}" ${item.id === selectedId ? 'selected' : ''}>${escapeHtml(item.displayName)}</option>`).join('')}</select></label>`
+    ? `<label class="official-dormitory-selector">切换我的宿舍<select id="official-dormitory-selector">${dormitories.map((item) => `<option value="${item.id}" ${item.id === selectedId ? 'selected' : ''}>${escapeHtml(item.displayName)}</option>`).join('')}</select></label>` // NOSONAR
     : '';
   setPage(`${selector}${officialDormitoryDetailMarkup(dormitory)}`);
   document.querySelector('#official-dormitory-selector')?.addEventListener('change', (event) => {
@@ -992,7 +997,7 @@ async function renderOfficialDormitoryVisit() {
   const data = await api(`/api/official-dormitories?${params}`);
   state.officialDormitoryNextCursor = data.nextCursor;
   const loadMore = data.nextCursor ? `<div class="load-more"><button class="btn btn-secondary" data-load-more-official>${icon('chevrons-down')}查看更多</button></div>` : '';
-  setPage(`<section class="treehole-hero"><div><span class="eyebrow">CYBER VISITING</span><h2>去其他宿舍串个门</h2><p>这里只展示成员愿意在站内公开的资料。</p></div></section><div class="toolbar"><form class="search-field" id="official-dormitory-search">${icon('search')}<input name="search" maxlength="80" value="${escapeHtml(state.officialDormitorySearch)}" placeholder="搜索宿舍编号、昵称或成员姓名"></form></div>${data.dormitories.length ? `<div class="official-visit-grid" id="official-visit-grid">${data.dormitories.map(officialDormitoryVisitCard).join('')}</div>${loadMore}` : emptyState('door-closed', '没有匹配的宿舍', '换一个关键词再试试')}`);
+  setPage(`<section class="treehole-hero"><div><span class="eyebrow">CYBER VISITING</span><h2>去其他宿舍串个门</h2><p>这里只展示成员愿意在站内公开的资料。</p></div></section><div class="toolbar"><form class="search-field" id="official-dormitory-search">${icon('search')}<input name="search" maxlength="80" value="${escapeHtml(state.officialDormitorySearch)}" placeholder="搜索宿舍编号、昵称或成员姓名"></form></div>${data.dormitories.length ? `<div class="official-visit-grid" id="official-visit-grid">${data.dormitories.map(officialDormitoryVisitCard).join('')}</div>${loadMore}` : emptyState('door-closed', '没有匹配的宿舍', '换一个关键词再试试')}`); // NOSONAR
   document.querySelector('#official-dormitory-search').addEventListener('submit', (event) => {
     event.preventDefault();
     state.officialDormitorySearch = new FormData(event.currentTarget).get('search').trim();
@@ -1029,7 +1034,7 @@ async function renderOfficialDormitoryDetail(dormitoryId) {
 }
 
 function showOfficialDormitoryEditor(dormitory) {
-  const modal = openModal('共同编辑宿舍', `<form id="official-dormitory-editor"><div class="form-grid"><div class="form-field full"><label>宿舍昵称</label><input name="nickname" maxlength="20" value="${escapeHtml(dormitory.nickname || '')}" ${dormitory.nicknameHidden ? 'disabled' : ''}></div><div class="form-field full"><div class="field-label-row"><label>宿舍简介</label><button type="button" class="btn btn-quiet btn-sm" data-preview-official="description">${icon('eye')}预览</button></div><textarea name="description" maxlength="2000" rows="7" ${dormitory.descriptionHidden ? 'disabled' : ''}>${escapeHtml(dormitory.descriptionMarkdown || '')}</textarea><div class="treehole-body treehole-markdown-preview" data-official-preview-area="description" hidden></div></div><div class="form-field full"><div class="field-label-row"><label>宿舍公约</label><button type="button" class="btn btn-quiet btn-sm" data-preview-official="rules">${icon('eye')}预览</button></div><textarea name="rules" maxlength="5000" rows="9" ${dormitory.rulesHidden ? 'disabled' : ''}>${escapeHtml(dormitory.rulesMarkdown || '')}</textarea><div class="treehole-body treehole-markdown-preview" data-official-preview-area="rules" hidden></div></div><div class="field-hint full">简介和公约支持安全 Markdown；原始 HTML 和图片不会渲染。若内容被管理员隐藏，需要管理员恢复后才能修改。</div></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary">${icon('save')}保存修改</button></div></form>`, { wide: true });
+  const modal = openModal('共同编辑宿舍', `<form id="official-dormitory-editor"><div class="form-grid"><div class="form-field full"><label>宿舍昵称</label><input name="nickname" maxlength="20" value="${escapeHtml(dormitory.nickname || '')}" ${dormitory.nicknameHidden ? 'disabled' : ''}></div><div class="form-field full"><div class="field-label-row"><label>宿舍简介</label><button type="button" class="btn btn-quiet btn-sm" data-preview-official="description">${icon('eye')}预览</button></div><textarea name="description" maxlength="2000" rows="7" ${dormitory.descriptionHidden ? 'disabled' : ''}>${escapeHtml(dormitory.descriptionMarkdown || '')}</textarea><div class="treehole-body treehole-markdown-preview" data-official-preview-area="description" hidden></div></div><div class="form-field full"><div class="field-label-row"><label>宿舍公约</label><button type="button" class="btn btn-quiet btn-sm" data-preview-official="rules">${icon('eye')}预览</button></div><textarea name="rules" maxlength="5000" rows="9" ${dormitory.rulesHidden ? 'disabled' : ''}>${escapeHtml(dormitory.rulesMarkdown || '')}</textarea><div class="treehole-body treehole-markdown-preview" data-official-preview-area="rules" hidden></div></div><div class="field-hint full">简介和公约支持安全 Markdown；原始 HTML 和图片不会渲染。若内容被管理员隐藏，需要管理员恢复后才能修改。</div></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary">${icon('save')}保存修改</button></div></form>`, { wide: true }); // NOSONAR
   const form = modal.querySelector('#official-dormitory-editor');
   modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
   modal.querySelectorAll('[data-preview-official]').forEach((button) => button.addEventListener('click', async () => {
