@@ -885,6 +885,33 @@ def delete_user(user_id: int, request: Request, body: dict, db: DB) -> dict:
     )
     leave_dormitory(db, user_id, reason="管理员永久删除账号")
     timestamp = now()
+    leader_memberships = all_rows(
+        db,
+        """SELECT * FROM official_dormitory_members
+        WHERE user_id=:id AND role='LEADER' ORDER BY official_dormitory_id""",
+        {"id": user_id},
+    )
+    for leader_membership in leader_memberships:
+        successor = one(
+            db,
+            """SELECT member.id FROM official_dormitory_members member JOIN users user ON user.id=member.user_id
+            WHERE member.official_dormitory_id=:dormitory AND member.user_id<>:user
+            AND user.account_type='USER' AND user.status='ACTIVE' ORDER BY member.position LIMIT 1""",
+            {"dormitory": leader_membership["official_dormitory_id"], "user": user_id},
+        )
+        if successor:
+            db.execute(
+                text("UPDATE official_dormitory_members SET role='MEMBER' WHERE id=:id"),
+                {"id": leader_membership["id"]},
+            )
+            db.execute(
+                text("UPDATE official_dormitory_members SET role='LEADER' WHERE id=:id"),
+                {"id": successor["id"]},
+            )
+            db.execute(
+                text("UPDATE official_dormitories SET version=version+1,updated_at=:now WHERE id=:id"),
+                {"id": leader_membership["official_dormitory_id"], "now": timestamp},
+            )
     db.execute(
         text(
             """UPDATE treehole_comments SET content='',moderation_status='DELETED',
@@ -912,6 +939,8 @@ def delete_user(user_id: int, request: Request, body: dict, db: DB) -> dict:
         ("dormitory_selection_rounds", "created_by"),
         ("dormitory_round_participants", "added_by"),
         ("audit_logs", "admin_id"),
+        ("official_dormitories", "created_by"),
+        ("official_dormitory_revisions", "edited_by"),
     )
     for table_name, column in nullable:
         db.execute(text(f"UPDATE {table_name} SET {column}=NULL WHERE {column}=:id"), {"id": user_id})
