@@ -1,10 +1,7 @@
-import html
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 
-import nh3
 from fastapi import APIRouter, Depends, Query, Request
-from markdown_it import MarkdownIt
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -24,6 +21,7 @@ from .common import (
 from .config import get_settings
 from .database import get_db
 from .errors import ApiError
+from .markdown import markdown_summary, render_markdown
 from .rate_limit import enforce_rate_limit
 
 router = APIRouter(prefix="/api/treehole")
@@ -31,54 +29,6 @@ admin_router = APIRouter(prefix="/api/admin/treehole")
 DB = Annotated[Session, Depends(get_db)]
 POST_NOT_FOUND = "树洞帖子不存在"
 COMMENT_NOT_FOUND = "评论不存在"
-TREEHOLE_MARKDOWN_TAGS = {
-    "a",
-    "blockquote",
-    "br",
-    "code",
-    "del",
-    "em",
-    "h1",
-    "h2",
-    "h3",
-    "h4",
-    "h5",
-    "h6",
-    "hr",
-    "li",
-    "ol",
-    "p",
-    "pre",
-    "s",
-    "strong",
-    "table",
-    "tbody",
-    "td",
-    "th",
-    "thead",
-    "tr",
-    "ul",
-}
-TREEHOLE_MARKDOWN = MarkdownIt(
-    "commonmark", {"html": False, "linkify": False, "typographer": False, "breaks": True}
-).enable(["table", "strikethrough"])
-
-
-def render_post_markdown(content: str) -> str:
-    return nh3.clean(
-        TREEHOLE_MARKDOWN.render(content),
-        tags=TREEHOLE_MARKDOWN_TAGS,
-        attributes={"a": {"href", "title"}},
-        url_schemes={"http", "https", "mailto"},
-        link_rel="noopener noreferrer nofollow",
-    )
-
-
-def post_markdown_summary(content: str, limit: int) -> tuple[str, bool]:
-    rendered = render_post_markdown(content)
-    plain = html.unescape(nh3.clean(rendered, tags=set(), attributes={}, url_schemes=set()))
-    normalized = " ".join(plain.split())
-    return normalized[:limit], len(normalized) > limit
 
 
 def prune_treehole_report_snapshots(db: Session) -> int:
@@ -184,7 +134,7 @@ def post_payload(db: Session, post: dict, user: dict, management: bool = False) 
         "id": post["id"],
         "title": None if unavailable and not management else post["title"],
         "content": content,
-        "contentHtml": render_post_markdown(content) if content is not None else None,
+        "contentHtml": render_markdown(content) if content is not None else None,
         "visibility": post["visibility"],
         "moderationStatus": post["moderation_status"],
         "reviewedAt": post["reviewed_at"],
@@ -317,7 +267,7 @@ def preview_markdown(request: Request, body: dict, db: DB) -> dict:
     enforce_rate_limit("treehole-preview-user", str(user["id"]), 30, 60, "TREEHOLE_PREVIEW_RATE_LIMITED")
     enforce_rate_limit("treehole-preview-ip", ip_address, 120, 60, "TREEHOLE_PREVIEW_RATE_LIMITED")
     content = validated_text(body.get("content"), 0, 5000, "正文")
-    return {"html": render_post_markdown(content) if content else ""}
+    return {"html": render_markdown(content) if content else ""}
 
 
 @router.get("/posts")
@@ -349,7 +299,7 @@ def public_posts(
     has_more = len(rows) > limit
     rows = rows[:limit]
     for row in rows:
-        row["summary"], row["summaryTruncated"] = post_markdown_summary(row["summary"], 220)
+        row["summary"], row["summaryTruncated"] = markdown_summary(row["summary"], 220)
     next_cursor = f"{rows[-1]['published_at']}|{rows[-1]['id']}" if has_more and rows else None
     eligible = bool(
         user["account_type"] == "USER"
@@ -700,7 +650,7 @@ def private_posts(
     has_more = len(rows) > limit
     rows = rows[:limit]
     for row in rows:
-        row["summary"], row["summaryTruncated"] = post_markdown_summary(row["content"], 180)
+        row["summary"], row["summaryTruncated"] = markdown_summary(row["content"], 180)
     return {"posts": rows, "nextBeforeId": rows[-1]["id"] if has_more and rows else None}
 
 
@@ -788,7 +738,7 @@ def managed_content(
     rows = rows[:limit]
     for row in rows:
         if row["content_type"] == "POST":
-            row["summary"], row["summaryTruncated"] = post_markdown_summary(row["content"], 180)
+            row["summary"], row["summaryTruncated"] = markdown_summary(row["content"], 180)
         else:
             summary = " ".join((row["content"] or "").split())
             row["summary"], row["summaryTruncated"] = summary[:180], len(summary) > 180
