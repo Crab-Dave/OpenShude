@@ -383,6 +383,77 @@ class DormitoryResultMember(Base):
     __table_args__ = (Index("idx_dormitory_result_members_source", "source_user_id", "snapshot_id"),)
 
 
+class OfficialDormitory(Base):
+    __tablename__ = "official_dormitories"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dormitory_code: Mapped[str] = mapped_column(Text, unique=True)
+    nickname: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    nickname_status: Mapped[str] = mapped_column(Text, server_default=text("'NORMAL'"))
+    description_markdown: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    description_status: Mapped[str] = mapped_column(Text, server_default=text("'NORMAL'"))
+    rules_markdown: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    rules_status: Mapped[str] = mapped_column(Text, server_default=text("'NORMAL'"))
+    management_grade_id: Mapped[int] = mapped_column(ForeignKey(GRADES_ID))
+    version: Mapped[int] = mapped_column(server_default=text("1"))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID, ondelete=SET_NULL))
+    created_at: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[str] = mapped_column(Text)
+    __table_args__ = (
+        CheckConstraint("nickname_status IN ('NORMAL','HIDDEN')"),
+        CheckConstraint("description_status IN ('NORMAL','HIDDEN')"),
+        CheckConstraint("rules_status IN ('NORMAL','HIDDEN')"),
+        CheckConstraint("version > 0"),
+        Index("idx_official_dormitories_updated", "updated_at", "id"),
+        Index("idx_official_dormitories_grade", "management_grade_id", "id"),
+    )
+
+
+class OfficialDormitoryMember(Base):
+    __tablename__ = "official_dormitory_members"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    official_dormitory_id: Mapped[int] = mapped_column(ForeignKey("official_dormitories.id", ondelete="CASCADE"))
+    user_id: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID, ondelete=SET_NULL))
+    role: Mapped[str] = mapped_column(Text)
+    position: Mapped[int]
+    imported_login_identifier: Mapped[str] = mapped_column(Text)
+    name_snapshot: Mapped[str] = mapped_column(Text)
+    grade_snapshot: Mapped[str] = mapped_column(Text)
+    major_snapshot: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    created_at: Mapped[str] = mapped_column(Text)
+    __table_args__ = (
+        UniqueConstraint("official_dormitory_id", "position"),
+        UniqueConstraint("official_dormitory_id", "user_id"),
+        CheckConstraint("role IN ('LEADER','MEMBER')"),
+        CheckConstraint("position BETWEEN 1 AND 4"),
+        Index("idx_official_dormitory_members_user", "user_id", "official_dormitory_id"),
+        Index(
+            "idx_official_dormitory_single_leader",
+            "official_dormitory_id",
+            unique=True,
+            sqlite_where=text("role = 'LEADER'"),
+        ),
+    )
+
+
+class OfficialDormitoryRevision(Base):
+    __tablename__ = "official_dormitory_revisions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    official_dormitory_id: Mapped[int] = mapped_column(ForeignKey("official_dormitories.id", ondelete="CASCADE"))
+    field_name: Mapped[str] = mapped_column(Text)
+    previous_value: Mapped[str] = mapped_column(Text)
+    new_value: Mapped[str] = mapped_column(Text)
+    from_version: Mapped[int]
+    to_version: Mapped[int]
+    edited_by: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID, ondelete=SET_NULL))
+    editor_name_snapshot: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text)
+    __table_args__ = (
+        CheckConstraint("field_name IN ('NICKNAME','DESCRIPTION','RULES')"),
+        CheckConstraint("to_version > from_version"),
+        Index("idx_official_dormitory_revisions_dormitory", "official_dormitory_id", "id"),
+    )
+
+
 class Grade(Base):
     __tablename__ = "grades"
     id: Mapped[int] = mapped_column(primary_key=True)
