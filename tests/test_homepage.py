@@ -41,3 +41,10 @@ def test_application_routes_use_the_login_application_and_unknown_pages_are_404(
     assert roommate_page.status_code == 200
     assert "/app.js" in roommate_page.text
     assert client.get("/page-that-does-not-exist").status_code == 404
+
+
+def test_protected_application_pages_are_not_cached(client):
+    for path in ("/roommates", "/shudong", "/sude", "/sude/dormitories/1"):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-store"

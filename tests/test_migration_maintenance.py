@@ -61,7 +61,7 @@ def test_alembic_upgrades_a_legacy_database(tmp_path, monkeypatch):
             database.execute("SELECT account_type FROM users WHERE login_identifier='admin'").fetchone()[0]
             == "SUPER_ADMIN"
         )
-        assert database.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "20260809_01"
+        assert database.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "20260903_01"
         assert (
             database.execute(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='system_settings'"
@@ -202,6 +202,11 @@ def test_hot_path_indexes_are_created_and_used(tmp_path, monkeypatch):
         "idx_treehole_posts_author_updated",
         "idx_treehole_posts_management",
         "idx_treehole_comments_post_created",
+        "idx_official_dormitories_updated",
+        "idx_official_dormitories_grade",
+        "idx_official_dormitory_members_user",
+        "idx_official_dormitory_single_leader",
+        "idx_official_dormitory_revisions_dormitory",
     }
     with sqlite3.connect(database_path) as database:
         indexes = {row[0] for row in database.execute("SELECT name FROM sqlite_master WHERE type='index'")}
@@ -243,6 +248,9 @@ def test_fresh_production_database_bootstrap(tmp_path, monkeypatch):
         "dormitory_selection_rounds",
         "grades",
         "messages",
+        "official_dormitories",
+        "official_dormitory_members",
+        "official_dormitory_revisions",
         "reports",
         "roommate_cards",
         "refresh_tokens",
@@ -270,7 +278,7 @@ def test_fresh_production_database_bootstrap(tmp_path, monkeypatch):
 
 
 def test_models_map_all_current_tables():
-    assert len(Base.metadata.tables) == 28
+    assert len(Base.metadata.tables) == 31
     database_engine = create_database_engine()
     try:
         tables = set(inspect(database_engine).get_table_names())

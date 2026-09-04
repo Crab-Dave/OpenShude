@@ -405,6 +405,79 @@ def main() -> None:
             )
 
         student_ids = dict(db.execute(text("SELECT login_identifier,id FROM users WHERE account_type='USER'")).all())
+        official_dormitories = [
+            (
+                "明德-101",
+                "星光小屋",
+                "## 我们的宿舍\n\n欢迎来认识 **爱摄影也爱生活** 的我们。",
+                "1. 晚上十一点后保持安静\n2. 公共区域轮流整理",
+                ["2026001", "2026006", "2026010"],
+            ),
+            (
+                "明德-102",
+                "旧时光",
+                "这是一起参加校园活动时保留的正式宿舍。",
+                "有事及时沟通，尊重彼此边界。",
+                ["2026001", "browser-page-01"],
+            ),
+        ]
+        official_dormitories.extend(
+            (
+                f"明德-{index + 200}",
+                f"演示宿舍{index:02d}",
+                f"用于验证赛博串门分页的第 {index} 个宿舍。",
+                "共同维护整洁，休息时间使用耳机。",
+                [f"browser-page-{((index - 1) % 10) + 1:02d}", f"browser-page-{(index % 10) + 1:02d}"],
+            )
+            for index in range(1, 17)
+        )
+        for index, (code, nickname, description, rules, member_logins) in enumerate(official_dormitories, 1):
+            updated_at = f"2026-09-03T01:{index:02d}:00.000Z"
+            dormitory_id = db.execute(
+                text(
+                    """INSERT INTO official_dormitories(
+                    dormitory_code,nickname,description_markdown,rules_markdown,management_grade_id,
+                    created_by,created_at,updated_at) VALUES(:code,:nickname,:description,:rules,:grade,:admin,:now,:now)
+                    RETURNING id"""
+                ),
+                {
+                    "code": code,
+                    "nickname": nickname,
+                    "description": description,
+                    "rules": rules,
+                    "grade": grade_ids["2026级"],
+                    "admin": admin_id,
+                    "now": updated_at,
+                },
+            ).scalar_one()
+            for position, login_identifier in enumerate(member_logins, 1):
+                member = (
+                    db.execute(
+                        text("SELECT id,name,grade,major FROM users WHERE login_identifier=:login"),
+                        {"login": login_identifier},
+                    )
+                    .mappings()
+                    .one()
+                )
+                db.execute(
+                    text(
+                        """INSERT INTO official_dormitory_members(
+                        official_dormitory_id,user_id,role,position,imported_login_identifier,
+                        name_snapshot,grade_snapshot,major_snapshot,created_at)
+                        VALUES(:dormitory,:user,:role,:position,:login,:name,:grade,:major,:now)"""
+                    ),
+                    {
+                        "dormitory": dormitory_id,
+                        "user": member["id"],
+                        "role": "LEADER" if position == 1 else "MEMBER",
+                        "position": position,
+                        "login": login_identifier,
+                        "name": member["name"],
+                        "grade": member["grade"],
+                        "major": member["major"],
+                        "now": updated_at,
+                    },
+                )
         db.execute(
             text("INSERT INTO treehole_author_grades(grade_id,created_by,created_at) VALUES(:grade,:admin,:now)"),
             {"grade": grade_ids["2026级"], "admin": admin_id, "now": timestamp},
