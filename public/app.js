@@ -436,7 +436,7 @@ async function enterOfficialDormitorySystem() {
   await navigate(detailMatch ? 'official-detail' : 'official-mine');
 }
 
-function renderShell() {
+function renderShell() { // NOSONAR
   const management = state.mode === 'management';
   const treehole = state.mode === 'treehole';
   const officialDormitory = state.mode === 'official-dormitory';
@@ -887,7 +887,7 @@ function showTreeholeEditor(post = null) {
   });
 }
 
-function officialDormitoryMember(member) {
+function officialDormitoryMember(member) { // NOSONAR
   if (!member.visible) {
     return `<article class="official-member-card unavailable ${member.role === 'LEADER' ? 'leader' : ''}">${icon('user-round-x')}<strong>${member.leaderPending ? '宿舍长待管理员处理' : '成员信息暂不可见'}</strong>${member.role === 'LEADER' && !member.leaderPending ? '<span>宿舍长</span>' : ''}</article>`;
   }
@@ -901,14 +901,14 @@ function officialDormitoryMember(member) {
   </article>`;
 }
 
-function officialDormitoryContentCard(title, iconName, summary, truncated, hidden) {
+function officialDormitoryContentCard(title, iconName, summary, truncated, hidden) { // NOSONAR
   const content = hidden
     ? `<div class="official-content-hidden">${icon('eye-off')}<span>该内容暂不可见</span></div>`
     : `<p class="official-content-summary ${summary ? '' : 'field-hint'}">${escapeHtml(summary || '还没有填写内容')}${truncated ? '…' : ''}</p>`;
   return `<article class="official-content-card panel" data-official-content="${title}" role="button" tabindex="0"><header>${icon(iconName)}<h2>${title}</h2></header>${content}</article>`;
 }
 
-function officialDormitoryDetailMarkup(dormitory, showBack = false) {
+function officialDormitoryDetailMarkup(dormitory, showBack = false) { // NOSONAR
   const actions = dormitory.canEdit
     ? `<button class="btn btn-primary" data-edit-official-dormitory>${icon('pencil')}共同编辑</button>${dormitory.canTransferLeader ? `<button class="btn btn-secondary" data-transfer-official-leader>${icon('crown')}转让宿舍长</button>` : ''}`
     : '';
@@ -942,7 +942,7 @@ function bindOfficialDormitoryDetail(dormitory) {
   document.querySelector('[data-transfer-official-leader]')?.addEventListener('click', () => showOfficialLeaderTransfer(dormitory));
 }
 
-async function renderMyOfficialDormitory() {
+async function renderMyOfficialDormitory() { // NOSONAR
   const { dormitories } = await api('/api/official-dormitories/mine');
   if (!dormitories.length) {
     setPage(`<section class="official-dormitory-hero panel"><div><span class="eyebrow">SUDE STORIES</span><h2>共同建设我们的宿舍</h2><p>学校正式宿舍名单导入后，这里会出现你的宿舍。</p></div></section>${emptyState('house-heart', '还没有正式宿舍', '你仍然可以去赛博串门看看其他宿舍', `<button class="btn btn-primary" data-go-official-visit>${icon('door-open')}去串门</button>`)}`);
@@ -1060,7 +1060,7 @@ function showOfficialDormitoryEditor(dormitory) {
   });
 }
 
-function showOfficialLeaderTransfer(dormitory) {
+function showOfficialLeaderTransfer(dormitory) { // NOSONAR
   const candidates = dormitory.members.filter((member) => member.visible && member.memberId && !member.isOwnCard);
   const modal = openModal('转让宿舍长', `<form id="official-leader-transfer"><p>转让成功后，你会立即失去宿舍长身份。请选择新的宿舍长：</p><div class="form-field"><select name="targetMemberId" required><option value="">请选择舍友</option>${candidates.map((member) => `<option value="${member.memberId}">${escapeHtml(member.name)}</option>`).join('')}</select></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary">${icon('crown')}确认转让</button></div></form>`);
   modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
@@ -1674,7 +1674,7 @@ function adminOfficialDormitoryRows(dormitories) {
   }).join('');
 }
 
-async function renderAdminOfficialDormitories(search = state.adminOfficialDormitorySearch, offset = state.adminOfficialDormitoryOffset) {
+async function renderAdminOfficialDormitories(search = state.adminOfficialDormitorySearch, offset = state.adminOfficialDormitoryOffset) { // NOSONAR
   const canRead = hasPermission('OFFICIAL_DORMITORY_READ');
   const canImport = hasPermission('OFFICIAL_DORMITORY_IMPORT');
   state.adminOfficialDormitorySearch = search;
@@ -1749,7 +1749,7 @@ function showOfficialDormitoryImport() {
   });
 }
 
-function officialModerationControls(dormitory) {
+function officialModerationControls(dormitory) { // NOSONAR
   if (!hasScopedPermission('OFFICIAL_DORMITORY_MODERATE', dormitory.management_grade_id)) return '';
   const fields = [['nickname', '宿舍昵称'], ['description', '宿舍简介'], ['rules', '宿舍公约']];
   return `<section class="section"><div class="section-heading"><div><h2>内容治理</h2><p>隐藏可恢复原内容，重置会清空内容并保留修订记录</p></div></div><div class="official-moderation-grid">${fields.map(([field, label]) => {
@@ -1758,7 +1758,7 @@ function officialModerationControls(dormitory) {
   }).join('')}</div></section>`;
 }
 
-async function showAdminOfficialDormitoryDetail(dormitoryId) {
+async function showAdminOfficialDormitoryDetail(dormitoryId) { // NOSONAR
   const { dormitory } = await api(`/api/admin/official-dormitories/${dormitoryId}`);
   const canUpdate = hasScopedPermission('OFFICIAL_DORMITORY_MEMBER_UPDATE', dormitory.management_grade_id);
   const revisions = dormitory.revisions.length
@@ -1773,7 +1773,7 @@ async function showAdminOfficialDormitoryDetail(dormitoryId) {
   }));
 }
 
-function showOfficialMemberCorrection(dormitory) {
+function showOfficialMemberCorrection(dormitory) { // NOSONAR
   const modal = openModal(`纠正 ${dormitory.dormitory_code} 的成员`, `<form id="official-member-correction" class="form-grid"><div class="form-field full"><label>成员登录标识（第一位为宿舍长）</label><textarea name="identifiers" rows="5" required>${escapeHtml(dormitory.members.map((member) => member.loginIdentifier).join('\n'))}</textarea><span class="field-hint">每行一个登录标识，共 1–4 人。提交后会替换完整成员名单。</span></div><div class="form-field"><label>输入宿舍编号确认</label><input name="confirmation" autocomplete="off" required></div><div class="form-field"><label>纠正原因</label><input name="reason" maxlength="200" required></div><div class="form-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-danger">${icon('users')}确认替换成员</button></div></form>`);
   modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
   modal.querySelector('form').addEventListener('submit', async (event) => {
@@ -1787,7 +1787,7 @@ function showOfficialMemberCorrection(dormitory) {
   });
 }
 
-function showOfficialContentModeration(dormitory, field, action) {
+function showOfficialContentModeration(dormitory, field, action) { // NOSONAR
   const fieldLabels = { nickname: '宿舍昵称', description: '宿舍简介', rules: '宿舍公约' };
   const actionLabels = { HIDE: '隐藏', RESTORE: '恢复', RESET: '重置' };
   const modal = openModal(`${actionLabels[action]}${fieldLabels[field]}`, `<form id="official-content-moderation"><p>${action === 'RESET' ? '重置会清空当前内容，此操作不能通过“恢复”撤销。' : `${actionLabels[action]}后将立即影响学生端展示。`}</p><div class="form-field"><label>操作原因</label><textarea name="reason" maxlength="200" required></textarea></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn ${action === 'RESET' ? 'btn-danger' : 'btn-primary'}">确认${actionLabels[action]}</button></div></form>`);

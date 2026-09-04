@@ -88,7 +88,7 @@ def decoded_cursor(cursor: str) -> tuple[int, str, int] | None:
         if mine not in ("0", "1") or not updated_at or int(dormitory_id) < 1:
             raise ValueError
         return int(mine), updated_at, int(dormitory_id)
-    except (binascii.Error, ValueError):
+    except ValueError:
         raise ApiError(400, "INVALID_DORMITORY_CURSOR", "分页位置无效") from None
 
 
