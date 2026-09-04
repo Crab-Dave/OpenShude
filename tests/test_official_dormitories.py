@@ -364,7 +364,11 @@ def test_permanent_user_deletion_preserves_membership_and_transfers_leader(clien
     visitor_detail = client.get(f"/api/official-dormitories/{pending_id}").json()["dormitory"]
     assert visitor_detail["members"] == [{"position": 1, "role": "LEADER", "visible": False, "leaderPending": True}]
     login(client, "2026002")
-    own_id = next(item["id"] for item in client.get("/api/official-dormitories/mine").json()["dormitories"] if item["dormitoryCode"] == "A-401")
+    own_id = next(
+        item["id"]
+        for item in client.get("/api/official-dormitories/mine").json()["dormitories"]
+        if item["dormitoryCode"] == "A-401"
+    )
     own_detail = client.get(f"/api/official-dormitories/{own_id}").json()["dormitory"]
     deleted_member = next(member for member in own_detail["members"] if member["position"] == 1)
     assert deleted_member["name"] == "已删除账号"
