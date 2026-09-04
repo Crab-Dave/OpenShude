@@ -221,6 +221,19 @@ function openModal(title, body, { wide = false } = {}) {
   return modal;
 }
 
+function parseSafeHtml(markup) {
+  const documentFragment = new DOMParser().parseFromString(String(markup), 'text/html');
+  documentFragment.querySelectorAll('script, iframe, object, embed, link, meta').forEach((node) => node.remove());
+  documentFragment.querySelectorAll('*').forEach((node) => {
+    [...node.attributes].forEach((attribute) => {
+      if (attribute.name.toLowerCase().startsWith('on')) node.removeAttribute(attribute.name);
+      if (attribute.name.toLowerCase() === 'href' && /^\s*javascript:/i.test(attribute.value)) node.removeAttribute(attribute.name);
+      if (attribute.name.toLowerCase() === 'src' && /^\s*javascript:/i.test(attribute.value)) node.removeAttribute(attribute.name);
+    });
+  });
+  return [...documentFragment.body.childNodes];
+}
+
 function closeModal() {
   modalRoot.innerHTML = '';
   if (modalReturnFocus?.isConnected) modalReturnFocus.focus();
@@ -260,7 +273,7 @@ function bindPersonPicker(form, prefix, groups = state.selectionGroups) {
 
 function setPage(content) {
   const page = document.querySelector('#page-content');
-  if (page) page.innerHTML = content;
+  if (page) page.replaceChildren(...parseSafeHtml(content));
   refreshIcons();
 }
 
@@ -474,7 +487,7 @@ function renderShell() {
     ? `<button class="btn btn-secondary" id="treehole-admin-btn">${icon('layout-dashboard')}<span>管理工作台</span></button>`
     : '';
   const loading = emptyState('loader-circle', '正在加载', '正在读取最新数据');
-  app.innerHTML = `
+  app.replaceChildren(...parseSafeHtml(`
     <div class="app-shell">
       <aside class="sidebar">
         <div class="sidebar-brand"><div class="brand-mark">${brandSymbol}</div><div><strong>${brandName}</strong><small>${brandDescription}</small></div></div>
@@ -496,7 +509,7 @@ function renderShell() {
         <div class="page" id="page-content">${loading}</div>
       </main>
       <nav class="mobile-nav">${mobileNavItems}</nav>
-    </div>`;
+    </div>`));
   document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.view)));
   document.querySelector('#switch-mode')?.addEventListener('click', async () => {
     if (management) await enterRoommateSystem();

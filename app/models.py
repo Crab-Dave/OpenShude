@@ -9,6 +9,7 @@ CONVERSATIONS_ID = "conversations.id"
 ADMIN_GROUPS_ID = "admin_groups.id"
 DORMITORY_ROUNDS_ID = "dormitory_selection_rounds.id"
 SET_NULL = "SET NULL"
+NORMAL_STATUS_SQL = "'NORMAL'"
 
 
 class User(Base):
@@ -388,20 +389,20 @@ class OfficialDormitory(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     dormitory_code: Mapped[str] = mapped_column(Text, unique=True)
     nickname: Mapped[str] = mapped_column(Text, server_default=text("''"))
-    nickname_status: Mapped[str] = mapped_column(Text, server_default=text("'NORMAL'"))
+    nickname_status: Mapped[str] = mapped_column(Text, server_default=text(NORMAL_STATUS_SQL))
     description_markdown: Mapped[str] = mapped_column(Text, server_default=text("''"))
-    description_status: Mapped[str] = mapped_column(Text, server_default=text("'NORMAL'"))
+    description_status: Mapped[str] = mapped_column(Text, server_default=text(NORMAL_STATUS_SQL))
     rules_markdown: Mapped[str] = mapped_column(Text, server_default=text("''"))
-    rules_status: Mapped[str] = mapped_column(Text, server_default=text("'NORMAL'"))
+    rules_status: Mapped[str] = mapped_column(Text, server_default=text(NORMAL_STATUS_SQL))
     management_grade_id: Mapped[int] = mapped_column(ForeignKey(GRADES_ID))
     version: Mapped[int] = mapped_column(server_default=text("1"))
     created_by: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID, ondelete=SET_NULL))
     created_at: Mapped[str] = mapped_column(Text)
     updated_at: Mapped[str] = mapped_column(Text)
     __table_args__ = (
-        CheckConstraint("nickname_status IN ('NORMAL','HIDDEN')"),
-        CheckConstraint("description_status IN ('NORMAL','HIDDEN')"),
-        CheckConstraint("rules_status IN ('NORMAL','HIDDEN')"),
+        CheckConstraint(f"nickname_status IN ({NORMAL_STATUS_SQL},'HIDDEN')"),
+        CheckConstraint(f"description_status IN ({NORMAL_STATUS_SQL},'HIDDEN')"),
+        CheckConstraint(f"rules_status IN ({NORMAL_STATUS_SQL},'HIDDEN')"),
         CheckConstraint("version > 0"),
         Index("idx_official_dormitories_updated", "updated_at", "id"),
         Index("idx_official_dormitories_grade", "management_grade_id", "id"),
@@ -480,7 +481,7 @@ class TreeholePost(Base):
     title: Mapped[str] = mapped_column(Text)
     content: Mapped[str] = mapped_column(Text)
     visibility: Mapped[str] = mapped_column(Text, server_default=text("'PRIVATE'"))
-    moderation_status: Mapped[str] = mapped_column(Text, server_default=text("'NORMAL'"))
+    moderation_status: Mapped[str] = mapped_column(Text, server_default=text(NORMAL_STATUS_SQL))
     moderation_reason: Mapped[str] = mapped_column(Text, server_default=text("''"))
     moderated_by: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID, ondelete=SET_NULL))
     moderated_at: Mapped[str | None] = mapped_column(Text)
@@ -492,7 +493,7 @@ class TreeholePost(Base):
     updated_at: Mapped[str] = mapped_column(Text)
     __table_args__ = (
         CheckConstraint("visibility IN ('PRIVATE','PUBLIC','WITHDRAWN')"),
-        CheckConstraint("moderation_status IN ('NORMAL','HIDDEN','DELETED')"),
+        CheckConstraint(f"moderation_status IN ({NORMAL_STATUS_SQL},'HIDDEN','DELETED')"),
         Index(
             "idx_treehole_posts_public",
             "visibility",
@@ -523,7 +524,7 @@ class TreeholeComment(Base):
     )
     content: Mapped[str] = mapped_column(Text)
     is_official: Mapped[int] = mapped_column(server_default=text("0"))
-    moderation_status: Mapped[str] = mapped_column(Text, server_default=text("'NORMAL'"))
+    moderation_status: Mapped[str] = mapped_column(Text, server_default=text(NORMAL_STATUS_SQL))
     moderation_reason: Mapped[str] = mapped_column(Text, server_default=text("''"))
     moderated_by: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID, ondelete=SET_NULL))
     moderated_at: Mapped[str | None] = mapped_column(Text)
@@ -531,7 +532,7 @@ class TreeholeComment(Base):
     deleted_at: Mapped[str | None] = mapped_column(Text)
     __table_args__ = (
         CheckConstraint("is_official IN (0,1)"),
-        CheckConstraint("moderation_status IN ('NORMAL','HIDDEN','DELETED')"),
+        CheckConstraint(f"moderation_status IN ({NORMAL_STATUS_SQL},'HIDDEN','DELETED')"),
         Index("idx_treehole_comments_post_created", "post_id", "created_at", "id"),
     )
 
