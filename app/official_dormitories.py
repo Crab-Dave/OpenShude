@@ -160,16 +160,17 @@ def student_dormitories(db: Session, rows: list[dict], viewer_id: int, details: 
             "leaderPending": member["role"] == "LEADER" and not member["user_id"],
         }
         if visible:
+            account_exists = bool(member["user_id"])
             item.update(
                 {
                     "memberId": member["id"] if own_dormitory else None,
                     "cardId": member["card_id"] if member["card_status"] == "PUBLISHED" else None,
                     "cardStatus": member["card_status"] or "UNPUBLISHED",
                     "isOwnCard": member["user_id"] == viewer_id,
-                    "name": member["name"] or member["name_snapshot"] or "已删除账号",
-                    "grade": member["grade"] or member["grade_snapshot"],
-                    "major": member["major"] if member["user_id"] else member["major_snapshot"],
-                    "gender": member["gender"] or "UNSPECIFIED",
+                    "name": member["name"] if account_exists else "已删除账号",
+                    "grade": member["grade"] if account_exists else "-",
+                    "major": member["major"] if account_exists else "-",
+                    "gender": member["gender"] if account_exists else "UNSPECIFIED",
                     "avatarUrl": member["avatar_url"] if member["card_status"] == "PUBLISHED" else "",
                     "originCity": member["origin_city"] if member["card_status"] == "PUBLISHED" else "",
                     "introduction": member["one_sentence_intro"] if member["card_status"] == "PUBLISHED" else "",
