@@ -8,6 +8,9 @@ revision = "20260903_01"
 down_revision = "20260809_01"
 branch_labels = None
 depends_on = None
+USERS_ID = "users.id"
+SET_NULL = "SET NULL"
+NORMAL_STATUS_SQL = "'NORMAL'"
 
 
 def upgrade() -> None:
@@ -25,12 +28,12 @@ def upgrade() -> None:
             sa.Column("rules_status", sa.Text(), nullable=False, server_default="NORMAL"),
             sa.Column("management_grade_id", sa.Integer(), sa.ForeignKey("grades.id"), nullable=False),
             sa.Column("version", sa.Integer(), nullable=False, server_default="1"),
-            sa.Column("created_by", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL")),
+            sa.Column("created_by", sa.Integer(), sa.ForeignKey(USERS_ID, ondelete=SET_NULL)),
             sa.Column("created_at", sa.Text(), nullable=False),
             sa.Column("updated_at", sa.Text(), nullable=False),
-            sa.CheckConstraint("nickname_status IN ('NORMAL','HIDDEN')"),
-            sa.CheckConstraint("description_status IN ('NORMAL','HIDDEN')"),
-            sa.CheckConstraint("rules_status IN ('NORMAL','HIDDEN')"),
+            sa.CheckConstraint(f"nickname_status IN ({NORMAL_STATUS_SQL},'HIDDEN')"),
+            sa.CheckConstraint(f"description_status IN ({NORMAL_STATUS_SQL},'HIDDEN')"),
+            sa.CheckConstraint(f"rules_status IN ({NORMAL_STATUS_SQL},'HIDDEN')"),
             sa.CheckConstraint("version > 0"),
         )
         op.create_index("idx_official_dormitories_updated", "official_dormitories", ["updated_at", "id"])
@@ -45,7 +48,7 @@ def upgrade() -> None:
                 sa.ForeignKey("official_dormitories.id", ondelete="CASCADE"),
                 nullable=False,
             ),
-            sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL")),
+            sa.Column("user_id", sa.Integer(), sa.ForeignKey(USERS_ID, ondelete=SET_NULL)),
             sa.Column("role", sa.Text(), nullable=False),
             sa.Column("position", sa.Integer(), nullable=False),
             sa.Column("imported_login_identifier", sa.Text(), nullable=False),
@@ -85,7 +88,7 @@ def upgrade() -> None:
             sa.Column("new_value", sa.Text(), nullable=False),
             sa.Column("from_version", sa.Integer(), nullable=False),
             sa.Column("to_version", sa.Integer(), nullable=False),
-            sa.Column("edited_by", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL")),
+            sa.Column("edited_by", sa.Integer(), sa.ForeignKey(USERS_ID, ondelete=SET_NULL)),
             sa.Column("editor_name_snapshot", sa.Text(), nullable=False),
             sa.Column("created_at", sa.Text(), nullable=False),
             sa.CheckConstraint("field_name IN ('NICKNAME','DESCRIPTION','RULES')"),

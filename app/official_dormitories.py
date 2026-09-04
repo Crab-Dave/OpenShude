@@ -52,6 +52,8 @@ CONTENT_FIELDS = {
     "description": ("DESCRIPTION", "description_markdown", "description_status", 2000),
     "rules": ("RULES", "rules_markdown", "rules_status", 5000),
 }
+OFFICIAL_NOT_FOUND_MESSAGE = "宿舍不存在或暂不可访问"
+ADMIN_NOT_FOUND_MESSAGE = "正式宿舍不存在"
 
 
 def active_student(user: dict) -> None:
@@ -86,7 +88,7 @@ def decoded_cursor(cursor: str) -> tuple[int, str, int] | None:
         if mine not in ("0", "1") or not updated_at or int(dormitory_id) < 1:
             raise ValueError
         return int(mine), updated_at, int(dormitory_id)
-    except (binascii.Error, ValueError, UnicodeDecodeError):
+    except (binascii.Error, ValueError):
         raise ApiError(400, "INVALID_DORMITORY_CURSOR", "分页位置无效") from None
 
 
@@ -308,7 +310,7 @@ def official_dormitory_detail(dormitory_id: int, request: Request, db: DB) -> di
         {"id": dormitory_id, "viewer": user["id"]},
     )
     if not row:
-        raise ApiError(404, "OFFICIAL_DORMITORY_NOT_FOUND", "宿舍不存在或暂不可访问")
+        raise ApiError(404, "OFFICIAL_DORMITORY_NOT_FOUND", OFFICIAL_NOT_FOUND_MESSAGE)
     return {"dormitory": student_dormitories(db, [row], user["id"], True)[0]}
 
 
@@ -339,7 +341,7 @@ def update_official_dormitory(dormitory_id: int, request: Request, body: dict, d
     begin_immediate(db)
     row = dormitory_by_id(db, dormitory_id)
     if not row or not member_for_user(db, dormitory_id, user["id"]):
-        raise ApiError(404, "OFFICIAL_DORMITORY_NOT_FOUND", "宿舍不存在或暂不可访问")
+        raise ApiError(404, "OFFICIAL_DORMITORY_NOT_FOUND", OFFICIAL_NOT_FOUND_MESSAGE)
     if row["version"] != body["version"]:
         raise ApiError(409, "DORMITORY_CONTENT_CONFLICT", "宿舍内容已被其他成员修改，请重新载入")
     changes = validated_content(body, row)
@@ -396,7 +398,11 @@ def preview_official_dormitory_markdown(request: Request, body: dict, db: DB) ->
     active_student(user)
     enforce_write_rate(request, user["id"], "preview", 30, 120, 60)
     field = body.get("field")
-    maximum = 2000 if field == "description" else 5000 if field == "rules" else 0
+    maximum = 0
+    if field == "description":
+        maximum = 2000
+    elif field == "rules":
+        maximum = 5000
     if not maximum:
         raise ApiError(400, "INVALID_DORMITORY_CONTENT_FIELD", "预览字段无效")
     content = clean_text(body.get("content"), maximum)
@@ -423,7 +429,7 @@ def transfer_official_dormitory_leader(dormitory_id: int, request: Request, body
         {"member": target_id, "dormitory": dormitory_id},
     )
     if not dormitory or not current:
-        raise ApiError(404, "OFFICIAL_DORMITORY_NOT_FOUND", "宿舍不存在或暂不可访问")
+        raise ApiError(404, "OFFICIAL_DORMITORY_NOT_FOUND", OFFICIAL_NOT_FOUND_MESSAGE)
     if dormitory["version"] != version:
         raise ApiError(409, "DORMITORY_CONTENT_CONFLICT", "宿舍信息已变化，请重新载入")
     if current["role"] != "LEADER":
@@ -816,7 +822,7 @@ def admin_dormitories(
 def admin_dormitory(db: Session, admin: dict, dormitory_id: int, permission: str) -> tuple[dict, dict]:
     dormitory = dormitory_by_id(db, dormitory_id)
     if not dormitory:
-        raise ApiError(404, "OFFICIAL_DORMITORY_NOT_FOUND", "正式宿舍不存在")
+        raise ApiError(404, "OFFICIAL_DORMITORY_NOT_FOUND", ADMIN_NOT_FOUND_MESSAGE)
     grant = authorize(db, admin, permission, dormitory["management_grade_id"])
     return dormitory, grant
 
@@ -890,7 +896,7 @@ def replace_official_dormitory_members(dormitory_id: int, request: Request, body
     begin_immediate(db)
     dormitory = dormitory_by_id(db, dormitory_id)
     if not dormitory:
-        raise ApiError(404, "OFFICIAL_DORMITORY_NOT_FOUND", "正式宿舍不存在")
+        raise ApiError(404, "OFFICIAL_DORMITORY_NOT_FOUND", ADMIN_NOT_FOUND_MESSAGE)
     authorize(db, admin, "OFFICIAL_DORMITORY_MEMBER_UPDATE", dormitory["management_grade_id"])
     if body.get("confirmation") != dormitory["dormitory_code"]:
         raise ApiError(400, "CONFIRMATION_REQUIRED", "请输入宿舍编号确认成员纠正")
@@ -1022,7 +1028,7 @@ def delete_official_dormitory(dormitory_id: int, request: Request, body: dict, d
     begin_immediate(db)
     dormitory = dormitory_by_id(db, dormitory_id)
     if not dormitory:
-        raise ApiError(404, "OFFICIAL_DORMITORY_NOT_FOUND", "正式宿舍不存在")
+        raise ApiError(404, "OFFICIAL_DORMITORY_NOT_FOUND", ADMIN_NOT_FOUND_MESSAGE)
     if body.get("confirmation") != dormitory["dormitory_code"]:
         raise ApiError(400, "CONFIRMATION_REQUIRED", "请输入宿舍编号确认删除")
     reason = clean_text(body.get("reason"), 200, True)
