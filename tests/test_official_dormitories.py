@@ -322,6 +322,19 @@ def test_scoped_admin_can_correct_and_moderate_official_dormitory(client: TestCl
     assert detail["nicknameHidden"] is True
 
 
+def test_hidden_nickname_is_not_searchable(client: TestClient):
+    login(client, "admin", "Admin123!")
+    import_dormitories(client, [("A-350", "2026001", "2026002")])
+    with SessionLocal.begin() as db:
+        db.execute(
+            text(
+                "UPDATE official_dormitories SET nickname='隐私昵称', nickname_status='HIDDEN' WHERE dormitory_code='A-350'"
+            )
+        )
+    login(client, "2026004")
+    assert client.get("/api/official-dormitories", params={"search": "隐私昵称"}).json()["dormitories"] == []
+
+
 def test_permanent_user_deletion_preserves_membership_and_transfers_leader(client: TestClient):
     login(client, "admin", "Admin123!")
     import_dormitories(client, [("A-401", "2026001", "2026002"), ("A-402", "2026001")])

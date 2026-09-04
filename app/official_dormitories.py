@@ -258,7 +258,7 @@ def list_official_dormitories(
         params["search"] = f"%{query}%"
         filters.append(
             f"""(LOWER(dormitory.dormitory_code) LIKE LOWER(:search)
-            OR LOWER(dormitory.nickname) LIKE LOWER(:search)
+            OR (dormitory.nickname_status='NORMAL' AND LOWER(dormitory.nickname) LIKE LOWER(:search))
             OR EXISTS(SELECT 1 FROM official_dormitory_members searched
               LEFT JOIN users searched_user ON searched_user.id=searched.user_id
               LEFT JOIN roommate_cards searched_card ON searched_card.user_id=searched.user_id
