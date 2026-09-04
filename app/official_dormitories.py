@@ -140,6 +140,12 @@ def blocked_user_ids(db: Session, viewer_id: int, user_ids: list[int]) -> set[in
     return {row["user_id"] for row in rows}
 
 
+def student_member_name(member: dict) -> str:
+    if not member["user_id"]:
+        return "已删除账号"
+    return member["name"] or member["name_snapshot"] or "已删除账号"
+
+
 def student_dormitories(db: Session, rows: list[dict], viewer_id: int, details: bool = False) -> list[dict]:  # NOSONAR
     members = member_rows(db, [row["id"] for row in rows])
     blocked = blocked_user_ids(db, viewer_id, [row["user_id"] for row in members if row["user_id"]])
@@ -167,7 +173,7 @@ def student_dormitories(db: Session, rows: list[dict], viewer_id: int, details: 
                     "cardId": member["card_id"] if member["card_status"] == "PUBLISHED" else None,
                     "cardStatus": member["card_status"] or "UNPUBLISHED",
                     "isOwnCard": member["user_id"] == viewer_id,
-                    "name": member["name"] if account_exists else "已删除账号",
+                    "name": student_member_name(member),
                     "grade": member["grade"] if account_exists else "-",
                     "major": member["major"] if account_exists else "-",
                     "gender": member["gender"] if account_exists else "UNSPECIFIED",
