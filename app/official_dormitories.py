@@ -39,6 +39,7 @@ MAX_XLSX_BYTES = 2 * 1024 * 1024
 MAX_XLSX_UNCOMPRESSED_BYTES = 20 * 1024 * 1024
 MAX_XLSX_ENTRIES = 1000
 MAX_BATCH_DELETE = 50
+MAX_SQLITE_INTEGER = (1 << 63) - 1
 IMPORT_HEADERS = (
     "宿舍编号",
     "成员1登录标识（宿舍长）",
@@ -1037,7 +1038,10 @@ def batch_delete_official_dormitories(request: Request, body: dict, db: DB) -> d
     if (
         not isinstance(dormitory_ids, list)
         or not 1 <= len(dormitory_ids) <= MAX_BATCH_DELETE
-        or any(type(dormitory_id) is not int or dormitory_id < 1 for dormitory_id in dormitory_ids)
+        or any(
+            type(dormitory_id) is not int or not 1 <= dormitory_id <= MAX_SQLITE_INTEGER
+            for dormitory_id in dormitory_ids
+        )
         or len(set(dormitory_ids)) != len(dormitory_ids)
     ):
         raise ApiError(400, "INVALID_DORMITORY_IDS", f"请选择 1 至 {MAX_BATCH_DELETE} 个不同的正式宿舍")
