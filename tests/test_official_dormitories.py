@@ -1,6 +1,7 @@
 import io
 from zipfile import ZIP_DEFLATED, ZipFile
 
+import pytest
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
 from sqlalchemy import event, text
@@ -132,6 +133,48 @@ def test_super_admin_can_batch_delete_official_dormitories_atomically(client: Te
             .all()
         )
         assert audit_rows == sorted([str(dormitories["A-101"]), str(dormitories["A-103"])])
+
+
+@pytest.mark.parametrize(
+    "invalid_ids",
+    [
+        None,
+        "1",
+        [],
+        [0],
+        [-1],
+        [True],
+        [1.5],
+        ["1"],
+        [1, 1],
+        list(range(1, 52)),
+        [1 << 63],
+    ],
+    ids=[
+        "null",
+        "not-a-list",
+        "empty",
+        "zero",
+        "negative",
+        "boolean",
+        "float",
+        "string",
+        "duplicate",
+        "too-many",
+        "sqlite-overflow",
+    ],
+)
+def test_batch_delete_rejects_invalid_id_lists(client: TestClient, invalid_ids: object):
+    login(client, "admin", "Admin123!")
+    import_dormitories(client, [("A-201", "2026001")])
+    response = client.post(
+        "/api/admin/official-dormitories/batch-delete",
+        json={"dormitoryIds": invalid_ids, "confirmation": "批量删除", "reason": "非法请求测试"},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "INVALID_DORMITORY_IDS"
+    with SessionLocal() as db:
+        assert db.execute(text("SELECT dormitory_code FROM official_dormitories")).scalar_one() == "A-201"
 
 
 def test_import_validates_workbook_accounts_grades_and_hash(client: TestClient):
