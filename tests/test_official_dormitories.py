@@ -79,6 +79,56 @@ def test_import_is_atomic_idempotent_and_isolated_from_selection_dormitories(cli
         assert leader == "2026001"
 
 
+def test_super_admin_can_batch_delete_official_dormitories_atomically(client: TestClient):
+    login(client, "admin", "Admin123!")
+    import_dormitories(
+        client,
+        [("A-101", "2026001"), ("A-102", "2026002"), ("A-103", "2026006")],
+    )
+    with SessionLocal() as db:
+        dormitories = dict(db.execute(text("SELECT dormitory_code,id FROM official_dormitories")).all())
+
+    missing_confirmation = client.post(
+        "/api/admin/official-dormitories/batch-delete",
+        json={"dormitoryIds": [dormitories["A-101"]], "reason": "清理误导入数据"},
+    )
+    assert missing_confirmation.status_code == 400
+    missing_dormitory = client.post(
+        "/api/admin/official-dormitories/batch-delete",
+        json={
+            "dormitoryIds": [dormitories["A-101"], 999999],
+            "confirmation": "批量删除",
+            "reason": "清理误导入数据",
+        },
+    )
+    assert missing_dormitory.status_code == 404
+    with SessionLocal() as db:
+        assert db.execute(text("SELECT COUNT(*) FROM official_dormitories")).scalar_one() == 3
+
+    deleted = client.post(
+        "/api/admin/official-dormitories/batch-delete",
+        json={
+            "dormitoryIds": [dormitories["A-101"], dormitories["A-103"]],
+            "confirmation": "批量删除",
+            "reason": "清理误导入数据",
+        },
+    )
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json() == {"ok": True, "deleted": 2}
+    with SessionLocal() as db:
+        assert db.execute(text("SELECT dormitory_code FROM official_dormitories")).scalar_one() == "A-102"
+        assert db.execute(
+            text("SELECT COUNT(*) FROM official_dormitory_members WHERE official_dormitory_id IN (:first,:second)"),
+            {"first": dormitories["A-101"], "second": dormitories["A-103"]},
+        ).scalar_one() == 0
+        audit_rows = db.execute(
+            text(
+                "SELECT target_id FROM audit_logs WHERE action='DELETE_OFFICIAL_DORMITORY' ORDER BY target_id"
+            )
+        ).scalars().all()
+        assert audit_rows == sorted([str(dormitories["A-101"]), str(dormitories["A-103"])])
+
+
 def test_import_validates_workbook_accounts_grades_and_hash(client: TestClient):
     login(client, "admin", "Admin123!")
     cross_grade = workbook_bytes([("X-1", "2026001", "2026003")])
@@ -288,6 +338,12 @@ def test_scoped_admin_can_correct_and_moderate_official_dormitory(client: TestCl
         db.execute(text("INSERT INTO admin_group_scopes VALUES(20,'GRADE','1',1,:now)"), {"now": timestamp})
     login(client, "2026005")
     dormitory = client.get("/api/admin/official-dormitories").json()["dormitories"][0]
+    batch_delete = client.post(
+        "/api/admin/official-dormitories/batch-delete",
+        json={"dormitoryIds": [dormitory["id"]], "confirmation": "批量删除", "reason": "越权测试"},
+    )
+    assert batch_delete.status_code == 403
+    assert batch_delete.json()["error"]["code"] == "SUPER_ADMIN_ONLY"
     detail = client.get(f"/api/admin/official-dormitories/{dormitory['id']}").json()["dormitory"]
     renamed_member = next(member for member in detail["members"] if member["name"] == "江晚")
     assert renamed_member["loginIdentifier"] == "S2026002"

@@ -38,6 +38,7 @@ XLSXBody = Annotated[bytes, Body(media_type=XLSX_MEDIA_TYPE)]
 MAX_XLSX_BYTES = 2 * 1024 * 1024
 MAX_XLSX_UNCOMPRESSED_BYTES = 20 * 1024 * 1024
 MAX_XLSX_ENTRIES = 1000
+MAX_BATCH_DELETE = 50
 IMPORT_HEADERS = (
     "宿舍编号",
     "成员1登录标识（宿舍长）",
@@ -1025,6 +1026,50 @@ def moderate_official_dormitory_content(dormitory_id: int, request: Request, bod
     )
     db.commit()
     return {"ok": True}
+
+
+@admin_router.post("/batch-delete")
+def batch_delete_official_dormitories(request: Request, body: dict, db: DB) -> dict:
+    admin = management_user(request, db)
+    grant = require_super_admin(admin)
+    enforce_write_rate(request, admin["id"], "batch-delete", 5, 20, 600)
+    dormitory_ids = body.get("dormitoryIds")
+    if (
+        not isinstance(dormitory_ids, list)
+        or not 1 <= len(dormitory_ids) <= MAX_BATCH_DELETE
+        or any(type(dormitory_id) is not int or dormitory_id < 1 for dormitory_id in dormitory_ids)
+        or len(set(dormitory_ids)) != len(dormitory_ids)
+    ):
+        raise ApiError(400, "INVALID_DORMITORY_IDS", f"请选择 1 至 {MAX_BATCH_DELETE} 个不同的正式宿舍")
+    if body.get("confirmation") != "批量删除":
+        raise ApiError(400, "CONFIRMATION_REQUIRED", "请输入“批量删除”确认操作")
+    reason = clean_text(body.get("reason"), 200, True)
+    begin_immediate(db)
+    parameters = {f"id_{index}": dormitory_id for index, dormitory_id in enumerate(dormitory_ids)}
+    placeholders = ",".join(f":{key}" for key in parameters)
+    dormitories = all_rows(
+        db,
+        f"SELECT id,dormitory_code FROM official_dormitories WHERE id IN ({placeholders})",
+        parameters,
+    )
+    if len(dormitories) != len(dormitory_ids):
+        raise ApiError(404, "OFFICIAL_DORMITORY_NOT_FOUND", "部分正式宿舍不存在，请刷新后重试")
+    for dormitory in dormitories:
+        audit(
+            db,
+            admin,
+            request,
+            "DELETE_OFFICIAL_DORMITORY",
+            "OFFICIAL_DORMITORY",
+            dormitory["id"],
+            reason,
+            metadata={"batch": True, "batchSize": len(dormitory_ids)},
+            grant=grant,
+            before={"dormitoryCode": dormitory["dormitory_code"]},
+        )
+    db.execute(text(f"DELETE FROM official_dormitories WHERE id IN ({placeholders})"), parameters)
+    db.commit()
+    return {"ok": True, "deleted": len(dormitory_ids)}
 
 
 @admin_router.delete("/{dormitory_id}")

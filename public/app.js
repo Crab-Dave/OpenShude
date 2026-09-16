@@ -1672,10 +1672,11 @@ async function renderSettings() {
   });
 }
 
-function adminOfficialDormitoryRows(dormitories) {
+function adminOfficialDormitoryRows(dormitories, selectable) {
   return dormitories.map((dormitory) => {
-  const memberNames = dormitory.members.map((member) => `${member.role === 'LEADER' ? '宿舍长：' : ''}${member.name}${member.leaderPending ? '（待管理员处理）' : ''}`).join('、');
-    return `<tr><td><strong>${escapeHtml(dormitory.dormitory_code)}</strong><div class="field-hint">${escapeHtml(dormitory.nickname || '尚未设置昵称')}</div></td><td>${escapeHtml(dormitory.management_grade)}</td><td>${escapeHtml(memberNames)}<div class="field-hint">${dormitory.member_count}/4 人</div></td><td>${formatDate(dormitory.updated_at)}</td><td><button class="btn btn-secondary btn-sm" data-admin-official-detail="${dormitory.id}">${icon('eye')}查看</button></td></tr>`;
+    const memberNames = dormitory.members.map((member) => `${member.role === 'LEADER' ? '宿舍长：' : ''}${member.name}${member.leaderPending ? '（待管理员处理）' : ''}`).join('、');
+    const checkbox = selectable ? `<td><input type="checkbox" data-official-select="${dormitory.id}" aria-label="选择宿舍 ${escapeHtml(dormitory.dormitory_code)}"></td>` : '';
+    return `<tr>${checkbox}<td><strong>${escapeHtml(dormitory.dormitory_code)}</strong><div class="field-hint">${escapeHtml(dormitory.nickname || '尚未设置昵称')}</div></td><td>${escapeHtml(dormitory.management_grade)}</td><td>${escapeHtml(memberNames)}<div class="field-hint">${dormitory.member_count}/4 人</div></td><td>${formatDate(dormitory.updated_at)}</td><td><button class="btn btn-secondary btn-sm" data-admin-official-detail="${dormitory.id}">${icon('eye')}查看</button></td></tr>`;
   }).join('');
 }
 
@@ -1693,23 +1694,63 @@ async function renderAdminOfficialDormitories(search = state.adminOfficialDormit
     const data = await api(`/api/admin/official-dormitories?${query}`);
     total = data.total;
     if (data.dormitories.length) {
-      list = `<div class="table-wrap"><table class="data-table"><thead><tr><th>宿舍</th><th>管理年级</th><th>成员</th><th>更新时间</th><th></th></tr></thead><tbody>${adminOfficialDormitoryRows(data.dormitories)}</tbody></table></div><div class="admin-pagination"><button class="btn btn-secondary" data-admin-official-page="previous" ${state.adminOfficialDormitoryOffset ? '' : 'disabled'}>${icon('chevron-left')}上一页</button><span>第 ${state.adminOfficialDormitoryOffset + 1}–${Math.min(state.adminOfficialDormitoryOffset + data.dormitories.length, total)} 条，共 ${total} 条</span><button class="btn btn-secondary" data-admin-official-page="next" ${state.adminOfficialDormitoryOffset + data.dormitories.length < total ? '' : 'disabled'}>下一页${icon('chevron-right')}</button></div>`;
+      const selectAll = state.user.isSuperAdmin ? '<th><input type="checkbox" id="select-all-official-dormitories" aria-label="选择本页全部宿舍"></th>' : '';
+      list = `<div class="table-wrap"><table class="data-table"><thead><tr>${selectAll}<th>宿舍</th><th>管理年级</th><th>成员</th><th>更新时间</th><th></th></tr></thead><tbody>${adminOfficialDormitoryRows(data.dormitories, state.user.isSuperAdmin)}</tbody></table></div><div class="admin-pagination"><button class="btn btn-secondary" data-admin-official-page="previous" ${state.adminOfficialDormitoryOffset ? '' : 'disabled'}>${icon('chevron-left')}上一页</button><span>第 ${state.adminOfficialDormitoryOffset + 1}–${Math.min(state.adminOfficialDormitoryOffset + data.dormitories.length, total)} 条，共 ${total} 条</span><button class="btn btn-secondary" data-admin-official-page="next" ${state.adminOfficialDormitoryOffset + data.dormitories.length < total ? '' : 'disabled'}>下一页${icon('chevron-right')}</button></div>`;
     } else {
       list = emptyState('house-heart', '没有匹配的正式宿舍', search ? '换一个关键词再试试' : '导入学校确认的正式宿舍名单后会显示在这里');
     }
+    state.adminOfficialDormitories = data.dormitories;
   }
-  setPage(`<div class="toolbar">${canRead ? `<form class="search-field" id="admin-official-search">${icon('search')}<input name="search" maxlength="80" value="${escapeHtml(search)}" placeholder="搜索宿舍编号、昵称或成员姓名"></form>` : ''}<div class="toolbar-spacer"></div>${canImport ? `<button class="btn btn-primary" id="import-official-dormitories">${icon('file-up')}导入正式宿舍</button>` : ''}</div>${list}`);
+  const batchDelete = canRead && state.user.isSuperAdmin && total ? `<button class="btn btn-danger" id="batch-delete-official-dormitories" disabled>${icon('trash-2')}<span>批量删除</span></button>` : '';
+  setPage(`<div class="toolbar">${canRead ? `<form class="search-field" id="admin-official-search">${icon('search')}<input name="search" maxlength="80" value="${escapeHtml(search)}" placeholder="搜索宿舍编号、昵称或成员姓名"></form>` : ''}<div class="toolbar-spacer"></div>${batchDelete}${canImport ? `<button class="btn btn-primary" id="import-official-dormitories">${icon('file-up')}导入正式宿舍</button>` : ''}</div>${list}`);
   document.querySelector('#admin-official-search')?.addEventListener('submit', (event) => {
     event.preventDefault();
     renderAdminOfficialDormitories(new FormData(event.currentTarget).get('search').trim(), 0);
   });
   document.querySelector('#import-official-dormitories')?.addEventListener('click', showOfficialDormitoryImport);
+  const selectedInputs = [...document.querySelectorAll('[data-official-select]')];
+  const selectAll = document.querySelector('#select-all-official-dormitories');
+  const batchDeleteButton = document.querySelector('#batch-delete-official-dormitories');
+  const updateBatchSelection = () => {
+    const selectedCount = selectedInputs.filter((input) => input.checked).length;
+    batchDeleteButton.disabled = selectedCount === 0;
+    batchDeleteButton.querySelector('span').textContent = `批量删除${selectedCount ? `（${selectedCount}）` : ''}`;
+    selectAll.checked = selectedCount === selectedInputs.length;
+    selectAll.indeterminate = selectedCount > 0 && selectedCount < selectedInputs.length;
+  };
+  selectedInputs.forEach((input) => input.addEventListener('change', updateBatchSelection));
+  selectAll?.addEventListener('change', () => {
+    selectedInputs.forEach((input) => { input.checked = selectAll.checked; });
+    updateBatchSelection();
+  });
+  batchDeleteButton?.addEventListener('click', () => {
+    const selectedIds = selectedInputs.filter((input) => input.checked).map((input) => Number(input.dataset.officialSelect));
+    showOfficialDormitoryBatchDeletion(selectedIds, state.adminOfficialDormitories);
+  });
   document.querySelectorAll('[data-admin-official-detail]').forEach((button) => button.addEventListener('click', () => showAdminOfficialDormitoryDetail(Number(button.dataset.adminOfficialDetail))));
   document.querySelectorAll('[data-admin-official-page]').forEach((button) => button.addEventListener('click', () => {
     const nextOffset = button.dataset.adminOfficialPage === 'next'
       ? state.adminOfficialDormitoryOffset + 30 : Math.max(0, state.adminOfficialDormitoryOffset - 30);
     renderAdminOfficialDormitories(state.adminOfficialDormitorySearch, nextOffset);
   }));
+}
+
+function showOfficialDormitoryBatchDeletion(dormitoryIds, dormitories) {
+  const selected = dormitories.filter((dormitory) => dormitoryIds.includes(dormitory.id));
+  const codes = selected.map((dormitory) => dormitory.dormitory_code).join('、');
+  const modal = openModal(`批量删除 ${dormitoryIds.length} 个正式宿舍`, `<form id="batch-delete-official-dormitories-form"><p>将永久删除以下正式宿舍、成员关系和内容修订：${escapeHtml(codes)}</p><p class="field-hint">该操作在一个事务内完成，不会影响自由选宿舍数据。</p><div class="form-field"><label>输入“批量删除”确认</label><input name="confirmation" autocomplete="off" required></div><div class="form-field"><label>删除原因</label><textarea name="reason" maxlength="200" required></textarea></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-danger">${icon('trash-2')}永久删除 ${dormitoryIds.length} 个宿舍</button></div></form>`);
+  modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
+  modal.querySelector('form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const values = Object.fromEntries(new FormData(event.currentTarget));
+    try {
+      const result = await api('/api/admin/official-dormitories/batch-delete', { method: 'POST', body: JSON.stringify({ dormitoryIds, ...values }) });
+      closeModal(); toast(`已永久删除 ${result.deleted} 个正式宿舍`);
+      const nextOffset = dormitoryIds.length === dormitories.length && state.adminOfficialDormitoryOffset
+        ? Math.max(0, state.adminOfficialDormitoryOffset - 30) : state.adminOfficialDormitoryOffset;
+      await renderAdminOfficialDormitories(state.adminOfficialDormitorySearch, nextOffset);
+    } catch (error) { toast(error.message, 'error'); }
+  });
 }
 
 function showOfficialDormitoryImport() {
