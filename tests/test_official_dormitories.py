@@ -1,4 +1,5 @@
 import io
+import json
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
@@ -88,6 +89,17 @@ def test_super_admin_can_batch_delete_official_dormitories_atomically(client: Te
     )
     with SessionLocal() as db:
         dormitories = dict(db.execute(text("SELECT dormitory_code,id FROM official_dormitories")).all())
+    with SessionLocal.begin() as db:
+        for dormitory_id in (dormitories["A-101"], dormitories["A-103"]):
+            db.execute(
+                text(
+                    """INSERT INTO official_dormitory_revisions(
+                    official_dormitory_id,field_name,previous_value,new_value,from_version,to_version,
+                    edited_by,editor_name_snapshot,created_at)
+                    VALUES(:dormitory,'NICKNAME','','测试昵称',1,2,1,'系统管理员',:now)"""
+                ),
+                {"dormitory": dormitory_id, "now": now()},
+            )
 
     missing_confirmation = client.post(
         "/api/admin/official-dormitories/batch-delete",
@@ -125,14 +137,25 @@ def test_super_admin_can_batch_delete_official_dormitories_atomically(client: Te
             ).scalar_one()
             == 0
         )
-        audit_rows = (
+        assert (
             db.execute(
-                text("SELECT target_id FROM audit_logs WHERE action='DELETE_OFFICIAL_DORMITORY' ORDER BY target_id")
-            )
-            .scalars()
-            .all()
+                text(
+                    "SELECT COUNT(*) FROM official_dormitory_revisions WHERE official_dormitory_id IN (:first,:second)"
+                ),
+                {"first": dormitories["A-101"], "second": dormitories["A-103"]},
+            ).scalar_one()
+            == 0
         )
-        assert audit_rows == sorted([str(dormitories["A-101"]), str(dormitories["A-103"])])
+        audit_rows = db.execute(
+            text(
+                "SELECT target_id,metadata FROM audit_logs WHERE action='DELETE_OFFICIAL_DORMITORY' ORDER BY target_id"
+            )
+        ).all()
+        assert [row.target_id for row in audit_rows] == sorted([str(dormitories["A-101"]), str(dormitories["A-103"])])
+        assert [json.loads(row.metadata) for row in audit_rows] == [
+            {"batch": True, "batchSize": 2},
+            {"batch": True, "batchSize": 2},
+        ]
 
 
 @pytest.mark.parametrize(
