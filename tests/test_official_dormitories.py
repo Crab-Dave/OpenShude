@@ -117,15 +117,20 @@ def test_super_admin_can_batch_delete_official_dormitories_atomically(client: Te
     assert deleted.json() == {"ok": True, "deleted": 2}
     with SessionLocal() as db:
         assert db.execute(text("SELECT dormitory_code FROM official_dormitories")).scalar_one() == "A-102"
-        assert db.execute(
-            text("SELECT COUNT(*) FROM official_dormitory_members WHERE official_dormitory_id IN (:first,:second)"),
-            {"first": dormitories["A-101"], "second": dormitories["A-103"]},
-        ).scalar_one() == 0
-        audit_rows = db.execute(
-            text(
-                "SELECT target_id FROM audit_logs WHERE action='DELETE_OFFICIAL_DORMITORY' ORDER BY target_id"
+        assert (
+            db.execute(
+                text("SELECT COUNT(*) FROM official_dormitory_members WHERE official_dormitory_id IN (:first,:second)"),
+                {"first": dormitories["A-101"], "second": dormitories["A-103"]},
+            ).scalar_one()
+            == 0
+        )
+        audit_rows = (
+            db.execute(
+                text("SELECT target_id FROM audit_logs WHERE action='DELETE_OFFICIAL_DORMITORY' ORDER BY target_id")
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert audit_rows == sorted([str(dormitories["A-101"]), str(dormitories["A-103"])])
 
 
