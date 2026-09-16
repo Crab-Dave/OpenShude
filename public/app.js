@@ -1702,7 +1702,9 @@ async function renderAdminOfficialDormitories(search = state.adminOfficialDormit
     state.adminOfficialDormitories = data.dormitories;
   }
   const batchDelete = canRead && state.user.isSuperAdmin && total ? `<button class="btn btn-danger" id="batch-delete-official-dormitories" disabled>${icon('trash-2')}<span>批量删除</span></button>` : '';
-  setPage(`<div class="toolbar">${canRead ? `<form class="search-field" id="admin-official-search">${icon('search')}<input name="search" maxlength="80" value="${escapeHtml(search)}" placeholder="搜索宿舍编号、昵称或成员姓名"></form>` : ''}<div class="toolbar-spacer"></div>${batchDelete}${canImport ? `<button class="btn btn-primary" id="import-official-dormitories">${icon('file-up')}导入正式宿舍</button>` : ''}</div>${list}`);
+  const searchForm = canRead ? `<form class="search-field" id="admin-official-search">${icon('search')}<input name="search" maxlength="80" value="${escapeHtml(search)}" placeholder="搜索宿舍编号、昵称或成员姓名"></form>` : '';
+  const importButton = canImport ? `<button class="btn btn-primary" id="import-official-dormitories">${icon('file-up')}导入正式宿舍</button>` : '';
+  setPage(`<div class="toolbar">${searchForm}<div class="toolbar-spacer"></div>${batchDelete}${importButton}</div>${list}`);
   document.querySelector('#admin-official-search')?.addEventListener('submit', (event) => {
     event.preventDefault();
     renderAdminOfficialDormitories(new FormData(event.currentTarget).get('search').trim(), 0);
@@ -1713,8 +1715,9 @@ async function renderAdminOfficialDormitories(search = state.adminOfficialDormit
   const batchDeleteButton = document.querySelector('#batch-delete-official-dormitories');
   const updateBatchSelection = () => {
     const selectedCount = selectedInputs.filter((input) => input.checked).length;
+    const selectedCountLabel = selectedCount ? `（${selectedCount}）` : '';
     batchDeleteButton.disabled = selectedCount === 0;
-    batchDeleteButton.querySelector('span').textContent = `批量删除${selectedCount ? `（${selectedCount}）` : ''}`;
+    batchDeleteButton.querySelector('span').textContent = `批量删除${selectedCountLabel}`;
     selectAll.checked = selectedCount === selectedInputs.length;
     selectAll.indeterminate = selectedCount > 0 && selectedCount < selectedInputs.length;
   };
