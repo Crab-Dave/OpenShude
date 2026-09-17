@@ -27,6 +27,13 @@ const state = {
   selectedOfficialDormitoryId: null,
   adminOfficialDormitorySearch: '',
   adminOfficialDormitoryOffset: 0,
+  activityView: window.innerWidth < 768 ? 'day' : 'month',
+  activityDate: new Date(),
+  activityFilters: { keyword: '', type: 'all', importance: '', registration: 'all', location: '' },
+  activityDetailId: null,
+  activityTemplateId: null,
+  activityEditId: null,
+  activityExpandedSlots: new Set(),
 };
 
 let refreshPromise = null;
@@ -150,7 +157,9 @@ function apiRequestHeaders(options) {
 function showLoginAfterUnauthorized() {
   state.user = null;
   const currentPath = window.location.pathname;
-  const next = ['/roommates', '/shudong', '/sude'].includes(currentPath) || /^\/sude\/dormitories\/\d+$/.test(currentPath)
+  const next = ['/roommates', '/shudong', '/sude', '/activities'].includes(currentPath)
+    || /^\/sude\/dormitories\/\d+$/.test(currentPath)
+    || /^\/activities\/(?:new|\d+)(?:\/edit)?$/.test(currentPath)
     ? currentPath : '';
   history.replaceState({}, '', next ? `/login?next=${encodeURIComponent(next)}` : '/login');
   renderLoginPage();
@@ -297,6 +306,11 @@ const officialDormitoryNav = [
   ['official-visit', 'door-open', '赛博串门'],
 ];
 
+const activityNav = [
+  ['activities-calendar', 'calendar-days', '活动日历'],
+  ['activities-groups', 'users-round', '目标群组'],
+];
+
 const adminNav = [
   ['overview', 'layout-dashboard', '数据概览'],
   ['users', 'users', '账号管理'],
@@ -360,6 +374,10 @@ const titles = {
   'official-visit': ['赛博串门', '看看其他宿舍的介绍与公约'],
   'official-detail': ['宿舍详情', '查看宿舍介绍、公约和成员'],
   'official-dormitories': ['正式宿舍', '导入学校名单并管理正式宿舍'],
+  'activities-calendar': ['活动广场', '按时间发现和参加校园活动'],
+  'activities-detail': ['活动详情', '查看安排、名额与参与者'],
+  'activities-form': ['创建活动', '设置时间、容量和目标人群'],
+  'activities-groups': ['目标群组', '维护创建活动时使用的学生名单'],
   rounds: ['选宿舍轮次', '配置参与学生并分别保留每轮结果'],
   groups: ['宿舍组管理', '查看和处理异常宿舍组'],
   reports: ['举报处理', '仅查看用户主动提交的举报快照'],
@@ -436,10 +454,38 @@ async function enterOfficialDormitorySystem() {
   await navigate(detailMatch ? 'official-detail' : 'official-mine');
 }
 
+async function enterActivitySystem() {
+  const currentPath = window.location.pathname;
+  const activityPath = currentPath === '/activities' || /^\/activities\/(?:new|\d+)(?:\/edit)?$/.test(currentPath)
+    ? currentPath : '/activities';
+  if (!state.user) {
+    history.replaceState({}, '', `/login?next=${encodeURIComponent(activityPath)}`);
+    renderLoginPage();
+    return;
+  }
+  if (state.user.mustChangePassword) {
+    renderLoginPage();
+    showRequiredPasswordChange(activityPath);
+    return;
+  }
+  if (currentPath !== activityPath) history.pushState({}, '', activityPath);
+  document.title = '活动广场 · 树德岛哩';
+  state.mode = 'activities';
+  const detailMatch = /^\/activities\/(\d+)$/.exec(activityPath);
+  const editMatch = /^\/activities\/(\d+)\/edit$/.exec(activityPath);
+  state.activityDetailId = detailMatch ? Number(detailMatch[1]) : null;
+  state.activityEditId = editMatch ? Number(editMatch[1]) : null;
+  state.activityTemplateId = new URLSearchParams(window.location.search).get('template');
+  if (activityPath === '/activities/new' || editMatch) await navigate('activities-form');
+  else if (detailMatch) await navigate('activities-detail');
+  else await navigate('activities-calendar');
+}
+
 function renderShell() { // NOSONAR
   const management = state.mode === 'management';
   const treehole = state.mode === 'treehole';
   const officialDormitory = state.mode === 'official-dormitory';
+  const activities = state.mode === 'activities';
   let nav = studentNav;
   let brandSymbol = '合';
   let brandName = '合住';
@@ -460,14 +506,20 @@ function renderShell() { // NOSONAR
     brandName = '宿得道理';
     brandDescription = '共同建设宿舍';
     navLabel = '正式宿舍';
+  } else if (activities) {
+    nav = activityNav;
+    brandSymbol = '活';
+    brandName = '活动广场';
+    brandDescription = '校园活动日历';
+    navLabel = '校园活动';
   }
   const [title, subtitle] = titles[state.view] || titles[nav[0][0]];
   const navItems = nav.map(([key, iconName, label]) => {
-    const active = state.view === key ? 'active' : '';
+    const active = state.view === key || (key === 'activities-calendar' && state.view === 'activities-detail') ? 'active' : '';
     return `<button class="nav-item ${active}" data-view="${key}">${icon(iconName)}<span>${label}</span></button>`;
   }).join('');
   const mobileNavItems = nav.map(([key, iconName, label]) => {
-    const active = state.view === key ? 'active' : '';
+    const active = state.view === key || (key === 'activities-calendar' && state.view === 'activities-detail') ? 'active' : '';
     return `<button class="${active}" data-view="${key}">${icon(iconName)}<span>${label}</span></button>`;
   }).join('');
   let userRole = escapeHtml(state.user.grade);
@@ -476,6 +528,7 @@ function renderShell() { // NOSONAR
     state.mode !== 'student' ? `<button class="btn btn-secondary" id="roommate-system-btn">${icon('users-round')}<span>室友双选</span></button>` : '',
     !treehole ? `<button class="btn btn-secondary" id="treehole-system-btn">${icon('trees')}<span>树洞道理</span></button>` : '',
     !officialDormitory ? `<button class="btn btn-secondary" id="official-dormitory-system-btn">${icon('house-heart')}<span>宿得道理</span></button>` : '',
+    !activities ? `<button class="btn btn-secondary" id="activity-system-btn">${icon('calendar-days')}<span>活动广场</span></button>` : '',
   ].join('');
   let modeButton = '';
   if (state.user.accountType === 'USER' && state.user.canManage) {
@@ -522,6 +575,7 @@ function renderShell() { // NOSONAR
   document.querySelector('#treehole-system-btn')?.addEventListener('click', enterTreeholeSystem);
   document.querySelector('#roommate-system-btn')?.addEventListener('click', enterRoommateSystem);
   document.querySelector('#official-dormitory-system-btn')?.addEventListener('click', enterOfficialDormitorySystem);
+  document.querySelector('#activity-system-btn')?.addEventListener('click', enterActivitySystem);
   document.querySelector('#treehole-admin-btn')?.addEventListener('click', async () => {
     state.mode = 'management';
     await navigate('overview');
@@ -537,6 +591,7 @@ async function navigate(view) {
     if (state.mode === 'management') await loadAdminView(view);
     else if (state.mode === 'treehole') await loadTreeholeView(view);
     else if (state.mode === 'official-dormitory') await loadOfficialDormitoryView(view);
+    else if (state.mode === 'activities') await loadActivityView(view);
     else await loadStudentView(view);
   } catch (error) {
     setPage(emptyState('circle-alert', '页面加载失败', error.message, `<button class="btn btn-secondary" id="retry-view">${icon('refresh-cw')}重试</button>`));
@@ -601,12 +656,15 @@ async function logout() {
 
 function requestedNextPath() {
   const next = new URLSearchParams(window.location.search).get('next');
-  return ['/roommates', '/shudong', '/sude'].includes(next) || /^\/sude\/dormitories\/\d+$/.test(next || '') ? next : '';
+  return ['/roommates', '/shudong', '/sude', '/activities'].includes(next)
+    || /^\/sude\/dormitories\/\d+$/.test(next || '')
+    || /^\/activities\/(?:new|\d+)(?:\/edit)?$/.test(next || '') ? next : '';
 }
 
 async function enterRequestedPath(path) {
   if (path === '/shudong') await enterTreeholeSystem();
   else if (path === '/sude' || /^\/sude\/dormitories\/\d+$/.test(path)) await enterOfficialDormitorySystem();
+  else if (path === '/activities' || /^\/activities\/(?:new|\d+)(?:\/edit)?$/.test(path)) await enterActivitySystem();
   else if (path === '/roommates') await enterRoommateSystem();
   else goHome();
 }
@@ -626,6 +684,366 @@ function showRequiredPasswordChange(continuePath = '/roommates') {
       else goHome();
     } catch (error) { toast(error.message, 'error'); }
   });
+}
+
+function activityDateKey(value) {
+  const dateValue = value instanceof Date ? value : new Date(value);
+  return `${dateValue.getFullYear()}-${String(dateValue.getMonth() + 1).padStart(2, '0')}-${String(dateValue.getDate()).padStart(2, '0')}`;
+}
+
+function activityDateTimeInput(value) {
+  const dateValue = new Date(value);
+  return `${activityDateKey(dateValue)}T${String(dateValue.getHours()).padStart(2, '0')}:${String(dateValue.getMinutes()).padStart(2, '0')}`;
+}
+
+function activityImportanceLabel(level) {
+  return ['I · 一般', 'II · 关注', 'III · 重要', 'IV · 很重要', 'V · 必须关注'][level - 1] || `I${level}`;
+}
+
+function activityTimeLabel(activity) {
+  if (activity.isAllDay) return '全天';
+  const start = new Date(activity.startAt);
+  const end = new Date(activity.endAt);
+  const clock = (value) => `${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`;
+  return `${clock(start)}–${clock(end)}`;
+}
+
+function activityStatusBadge(activity) {
+  if (activity.status === 'DRAFT') return statusBadge('草稿', 'pending', 'file-pen-line');
+  if (activity.status === 'CANCELLED') return statusBadge('已取消', 'closed', 'calendar-x');
+  if (new Date(activity.endAt) <= new Date()) return statusBadge('已结束', 'closed', 'circle-stop');
+  return statusBadge('报名中', 'active', 'ticket-check');
+}
+
+function activitySummaryCard(activity, controls = false) {
+  const full = activity.registrationCount >= activity.capacity;
+  const percent = Math.min(100, Math.round((activity.registrationCount / activity.capacity) * 100));
+  return `<article class="activity-card activity-importance-${activity.importance}" data-activity-open="${activity.id}" tabindex="0">
+    <div class="activity-card-badges">${activity.organizerType === 'ADMIN_GROUP' ? '<span class="activity-badge official">官方</span>' : ''}<span class="activity-badge">${activityImportanceLabel(activity.importance)}</span>${activity.registered ? '<span class="activity-badge joined">已报名</span>' : ''}${full ? '<span class="activity-badge full">已满</span>' : ''}</div>
+    <h3>${escapeHtml(activity.title)}</h3>
+    <p>${icon('clock-3')}${activityTimeLabel(activity)}</p>
+    <p>${icon('map-pin')}${escapeHtml(activity.location)} · ${escapeHtml(activity.organizerName)}</p>
+    <div class="activity-capacity"><span><i style="width:${percent}%"></i></span><small>${activity.registrationCount} / ${activity.capacity}</small></div>
+    ${controls ? `<button class="btn btn-secondary activity-card-action" data-activity-open="${activity.id}">${icon('eye')}查看详情</button>` : ''}
+  </article>`;
+}
+
+function activityMonthMarkup(data) {
+  const selectedMonth = state.activityDate.getMonth();
+  return `<section class="panel activity-month"><div class="activity-weekdays">${['一', '二', '三', '四', '五', '六', '日'].map((day) => `<span>${day}</span>`).join('')}</div><div class="activity-month-grid">${data.days.map((day) => {
+    const value = new Date(`${day.date}T00:00:00`);
+    const outside = value.getMonth() !== selectedMonth;
+    const summaries = day.activities.map((activity) => `<button data-activity-open="${activity.id}" class="activity-month-event importance-${activity.importance}"><time>${activity.isAllDay ? '全天' : activityTimeLabel(activity).split('–')[0]}</time><span>${escapeHtml(activity.title)}</span></button>`).join('');
+    return `<div class="activity-month-day ${outside ? 'outside' : ''} ${day.date === activityDateKey(new Date()) ? 'today' : ''}"><button class="activity-day-number" data-activity-date="${day.date}"><span>${value.getDate()}</span><small>${day.count ? `${day.count} 个` : ''}</small></button>${summaries}${day.count > 3 ? `<button class="activity-more" data-activity-day="${day.date}">另有 ${day.count - 3} 个活动</button>` : ''}<i class="activity-heat heat-${Math.min(5, day.score === 0 ? 0 : day.score <= 3 ? 1 : day.score <= 8 ? 2 : day.score <= 15 ? 3 : day.score <= 24 ? 4 : 5)}"></i></div>`;
+  }).join('')}</div></section>`;
+}
+
+function activityYearMarkup(data) {
+  const byDate = new Map(data.days.map((day) => [day.date, day]));
+  const year = state.activityDate.getFullYear();
+  return `<div class="activity-year-grid">${Array.from({ length: 12 }, (_, month) => {
+    const first = new Date(year, month, 1);
+    const offset = (first.getDay() + 6) % 7;
+    const days = new Date(year, month + 1, 0).getDate();
+    const cells = Array.from({ length: offset }, () => '<span></span>');
+    for (let day = 1; day <= days; day += 1) {
+      const key = activityDateKey(new Date(year, month, day));
+      const aggregate = byDate.get(key) || { count: 0, score: 0 };
+      const heat = aggregate.score === 0 ? 0 : aggregate.score <= 3 ? 1 : aggregate.score <= 8 ? 2 : aggregate.score <= 15 ? 3 : aggregate.score <= 24 ? 4 : 5;
+      cells.push(`<button class="heat-${heat}" data-activity-date="${key}" title="${month + 1} 月 ${day} 日 · ${aggregate.count} 个活动">${day}</button>`);
+    }
+    const monthCount = data.days.filter((item) => new Date(`${item.date}T00:00:00`).getMonth() === month).reduce((sum, item) => sum + item.count, 0);
+    return `<section class="panel activity-mini-month"><button class="activity-mini-title" data-activity-month="${year}-${month + 1}"><strong>${month + 1} 月</strong><small>${monthCount} 个活动</small></button><div class="activity-mini-weekdays">${['一', '二', '三', '四', '五', '六', '日'].map((name) => `<span>${name}</span>`).join('')}</div><div class="activity-mini-days">${cells.join('')}</div></section>`;
+  }).join('')}</div>`;
+}
+
+function activityClusters(activities) {
+  const sorted = [...activities].sort((first, second) => new Date(first.startAt) - new Date(second.startAt));
+  const clusters = [];
+  for (const activity of sorted) {
+    const start = new Date(activity.startAt);
+    const end = new Date(activity.endAt);
+    const current = clusters.at(-1);
+    if (!current || start >= current.end) clusters.push({ start, end, activities: [activity] });
+    else {
+      current.activities.push(activity);
+      if (end > current.end) current.end = end;
+    }
+  }
+  return clusters;
+}
+
+function activityWeekMarkup(data) {
+  const start = new Date(`${data.rangeStart}T00:00:00`);
+  const days = Array.from({ length: 7 }, (_, index) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + index));
+  return `<section class="panel activity-week-scroll"><div class="activity-week"><div class="activity-week-head"><span></span>${days.map((day) => `<button data-activity-date="${activityDateKey(day)}"><small>${['周日', '周一', '周二', '周三', '周四', '周五', '周六'][day.getDay()]}</small><strong>${day.getMonth() + 1}/${day.getDate()}</strong></button>`).join('')}</div><div class="activity-week-body"><div class="activity-time-axis">${Array.from({ length: 10 }, (_, index) => `<span style="top:${index * 96}px">${String(index * 2 + 6).padStart(2, '0')}:00</span>`).join('')}</div>${days.map((day) => {
+    const key = activityDateKey(day);
+    const dayActivities = data.activities.filter((activity) => activityDateKey(activity.startAt) === key && !activity.isAllDay);
+    const clusters = activityClusters(dayActivities);
+    return `<div class="activity-week-column">${clusters.map((cluster) => {
+      const ordered = [...cluster.activities].sort((first, second) => second.importance - first.importance || second.id - first.id);
+      const top = Math.max(0, ((cluster.start.getHours() + cluster.start.getMinutes() / 60) - 6) * 48);
+      const height = Math.max(38, Math.min(160, (cluster.end - cluster.start) / 3600000 * 48));
+      return `<div class="activity-week-cluster" style="top:${top}px;min-height:${height}px">${ordered.slice(0, 2).map((activity) => `<button class="importance-${activity.importance}" data-activity-open="${activity.id}"><time>${activityTimeLabel(activity).split('–')[0]}</time><span>${escapeHtml(activity.title)}</span></button>`).join('')}${ordered.length > 2 ? `<button class="activity-cluster-more" data-activity-slot="${key}">另有 ${ordered.length - 2} 个</button>` : ''}</div>`;
+    }).join('')}</div>`;
+  }).join('')}</div></div></section>`;
+}
+
+function activityDayMarkup(data) {
+  const grouped = new Map();
+  data.activities.forEach((activity) => {
+    const key = activity.isAllDay ? '全天' : activityTimeLabel(activity).split('–')[0];
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(activity);
+  });
+  const available = data.activities.filter((activity) => activity.registrationCount < activity.capacity).length;
+  const joined = data.activities.filter((activity) => activity.registered).length;
+  return `<div class="activity-day-layout"><section class="activity-day-stats"><div><strong>${data.total}</strong><span>全部活动</span></div><div><strong>${joined}</strong><span>我已报名</span></div><div><strong>${available}</strong><span>仍有名额</span></div></section>${data.activities.length ? [...grouped.entries()].map(([slot, activities]) => {
+    const key = `${data.date}-${slot}`;
+    const expanded = state.activityExpandedSlots.has(key);
+    const shown = expanded ? activities : activities.slice(0, 3);
+    return `<section class="activity-time-group"><div class="activity-time-label"><strong>${slot}</strong><span>${activities.length} 个活动</span></div><div class="activity-time-cards">${shown.map((activity) => activitySummaryCard(activity)).join('')}${activities.length > 3 ? `<button class="btn btn-secondary" data-activity-expand="${escapeHtml(key)}">${expanded ? `${icon('chevron-up')}收起` : `${icon('chevron-down')}展开其余 ${activities.length - 3} 个`}</button>` : ''}</div></section>`;
+  }).join('') : emptyState('calendar-x', '这一天还没有活动', '可以调整筛选或创建一个新活动')}</div>`;
+}
+
+async function openActivityDayList(dateValue) {
+  const data = await api(`/api/activities/day?date=${dateValue}`);
+  const modal = openModal(`${dateValue} 的活动`, `<div class="activity-drawer-stats"><span><strong>${data.total}</strong> 全部活动</span><span><strong>${data.activities.filter((item) => item.registered).length}</strong> 已报名</span><span><strong>${data.activities.filter((item) => item.registrationCount < item.capacity).length}</strong> 有名额</span></div><div class="activity-drawer-list">${data.activities.map((activity) => activitySummaryCard(activity, true)).join('') || '<p class="field-hint">没有符合条件的活动。</p>'}</div>`, { wide: true });
+  bindActivityOpeners(modal);
+}
+
+function bindActivityOpeners(container = document) {
+  container.querySelectorAll('[data-activity-open]').forEach((element) => {
+    const open = (event) => {
+      event.stopPropagation();
+      closeModal();
+      state.activityDetailId = Number(element.dataset.activityOpen);
+      history.pushState({}, '', `/activities/${state.activityDetailId}`);
+      navigate('activities-detail');
+    };
+    element.addEventListener('click', open);
+    element.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') open(event); });
+  });
+}
+
+async function renderActivityCalendar() {
+  const params = new URLSearchParams({ view: state.activityView, date: activityDateKey(state.activityDate) });
+  Object.entries(state.activityFilters).forEach(([key, value]) => { if (value && value !== 'all') params.set(key === 'type' ? 'type' : key, value); });
+  const data = await api(`/api/activities/calendar?${params}`);
+  const title = state.activityView === 'year' ? `${state.activityDate.getFullYear()} 年` : state.activityView === 'month' ? `${state.activityDate.getFullYear()} 年 ${state.activityDate.getMonth() + 1} 月` : state.activityView === 'week' ? `${data.rangeStart} 至 ${data.rangeEnd}` : activityDateKey(state.activityDate);
+  const content = state.activityView === 'year' ? activityYearMarkup(data) : state.activityView === 'month' ? activityMonthMarkup(data) : state.activityView === 'week' ? activityWeekMarkup(data) : activityDayMarkup(await api(`/api/activities/day?date=${activityDateKey(state.activityDate)}&${params}`));
+  setPage(`<div class="activity-toolbar"><div class="activity-date-nav"><button class="btn btn-secondary" data-activity-today>今天</button><button class="btn btn-secondary icon-btn" data-activity-nav="previous" title="上一个时间段">${icon('chevron-left')}</button><button class="btn btn-secondary icon-btn" data-activity-nav="next" title="下一个时间段">${icon('chevron-right')}</button><h2>${escapeHtml(title)}</h2></div><div class="toolbar-spacer"></div><div class="segmented activity-view-switch">${[['year', '年'], ['month', '月'], ['week', '周'], ['day', '日']].map(([view, label]) => `<button class="${state.activityView === view ? 'active' : ''}" data-activity-view="${view}">${label}</button>`).join('')}</div><button class="btn btn-secondary" data-activity-groups>${icon('users-round')}目标群组</button><button class="btn btn-primary" data-activity-create>${icon('plus')}创建活动</button></div><form class="activity-filters" id="activity-filter-form"><div class="search-field">${icon('search')}<input name="keyword" maxlength="80" value="${escapeHtml(state.activityFilters.keyword)}" placeholder="搜索活动、地点或主办者"></div><select name="type"><option value="all">全部活动</option><option value="official" ${state.activityFilters.type === 'official' ? 'selected' : ''}>官方活动</option><option value="personal" ${state.activityFilters.type === 'personal' ? 'selected' : ''}>个人活动</option></select><select name="importance"><option value="">全部重要程度</option>${[5, 4, 3, 2, 1].map((level) => `<option value="${level}" ${state.activityFilters.importance === String(level) ? 'selected' : ''}>${activityImportanceLabel(level)}</option>`).join('')}</select><select name="registration"><option value="all">全部报名状态</option><option value="joined" ${state.activityFilters.registration === 'joined' ? 'selected' : ''}>我已报名</option><option value="available" ${state.activityFilters.registration === 'available' ? 'selected' : ''}>仍有名额</option><option value="mine" ${state.activityFilters.registration === 'mine' ? 'selected' : ''}>我创建的</option></select><div class="search-field">${icon('map-pin')}<input name="location" maxlength="120" value="${escapeHtml(state.activityFilters.location)}" placeholder="地点"></div><button class="btn btn-quiet" type="button" data-activity-clear>${icon('x')}清除</button></form><div class="activity-heat-legend"><span>热力</span>${[1, 2, 3, 4, 5].map((level) => `<i class="heat-${level}"></i>`).join('')}<small>按可见活动重要程度计算</small></div>${content}`);
+  history.replaceState({}, '', `/activities?view=${state.activityView}&date=${activityDateKey(state.activityDate)}`);
+  document.querySelectorAll('[data-activity-view]').forEach((button) => button.addEventListener('click', () => { state.activityView = button.dataset.activityView; renderActivityCalendar(); }));
+  document.querySelector('[data-activity-today]').addEventListener('click', () => { state.activityDate = new Date(); renderActivityCalendar(); });
+  document.querySelectorAll('[data-activity-nav]').forEach((button) => button.addEventListener('click', () => {
+    const amount = button.dataset.activityNav === 'next' ? 1 : -1;
+    const next = new Date(state.activityDate);
+    if (state.activityView === 'year') next.setFullYear(next.getFullYear() + amount);
+    else if (state.activityView === 'month') next.setMonth(next.getMonth() + amount, 1);
+    else next.setDate(next.getDate() + amount * (state.activityView === 'week' ? 7 : 1));
+    state.activityDate = next;
+    renderActivityCalendar();
+  }));
+  document.querySelectorAll('[data-activity-date]').forEach((button) => button.addEventListener('click', () => { state.activityDate = new Date(`${button.dataset.activityDate}T00:00:00`); state.activityView = 'day'; renderActivityCalendar(); }));
+  document.querySelectorAll('[data-activity-month]').forEach((button) => button.addEventListener('click', () => { const [year, month] = button.dataset.activityMonth.split('-').map(Number); state.activityDate = new Date(year, month - 1, 1); state.activityView = 'month'; renderActivityCalendar(); }));
+  document.querySelectorAll('[data-activity-day], [data-activity-slot]').forEach((button) => button.addEventListener('click', () => openActivityDayList(button.dataset.activityDay || button.dataset.activitySlot)));
+  document.querySelectorAll('[data-activity-expand]').forEach((button) => button.addEventListener('click', () => { const key = button.dataset.activityExpand; state.activityExpandedSlots.has(key) ? state.activityExpandedSlots.delete(key) : state.activityExpandedSlots.add(key); renderActivityCalendar(); }));
+  document.querySelector('[data-activity-create]').addEventListener('click', () => openActivityForm());
+  document.querySelector('[data-activity-groups]').addEventListener('click', () => navigate('activities-groups'));
+  const form = document.querySelector('#activity-filter-form');
+  let searchTimer;
+  form.addEventListener('input', (event) => {
+    if (!['keyword', 'location'].includes(event.target.name)) return;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { state.activityFilters[event.target.name] = event.target.value.trim(); renderActivityCalendar(); }, 300);
+  });
+  form.addEventListener('change', (event) => { state.activityFilters[event.target.name] = event.target.value; renderActivityCalendar(); });
+  form.addEventListener('submit', (event) => { event.preventDefault(); state.activityFilters.keyword = form.keyword.value.trim(); state.activityFilters.location = form.location.value.trim(); renderActivityCalendar(); });
+  document.querySelector('[data-activity-clear]').addEventListener('click', () => { state.activityFilters = { keyword: '', type: 'all', importance: '', registration: 'all', location: '' }; renderActivityCalendar(); });
+  bindActivityOpeners();
+}
+
+async function renderActivityDetail() {
+  const [{ activity }, participantData] = await Promise.all([
+    api(`/api/activities/${state.activityDetailId}`),
+    api(`/api/activities/${state.activityDetailId}/participants`),
+  ]);
+  const percent = Math.min(100, Math.round((activity.registrationCount / activity.capacity) * 100));
+  const participants = participantData.participants.map((participant) => `<div class="activity-participant">${avatar(participant.avatarUrl, participant.name)}<div><strong>${escapeHtml(participant.name)}</strong><span>${escapeHtml(participant.grade || '身份已隐藏')}</span></div></div>`).join('');
+  const action = activity.registered ? `<button class="btn btn-secondary" data-activity-registration="cancel">${icon('ticket-x')}取消报名</button>` : `<button class="btn btn-primary" data-activity-registration="register" ${activity.capabilities.canRegister ? '' : 'disabled'}>${icon('ticket-check')}${activity.registrationCount >= activity.capacity ? '名额已满' : '立即报名'}</button>`;
+  setPage(`<div class="activity-page-actions"><button class="btn btn-secondary" data-activity-back>${icon('arrow-left')}返回活动广场</button><div class="toolbar-spacer"></div><button class="btn btn-secondary" data-activity-template>${icon('copy')}以此为模板</button>${activity.capabilities.canEdit ? `<button class="btn btn-secondary" data-activity-edit>${icon('pencil')}编辑</button>` : ''}${activity.capabilities.canCancel ? `<button class="btn btn-danger" data-activity-cancel>${icon('calendar-x')}取消活动</button>` : ''}</div><section class="activity-detail-hero"><div><div class="activity-card-badges">${activity.organizerType === 'ADMIN_GROUP' ? '<span class="activity-badge official">官方活动</span>' : '<span class="activity-badge">个人活动</span>'}<span class="activity-badge">${activityImportanceLabel(activity.importance)}</span>${activityStatusBadge(activity)}</div><h2>${escapeHtml(activity.title)}</h2><p>${escapeHtml(activity.descriptionSummary)}</p><div class="activity-detail-meta"><span>${icon('calendar-days')}${formatDate(activity.startAt)}</span><span>${icon('clock-3')}${activityTimeLabel(activity)}</span><span>${icon('map-pin')}${escapeHtml(activity.location)}</span><span>${icon('building-2')}${escapeHtml(activity.organizerName)}</span></div></div><aside class="activity-registration-panel"><div><strong>${activity.registrationCount}</strong><span> / ${activity.capacity} 人</span></div><div class="activity-capacity"><span><i style="width:${percent}%"></i></span><small>还剩 ${Math.max(0, activity.capacity - activity.registrationCount)} 个名额</small></div>${activity.status === 'DRAFT' && activity.capabilities.canPublish ? `<button class="btn btn-primary" data-activity-publish>${icon('send')}发布活动</button>` : action}</aside></section><div class="activity-detail-grid"><section class="panel activity-description"><h3>${icon('notebook-text')}活动介绍</h3><div class="markdown-body">${activity.descriptionHtml || '<p>暂无介绍</p>'}</div>${activity.cancelReason ? `<div class="activity-cancel-reason"><strong>取消原因</strong><p>${escapeHtml(activity.cancelReason)}</p></div>` : ''}</section><aside class="panel activity-participants"><div class="section-heading"><div><h2>参与者</h2><p>只展示最小公开身份信息</p></div><span class="activity-badge">${activity.registrationCount} 人</span></div>${participants || '<p class="field-hint">暂时还没有人报名</p>'}</aside></div>`);
+  document.querySelector('[data-activity-back]').addEventListener('click', () => { history.pushState({}, '', '/activities'); navigate('activities-calendar'); });
+  document.querySelector('[data-activity-template]').addEventListener('click', () => openActivityForm(null, activity.id));
+  document.querySelector('[data-activity-edit]')?.addEventListener('click', () => openActivityForm(activity.id));
+  document.querySelector('[data-activity-publish]')?.addEventListener('click', async () => {
+    try { await api(`/api/activities/${activity.id}/publish`, { method: 'POST', body: JSON.stringify({ version: activity.version }) }); toast('活动已发布'); await renderActivityDetail(); } catch (error) { toast(error.message, 'error'); }
+  });
+  document.querySelector('[data-activity-registration]')?.addEventListener('click', async (event) => {
+    const cancel = event.currentTarget.dataset.activityRegistration === 'cancel';
+    try { await api(`/api/activities/${activity.id}${cancel ? '/registration' : '/register'}`, { method: cancel ? 'DELETE' : 'POST', body: cancel ? undefined : '{}' }); toast(cancel ? '已取消报名' : '报名成功'); await renderActivityDetail(); } catch (error) { toast(error.message, 'error'); }
+  });
+  document.querySelector('[data-activity-cancel]')?.addEventListener('click', () => showCancelActivity(activity));
+}
+
+function showCancelActivity(activity) {
+  const modal = openModal('取消活动', `<form id="activity-cancel-form"><p>取消后活动不能恢复，已有报名记录会保留用于审计。</p><div class="form-field"><label>取消原因</label><textarea name="reason" maxlength="500" ${activity.registrationCount ? 'required' : ''}></textarea></div><label class="checkbox-row"><input type="checkbox" name="confirmed" required>我确认取消该活动</label><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>返回</button><button class="btn btn-danger">${icon('calendar-x')}确认取消</button></div></form>`);
+  modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
+  modal.querySelector('#activity-cancel-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      await api(`/api/activities/${activity.id}/cancel`, { method: 'POST', body: JSON.stringify({ version: activity.version, confirmed: true, reason: event.currentTarget.reason.value }) });
+      closeModal(); toast('活动已取消'); await renderActivityDetail();
+    } catch (error) { toast(error.message, 'error'); }
+  });
+}
+
+async function activityFormCatalog() {
+  const groupRequest = state.user.isSuperAdmin ? api('/api/admin/student-selection-groups') : api('/api/student-selection-groups');
+  const groups = (await groupRequest).groups.map((group) => ({ ...group, owned: group.owned ?? false }));
+  let organizerGroups = [];
+  let grades = state.user.gradeId ? [{ id: state.user.gradeId, name: state.user.grade }] : [];
+  if (state.user.isSuperAdmin) {
+    const [adminGroups, gradeData] = await Promise.all([api('/api/admin/admin-groups'), api('/api/admin/grades')]);
+    organizerGroups = adminGroups.groups.filter((group) => group.status === 'ACTIVE').map((group) => ({ ...group, gradeIds: group.scopes.filter((scope) => scope.scope_type === 'GRADE').map((scope) => Number(scope.scope_value)) }));
+    grades = gradeData.grades;
+  } else if (state.user.canManage) {
+    const gradeData = await api('/api/admin/grades');
+    grades = gradeData.grades;
+    organizerGroups = state.user.groups.filter((group) => group.permissions.includes('ACTIVITY_PUBLISH'));
+  }
+  return { groups, organizerGroups, grades };
+}
+
+async function openActivityForm(editId = null, templateId = null) {
+  state.activityEditId = editId;
+  state.activityTemplateId = templateId;
+  history.pushState({}, '', editId ? `/activities/${editId}/edit` : `/activities/new${templateId ? `?template=${templateId}` : ''}`);
+  await navigate('activities-form');
+}
+
+async function renderActivityForm() { // NOSONAR
+  const catalog = await activityFormCatalog();
+  let source = null;
+  let templateNotice = '';
+  if (state.activityEditId) source = (await api(`/api/activities/${state.activityEditId}`)).activity;
+  else if (state.activityTemplateId) {
+    source = (await api(`/api/activities/${state.activityTemplateId}/copy`)).template;
+    templateNotice = `<div class="activity-template-note">${icon('copy-check')}<div><strong>正在使用活动模板</strong><p>主办者、报名人员和原活动状态不会复制。</p></div></div>`;
+  }
+  const defaultStart = new Date();
+  defaultStart.setHours(defaultStart.getHours() + 1, 0, 0, 0);
+  const defaultEnd = new Date(defaultStart.getTime() + 90 * 60000);
+  const selectedGradeIds = new Set(source?.targetGradeIds || (state.user.gradeId ? [state.user.gradeId] : []));
+  const selectedGroupIds = new Set(source?.targetGroupIds || source?.targetGroups?.map((group) => group.source_group_id).filter(Boolean) || []);
+  const selectedOrganizer = source?.organizerType === 'ADMIN_GROUP' ? String(source.organizerGroupId || '') : '';
+  const canPersonal = state.user.accountType === 'USER';
+  const organizerOptions = `${canPersonal ? '<option value="">个人活动</option>' : ''}${catalog.organizerGroups.map((group) => `<option value="${group.id}" ${String(group.id) === selectedOrganizer ? 'selected' : ''}>官方 · ${escapeHtml(group.name)}</option>`).join('')}`;
+  setPage(`<div class="activity-page-actions"><button class="btn btn-secondary" data-activity-form-back>${icon('arrow-left')}返回</button><span class="status-badge status-pending">${icon('file-pen-line')}${source?.status === 'PUBLISHED' ? '编辑活动' : '草稿'}</span></div><form id="activity-form" class="activity-form-layout"><section class="panel activity-form-main">${templateNotice}<div class="activity-form-section"><h2>基本信息</h2><div class="form-field"><label>活动名称</label><input name="title" maxlength="80" required value="${escapeHtml(source?.title || '')}" placeholder="例如：新生学习经验分享会"></div><div class="form-field"><label>活动介绍 · Markdown</label><textarea name="descriptionMarkdown" maxlength="5000" rows="8" placeholder="介绍活动内容和到场须知">${escapeHtml(source?.descriptionMarkdown || '')}</textarea><button type="button" class="btn btn-secondary" data-activity-preview>${icon('eye')}预览介绍</button></div></div><div class="activity-form-section"><h2>时间与地点</h2><label class="checkbox-row"><input type="checkbox" name="isAllDay" ${source?.isAllDay ? 'checked' : ''}>全天活动</label><div class="form-grid"><div class="form-field"><label>开始时间</label><input type="datetime-local" name="startAt" required value="${activityDateTimeInput(source?.startAt || defaultStart)}"></div><div class="form-field"><label>结束时间</label><input type="datetime-local" name="endAt" required value="${activityDateTimeInput(source?.endAt || defaultEnd)}"></div><div class="form-field full"><label>活动地点</label><input name="location" maxlength="120" required value="${escapeHtml(source?.location || '')}"></div></div></div><div class="activity-form-section"><h2>主办与目标人群</h2><div class="form-field"><label>活动主办方</label><select name="organizerGroupId" ${state.activityEditId ? 'disabled' : ''}>${organizerOptions}</select></div><div class="form-field"><label>目标年级</label><div class="activity-target-grid" id="activity-grade-targets">${catalog.grades.map((grade) => `<label data-activity-grade="${grade.id}"><input type="checkbox" name="targetGradeIds" value="${grade.id}" ${selectedGradeIds.has(grade.id) ? 'checked' : ''}><span>${escapeHtml(grade.name)}</span></label>`).join('')}</div></div><div class="form-field"><div class="section-heading"><div><label>目标群组</label><p>年级与群组成员取并集，发布时固定成员快照</p></div>${state.user.accountType === 'USER' ? `<button type="button" class="btn btn-secondary" data-manage-activity-groups>${icon('settings-2')}管理群组</button>` : ''}</div><div class="activity-target-groups">${catalog.groups.map((group) => `<label><input type="checkbox" name="targetGroupIds" value="${group.id}" ${selectedGroupIds.has(group.id) ? 'checked' : ''}><span><strong>${escapeHtml(group.name)}</strong><small>${group.members.length} 人 · ${group.owned ? '我的群组' : '管理员共享'}</small></span></label>`).join('') || '<p class="field-hint">暂无可用群组</p>'}</div></div></div><div class="activity-form-section"><h2>报名与展示</h2><div class="form-grid"><div class="form-field"><label>活动容量</label><input type="number" name="capacity" min="1" max="500" required value="${source?.capacity || 60}"></div><div class="form-field"><label>重要程度</label><div class="activity-importance-options">${[1, 2, 3, 4, 5].map((level) => `<label><input type="radio" name="importance" value="${level}" ${level === (source?.importance || 1) ? 'checked' : ''}><span>${['I', 'II', 'III', 'IV', 'V'][level - 1]}</span></label>`).join('')}</div></div></div></div></section><aside class="panel activity-publish-panel"><h2>发布检查</h2><p>${icon('circle-check')}结束时间晚于开始时间</p><p>${icon('circle-check')}至少选择一个年级或群组</p><p>${icon('circle-check')}容量与重要程度符合权限</p><button class="btn btn-primary" type="submit" name="intent" value="publish">${icon('send')}${source?.status === 'PUBLISHED' ? '保存修改' : '发布活动'}</button>${source?.status !== 'PUBLISHED' ? `<button class="btn btn-secondary" type="submit" name="intent" value="draft">${icon('save')}保存草稿</button>` : ''}</aside></form>`);
+  const form = document.querySelector('#activity-form');
+  const updateGradeAvailability = () => {
+    const organizerId = Number(form.organizerGroupId.value || 0);
+    const organizer = catalog.organizerGroups.find((group) => group.id === organizerId);
+    form.querySelectorAll('[data-activity-grade]').forEach((label) => {
+      const input = label.querySelector('input');
+      const allowed = organizer ? (state.user.isSuperAdmin || organizer.gradeIds.includes(Number(input.value))) : Number(input.value) === state.user.gradeId;
+      input.disabled = !allowed;
+      if (!allowed) input.checked = false;
+      label.classList.toggle('disabled', !allowed);
+    });
+    const maxImportance = organizer ? (state.user.isSuperAdmin || organizer.permissions?.includes('ACTIVITY_IMPORTANCE_SET') ? 5 : 3) : 3;
+    form.querySelectorAll('[name="importance"]').forEach((input) => { input.disabled = Number(input.value) > maxImportance; if (input.checked && input.disabled) form.querySelector('[name="importance"][value="3"]').checked = true; });
+  };
+  updateGradeAvailability();
+  form.organizerGroupId.addEventListener('change', updateGradeAvailability);
+  document.querySelector('[data-activity-form-back]').addEventListener('click', () => { history.pushState({}, '', state.activityEditId ? `/activities/${state.activityEditId}` : '/activities'); state.activityDetailId = state.activityEditId; navigate(state.activityEditId ? 'activities-detail' : 'activities-calendar'); });
+  document.querySelector('[data-manage-activity-groups]')?.addEventListener('click', () => navigate('activities-groups'));
+  document.querySelector('[data-activity-preview]').addEventListener('click', async () => {
+    try { const preview = await api('/api/activities/markdown/preview', { method: 'POST', body: JSON.stringify({ content: form.descriptionMarkdown.value }) }); openModal('活动介绍预览', `<div class="markdown-body">${preview.html || '<p>暂无内容</p>'}</div>`); } catch (error) { toast(error.message, 'error'); }
+  });
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const intent = event.submitter?.value || 'draft';
+    const organizerGroupId = Number(form.organizerGroupId.value || 0);
+    const payload = {
+      title: form.title.value,
+      descriptionMarkdown: form.descriptionMarkdown.value,
+      startAt: new Date(form.startAt.value).toISOString(),
+      endAt: new Date(form.endAt.value).toISOString(),
+      isAllDay: form.isAllDay.checked,
+      location: form.location.value,
+      capacity: Number(form.capacity.value),
+      importance: Number(form.importance.value),
+      targetGradeIds: [...form.querySelectorAll('[name="targetGradeIds"]:checked')].map((input) => Number(input.value)),
+      targetGroupIds: [...form.querySelectorAll('[name="targetGroupIds"]:checked')].map((input) => Number(input.value)),
+      ...(organizerGroupId ? { organizerGroupId } : {}),
+    };
+    try {
+      let activity;
+      if (state.activityEditId) {
+        const result = await api(`/api/activities/${state.activityEditId}`, { method: 'PATCH', body: JSON.stringify({ ...payload, version: source.version }) });
+        activity = result.activity;
+      } else {
+        activity = (await api('/api/activities', { method: 'POST', body: JSON.stringify(payload) })).activity;
+      }
+      if (intent === 'publish' && activity.status === 'DRAFT') activity = (await api(`/api/activities/${activity.id}/publish`, { method: 'POST', body: JSON.stringify({ version: activity.version }) })).activity;
+      state.activityDetailId = activity.id;
+      state.activityEditId = null;
+      state.activityTemplateId = null;
+      history.pushState({}, '', `/activities/${activity.id}`);
+      toast(intent === 'draft' ? '草稿已保存' : '活动已保存');
+      await navigate('activities-detail');
+    } catch (error) { toast(error.message, 'error'); }
+  });
+}
+
+async function activityGroupData() {
+  if (state.user.isSuperAdmin) {
+    const [{ groups }, { users }] = await Promise.all([api('/api/admin/student-selection-groups'), api('/api/admin/users')]);
+    return { groups: groups.map((group) => ({ ...group, owned: true })), candidates: users.filter((user) => user.account_type === 'USER' && user.status === 'ACTIVE'), admin: true };
+  }
+  const [{ groups }, { candidates }] = await Promise.all([api('/api/student-selection-groups'), api('/api/student-selection-groups/candidates')]);
+  return { groups, candidates, admin: false };
+}
+
+async function renderActivityGroups() {
+  const data = await activityGroupData();
+  setPage(`<div class="toolbar"><div><strong>活动目标群组</strong><div class="field-hint">本人群组与管理员共享群组使用同一套名单数据</div></div><div class="toolbar-spacer"></div><button class="btn btn-primary" data-create-activity-group>${icon('plus')}新建群组</button></div><div class="activity-group-list">${data.groups.map((group) => `<section class="panel activity-group-card"><div><span class="activity-badge ${group.owned ? 'joined' : ''}">${group.owned ? '可管理' : '管理员共享'}</span><h2>${escapeHtml(group.name)}</h2><p>${escapeHtml(group.description || '暂无说明')}</p><small>${group.members.map((member) => escapeHtml(member.name)).join('、')}</small></div>${group.owned ? `<div class="cell-actions"><button class="btn btn-secondary" data-edit-activity-group="${group.id}">${icon('pencil')}编辑</button><button class="btn btn-danger" data-delete-activity-group="${group.id}">${icon('trash-2')}删除</button></div>` : ''}</section>`).join('') || emptyState('users-round', '还没有目标群组', '新建群组后可在活动表单中直接选择') }</div>`);
+  document.querySelector('[data-create-activity-group]').addEventListener('click', () => showActivityGroupEditor(null, data));
+  document.querySelectorAll('[data-edit-activity-group]').forEach((button) => button.addEventListener('click', () => showActivityGroupEditor(data.groups.find((group) => group.id === Number(button.dataset.editActivityGroup)), data)));
+  document.querySelectorAll('[data-delete-activity-group]').forEach((button) => button.addEventListener('click', async () => {
+    const group = data.groups.find((item) => item.id === Number(button.dataset.deleteActivityGroup));
+    if (!window.confirm(`删除“${group.name}”？已发布活动的目标快照不会改变。`)) return;
+    try {
+      const options = data.admin ? { method: 'DELETE', body: JSON.stringify({ reason: '活动目标群组管理' }) } : { method: 'DELETE' };
+      await api(`${data.admin ? '/api/admin' : '/api'}/student-selection-groups/${group.id}`, options);
+      toast('群组已删除'); await renderActivityGroups();
+    } catch (error) { toast(error.message, 'error'); }
+  }));
+}
+
+function showActivityGroupEditor(group, data) {
+  const memberIds = new Set(group?.members.map((member) => member.id) || []);
+  const modal = openModal(group ? '编辑目标群组' : '新建目标群组', `<form id="activity-group-form"><div class="form-grid"><div class="form-field"><label>群组名称</label><input name="name" maxlength="80" required value="${escapeHtml(group?.name || '')}"></div><div class="form-field"><label>说明</label><input name="description" maxlength="500" value="${escapeHtml(group?.description || '')}"></div></div><div class="section"><div class="section-heading"><div><h2>群组成员</h2><p>只展示正常状态学生的必要身份信息</p></div></div><div class="candidate-grid">${data.candidates.map((candidate) => `<div class="candidate"><input type="checkbox" name="memberIds" value="${candidate.id}" id="activity-group-member-${candidate.id}" ${memberIds.has(candidate.id) ? 'checked' : ''}><label for="activity-group-member-${candidate.id}">${icon('user-round')}<span>${escapeHtml(candidate.name)}<small>${escapeHtml(candidate.grade)}</small></span></label></div>`).join('')}</div></div>${data.admin && group ? '<div class="form-field"><label>变更原因</label><input name="reason" maxlength="200" value="活动目标群组管理" required></div>' : ''}<div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary">${icon('save')}保存群组</button></div></form>`, { wide: true });
+  modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
+  modal.querySelector('#activity-group-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const body = { name: form.name.value, description: form.description.value, memberIds: [...form.querySelectorAll('[name="memberIds"]:checked')].map((input) => Number(input.value)), ...(data.admin && group ? { reason: form.reason.value } : {}) };
+    try {
+      const base = data.admin ? '/api/admin/student-selection-groups' : '/api/student-selection-groups';
+      await api(group ? `${base}/${group.id}` : base, { method: group ? 'PATCH' : 'POST', body: JSON.stringify(body) });
+      closeModal(); toast('群组已保存'); await renderActivityGroups();
+    } catch (error) { toast(error.message, 'error'); }
+  });
+}
+
+async function loadActivityView(view) {
+  if (view === 'activities-calendar') return renderActivityCalendar();
+  if (view === 'activities-detail' && state.activityDetailId) return renderActivityDetail();
+  if (view === 'activities-form') return renderActivityForm();
+  if (view === 'activities-groups') return renderActivityGroups();
+  return navigate('activities-calendar');
 }
 
 async function loadStudentView(view) {
@@ -2643,6 +3061,7 @@ async function init() {
   if (window.location.pathname === '/roommates') await enterRoommateSystem();
   else if (window.location.pathname === '/shudong') await enterTreeholeSystem();
   else if (window.location.pathname === '/sude' || /^\/sude\/dormitories\/\d+$/.test(window.location.pathname)) await enterOfficialDormitorySystem();
+  else if (window.location.pathname === '/activities' || /^\/activities\/(?:new|\d+)(?:\/edit)?$/.test(window.location.pathname)) await enterActivitySystem();
   else if (window.location.pathname === '/login') {
     const continuePath = requestedNextPath();
     if (!state.user) renderLoginPage();
@@ -2661,6 +3080,7 @@ window.addEventListener('popstate', () => {
   if (window.location.pathname === '/roommates') enterRoommateSystem();
   else if (window.location.pathname === '/shudong') enterTreeholeSystem();
   else if (window.location.pathname === '/sude' || /^\/sude\/dormitories\/\d+$/.test(window.location.pathname)) enterOfficialDormitorySystem();
+  else if (window.location.pathname === '/activities' || /^\/activities\/(?:new|\d+)(?:\/edit)?$/.test(window.location.pathname)) enterActivitySystem();
   else if (window.location.pathname === '/login') {
     const continuePath = requestedNextPath();
     if (!state.user) renderLoginPage();

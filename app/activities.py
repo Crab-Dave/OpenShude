@@ -367,6 +367,7 @@ def activity_detail(db: Session, user: dict, activity: dict) -> dict:
         {
             "descriptionMarkdown": activity["description_markdown"],
             "descriptionHtml": activity["description_html"],
+            "organizerGroupId": activity["organizer_group_id"],
             "version": activity["version"],
             "cancelReason": activity["cancel_reason"],
             "createdAt": activity["created_at"],
