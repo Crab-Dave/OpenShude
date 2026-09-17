@@ -77,7 +77,7 @@
     .month-grid { display: grid; grid-template-columns: repeat(7, minmax(0,1fr)); grid-auto-rows: 101px; }
     .day { position: relative; padding: 7px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: white; overflow: hidden; }
     .day:nth-child(7n) { border-right: 0; }
-    .day.muted { background: #fbfafd; color: #aaa0b5; }
+    .day.muted { background: #fbfafd; color: var(--muted); }
     .day.selected { background: #faf7ff; box-shadow: inset 0 0 0 2px var(--primary); }
     .day-number { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; font-size: 12px; font-weight: 750; }
     .day-number b { display: grid; place-items: center; min-width: 23px; height: 23px; border-radius: 50%; }
@@ -217,7 +217,8 @@
         ['users-round', '找室友'], ['contact', '我的卡片'], ['message-square', '私信'],
         ['bed-double', '宿舍组'], ['history', '历史结果'], ['calendar-days', '活动广场'], ['settings', '账号设置'],
       ];
-      return `<aside class="sidebar"><div class="brand"><div class="brand-mark">活</div><div><strong>活动广场</strong><small>发现校园好活动</small></div></div><div class="nav-label">校园生活</div>${items.map(([name,label]) => `<div class="nav-item ${label === '活动广场' ? 'active' : ''}">${icon(name)}${label}</div>`).join('')}<div class="sidebar-user"><strong>林夏</strong><small>2026级</small></div></aside>`;
+      const navigation = items.map(([name,label]) => `<div class="nav-item ${label === '活动广场' ? 'active' : ''}">${icon(name)}${label}</div>`).join('');
+      return `<aside class="sidebar"><div class="brand"><div class="brand-mark">活</div><div><strong>活动广场</strong><small>发现校园好活动</small></div></div><div class="nav-label">校园生活</div>${navigation}<div class="sidebar-user"><strong>林夏</strong><small>2026级</small></div></aside>`;
     }
 
     function topbar(title, subtitle) {
@@ -225,7 +226,8 @@
     }
 
     function viewToolbar(active, title) {
-      return `<div class="toolbar"><button class="btn">今天</button><button class="btn icon">${icon('chevron-left')}</button><button class="btn icon">${icon('chevron-right')}</button><h2>${title}</h2><div class="spacer"></div><div class="legend"><span>热力</span><i class="heat h1"></i><i class="heat h2"></i><i class="heat h3"></i><i class="heat h4"></i><i class="heat h5"></i></div><div class="segmented">${['年','月','周','日'].map(label => `<button class="segment ${label === active ? 'active' : ''}">${label}</button>`).join('')}</div><button class="btn primary">${icon('plus')}创建活动</button></div>`;
+      const segments = ['年','月','周','日'].map(label => `<button class="segment ${label === active ? 'active' : ''}">${label}</button>`).join('');
+      return `<div class="toolbar"><button class="btn">今天</button><button class="btn icon">${icon('chevron-left')}</button><button class="btn icon">${icon('chevron-right')}</button><h2>${title}</h2><div class="spacer"></div><div class="legend"><span>热力</span><i class="heat h1"></i><i class="heat h2"></i><i class="heat h3"></i><i class="heat h4"></i><i class="heat h5"></i></div><div class="segmented">${segments}</div><button class="btn primary">${icon('plus')}创建活动</button></div>`;
     }
 
     function filters() {
@@ -250,27 +252,45 @@
     function monthCell(day, muted = false) {
       const events = muted ? [] : (monthEvents[day] || []);
       const count = day === 17 ? 23 : events.length;
-      return `<div class="day ${muted ? 'muted' : ''} ${day === 17 && !muted ? 'selected today' : ''}"><div class="day-number"><b>${day}</b>${count ? `<span class="day-count">${count} 个</span>` : ''}</div>${events.slice(0,3).map(([time,name,type]) => `<div class="event-line ${type}"><span>${time}</span><span>${name}</span></div>`).join('')}${count > 3 ? `<div class="more-link">另有 ${count - 3} 个活动</div>` : ''}</div>`;
+      const countMarkup = count ? `<span class="day-count">${count} 个</span>` : '';
+      const eventMarkup = events.slice(0,3).map(([time,name,type]) => `<div class="event-line ${type}"><span>${time}</span><span>${name}</span></div>`).join('');
+      const more = count > 3 ? `<div class="more-link">另有 ${count - 3} 个活动</div>` : '';
+      return `<div class="day ${muted ? 'muted' : ''} ${day === 17 && !muted ? 'selected today' : ''}"><div class="day-number"><b>${day}</b>${countMarkup}</div>${eventMarkup}${more}</div>`;
     }
 
     function monthPage() {
       const cells = monthCell(31, true) + Array.from({length:30},(_,i)=>monthCell(i+1)).join('') + Array.from({length:11},(_,i)=>monthCell(i+1,true)).join('');
       const drawer = `<aside class="drawer"><div class="drawer-head"><div><h3>9 月 17 日 · 星期四</h3><p>共 23 个活动 · 热力 38（很高）</p></div><span class="drawer-close">${icon('x')}</span></div><div class="drawer-summary"><div class="mini-stat"><strong>23</strong><span>全部活动</span></div><div class="mini-stat"><strong>4</strong><span>我已报名</span></div><div class="mini-stat"><strong>16</strong><span>仍有名额</span></div></div>${activityCard('新生安全教育','14:00–15:30','大学生活动中心礼堂','学生工作处','386 / 500','critical',true)}${activityCard('AI 创作沙龙','14:00–16:00','创新工坊 A201','计算机协会','42 / 60','',false)}${activityCard('秋季摄影外拍','14:00–17:30','东门广场集合','叶澜','18 / 20','',false)}${activityCard('英语角特别场','19:00–20:30','图书馆研讨室','外语社','26 / 40','',false)}<button class="btn soft" style="width:100%;margin-top:6px">查看其余 19 个活动</button></aside>`;
-      return desktopPage('活动广场','按时间发现和参加校园活动',`${viewToolbar('月','2026 年 9 月')}${filters()}<div class="calendar-layout"><section class="panel calendar"><div class="week-head">${['周一','周二','周三','周四','周五','周六','周日'].map(x=>`<div>${x}</div>`).join('')}</div><div class="month-grid">${cells}</div></section>${drawer}</div>`);
+      const weekdays = ['周一','周二','周三','周四','周五','周六','周日'].map(x=>`<div>${x}</div>`).join('');
+      const toolbar = viewToolbar('月','2026 年 9 月') + filters();
+      return desktopPage('活动广场','按时间发现和参加校园活动',`${toolbar}<div class="calendar-layout"><section class="panel calendar"><div class="week-head">${weekdays}</div><div class="month-grid">${cells}</div></section>${drawer}</div>`);
     }
 
     function activityCard(title,time,location,organizer,capacity,type='',official=false) {
-      return `<article class="activity-card ${type}"><div class="badges">${official ? '<span class="badge official">官方</span>' : ''}<span class="badge">${type === 'critical' ? 'V · 必须关注' : 'III · 重要'}</span>${time.startsWith('14:00') && title !== '新生安全教育' ? '<span class="badge warning">时间冲突</span>' : ''}</div><h4>${title}</h4><p>${icon('clock-3')}${time}</p><p>${icon('map-pin')}${location} · ${organizer}</p><div style="display:flex;align-items:center;gap:7px;margin-top:7px"><div class="progress" style="flex:1"><span style="width:${capacity.startsWith('18') ? '90' : capacity.startsWith('42') ? '70' : '65'}%"></span></div><span style="font-size:9px;color:var(--muted)">${capacity}</span></div></article>`;
+      const officialBadge = official ? '<span class="badge official">官方</span>' : '';
+      const importance = type === 'critical' ? 'V · 必须关注' : 'III · 重要';
+      const conflict = time.startsWith('14:00') && title !== '新生安全教育' ? '<span class="badge warning">时间冲突</span>' : '';
+      let progress = '65';
+      if (capacity.startsWith('18')) progress = '90';
+      else if (capacity.startsWith('42')) progress = '70';
+      return `<article class="activity-card ${type}"><div class="badges">${officialBadge}<span class="badge">${importance}</span>${conflict}</div><h4>${title}</h4><p>${icon('clock-3')}${time}</p><p>${icon('map-pin')}${location} · ${organizer}</p><div style="display:flex;align-items:center;gap:7px;margin-top:7px"><div class="progress" style="flex:1"><span style="width:${progress}%"></span></div><span style="font-size:9px;color:var(--muted)">${capacity}</span></div></article>`;
     }
 
     function weekPage() {
       const drawer = `<aside class="drawer conflict-drawer"><div class="drawer-head"><div><h3>星期四 · 14:00</h3><p>20 个同时段活动</p></div><span class="drawer-close">${icon('x')}</span></div><div class="drawer-filters"><label class="field">${icon('search')}搜索</label><label class="field">${icon('circle-check')}仅看有名额</label></div>${activityCard('新生安全教育','14:00–15:30','大学生活动中心礼堂','学生工作处','386 / 500','critical',true)}${activityCard('AI 创作沙龙','14:00–16:00','创新工坊 A201','计算机协会','42 / 60')}${activityCard('秋季摄影外拍','14:00–17:30','东门广场集合','叶澜','18 / 20')}${activityCard('城市速写练习','14:30–16:00','艺术楼中庭','美术社','12 / 25')}<button class="btn soft" style="width:100%;margin-top:5px">加载更多 16 个</button></aside>`;
-      return desktopPage('活动广场','按时间发现和参加校园活动',`${viewToolbar('周','9 月 14 日–20 日')}${filters()}<div class="week-layout"><section class="panel week-panel"><div class="week-days"><div></div>${[['一','14'],['二','15'],['三','16'],['四','17'],['五','18'],['六','19'],['日','20']].map(([w,d])=>`<div class="${d==='17'?'active':''}"><span>${w}<b>${d}</b></span></div>`).join('')}</div><div class="week-canvas"><div class="time-labels">${['08:00','10:00','12:00','14:00','16:00','18:00','20:00','22:00'].map(t=>`<span>${t}</span>`).join('')}</div><div class="week-event info" style="left:1%;top:74px;width:12%;height:68px"><strong>10:00 城市漫步</strong>南门集合</div><div class="week-event" style="left:15.3%;top:329px;width:12%;height:75px"><strong>19:00 开源入门</strong>创新工坊</div><div class="week-event critical" style="left:43.5%;top:219px;width:5.7%;height:63px"><strong>14:00 安全教育</strong>官方 · V</div><div class="week-event" style="left:49.5%;top:219px;width:5.7%;height:78px"><strong>14:00 AI 沙龙</strong>III</div><div class="cluster" style="left:43.5%;top:301px;width:11.7%;height:43px">还有 18 个<br>同时段活动</div><div class="week-event critical" style="left:58%;top:73px;width:12%;height:64px"><strong>10:00 院系开放日</strong>官方 · IV</div><div class="week-event" style="left:72.2%;top:364px;width:12%;height:70px"><strong>20:00 乐队开放场</strong>音乐教室</div><div class="week-event info" style="left:86.4%;top:38px;width:12%;height:94px"><strong>09:00 校园定向赛</strong>操场</div></div></section>${drawer}</div>`);
+      const days = [['一','14'],['二','15'],['三','16'],['四','17'],['五','18'],['六','19'],['日','20']].map(([w,d])=>`<div class="${d==='17'?'active':''}"><span>${w}<b>${d}</b></span></div>`).join('');
+      const times = ['08:00','10:00','12:00','14:00','16:00','18:00','20:00','22:00'].map(t=>`<span>${t}</span>`).join('');
+      const toolbar = viewToolbar('周','9 月 14 日–20 日') + filters();
+      return desktopPage('活动广场','按时间发现和参加校园活动',`${toolbar}<div class="week-layout"><section class="panel week-panel"><div class="week-days"><div></div>${days}</div><div class="week-canvas"><div class="time-labels">${times}</div><div class="week-event info" style="left:1%;top:74px;width:12%;height:68px"><strong>10:00 城市漫步</strong>南门集合</div><div class="week-event" style="left:15.3%;top:329px;width:12%;height:75px"><strong>19:00 开源入门</strong>创新工坊</div><div class="week-event critical" style="left:43.5%;top:219px;width:5.7%;height:63px"><strong>14:00 安全教育</strong>官方 · V</div><div class="week-event" style="left:49.5%;top:219px;width:5.7%;height:78px"><strong>14:00 AI 沙龙</strong>III</div><div class="cluster" style="left:43.5%;top:301px;width:11.7%;height:43px">还有 18 个<br>同时段活动</div><div class="week-event critical" style="left:58%;top:73px;width:12%;height:64px"><strong>10:00 院系开放日</strong>官方 · IV</div><div class="week-event" style="left:72.2%;top:364px;width:12%;height:70px"><strong>20:00 乐队开放场</strong>音乐教室</div><div class="week-event info" style="left:86.4%;top:38px;width:12%;height:94px"><strong>09:00 校园定向赛</strong>操场</div></div></section>${drawer}</div>`);
     }
 
     function detailPage() {
       const participants = [['林夏','2026级 · 计算机科学与技术'],['江晚','2026级 · 工商管理'],['叶澜','2026级 · 计算机科学与技术'],['苏晴','2025级 · 工商管理'],['唐宁','2025级 · 视觉传达设计']];
-      return desktopPage('活动详情','查看活动安排与报名信息',`<div class="toolbar"><button class="btn">${icon('arrow-left')}返回活动广场</button><div class="spacer"></div><button class="btn">${icon('copy')}以此为模板</button><button class="btn">${icon('share-2')}复制链接</button></div><section class="panel hero"><div><div class="badges"><span class="badge official">官方活动</span><span class="badge official">V · 必须关注</span><span class="badge">报名中</span></div><span class="eyebrow">CAMPUS EVENT</span><h2>新生安全教育与校园生活说明会</h2><p>面向 2026 级新生的重要入学活动，请提前 15 分钟到场。</p><div class="hero-meta"><div class="meta-item">${icon('calendar-days')}9 月 17 日 星期四</div><div class="meta-item">${icon('clock-3')}14:00–15:30</div><div class="meta-item">${icon('map-pin')}大学生活动中心礼堂</div><div class="meta-item">${icon('building-2')}学生工作处</div></div></div><aside class="hero-action"><div class="capacity"><div><span>当前报名</span><br><strong>386</strong><span> / 500 人</span></div><span>还剩 114 个名额</span></div><div class="progress"><span style="width:77%"></span></div><button class="btn primary">${icon('ticket-check')}立即报名</button><p class="hint" style="text-align:center">活动开始前可取消报名</p></aside></section><div class="detail-grid"><section class="panel detail-panel"><h3>${icon('notebook-text')}活动介绍</h3><article><h4>活动内容</h4><p>本次说明会将介绍校园安全、宿舍生活、实验室规范和紧急联络方式，并现场解答新生常见问题。</p><h4>到场须知</h4><ul><li>请携带校园卡，并按照学院指引分区就座。</li><li>活动开始后停止入场，请合理安排时间。</li><li>如无法参加，请在开始前取消报名释放名额。</li></ul></article></section><aside class="panel detail-panel"><div style="display:flex;align-items:center"><h3 style="margin:0">${icon('users')}已报名同学</h3><span class="spacer"></span><span class="badge">386 人</span></div><p class="hint">仅展示可见的最小身份信息</p>${participants.map(([name,meta],i)=>`<div class="participant"><div class="avatar">${name.slice(0,1)}</div><div><strong>${name}</strong><span>${meta}</span></div>${i===0?'<span class="badge" style="margin-left:auto">我的报名</span>':''}</div>`).join('')}<button class="btn soft" style="width:100%;margin-top:14px">查看全部参与者</button></aside></div>`);
+      const participantMarkup = participants.map(([name,meta],i) => {
+        const own = i === 0 ? '<span class="badge" style="margin-left:auto">我的报名</span>' : '';
+        return `<div class="participant"><div class="avatar">${name.slice(0,1)}</div><div><strong>${name}</strong><span>${meta}</span></div>${own}</div>`;
+      }).join('');
+      return desktopPage('活动详情','查看活动安排与报名信息',`<div class="toolbar"><button class="btn">${icon('arrow-left')}返回活动广场</button><div class="spacer"></div><button class="btn">${icon('copy')}以此为模板</button><button class="btn">${icon('share-2')}复制链接</button></div><section class="panel hero"><div><div class="badges"><span class="badge official">官方活动</span><span class="badge official">V · 必须关注</span><span class="badge">报名中</span></div><span class="eyebrow">CAMPUS EVENT</span><h2>新生安全教育与校园生活说明会</h2><p>面向 2026 级新生的重要入学活动，请提前 15 分钟到场。</p><div class="hero-meta"><div class="meta-item">${icon('calendar-days')}9 月 17 日 星期四</div><div class="meta-item">${icon('clock-3')}14:00–15:30</div><div class="meta-item">${icon('map-pin')}大学生活动中心礼堂</div><div class="meta-item">${icon('building-2')}学生工作处</div></div></div><aside class="hero-action"><div class="capacity"><div><span>当前报名</span><br><strong>386</strong><span> / 500 人</span></div><span>还剩 114 个名额</span></div><div class="progress"><span style="width:77%"></span></div><button class="btn primary">${icon('ticket-check')}立即报名</button><p class="hint" style="text-align:center">活动开始前可取消报名</p></aside></section><div class="detail-grid"><section class="panel detail-panel"><h3>${icon('notebook-text')}活动介绍</h3><article><h4>活动内容</h4><p>本次说明会将介绍校园安全、宿舍生活、实验室规范和紧急联络方式，并现场解答新生常见问题。</p><h4>到场须知</h4><ul><li>请携带校园卡，并按照学院指引分区就座。</li><li>活动开始后停止入场，请合理安排时间。</li><li>如无法参加，请在开始前取消报名释放名额。</li></ul></article></section><aside class="panel detail-panel"><div style="display:flex;align-items:center"><h3 style="margin:0">${icon('users')}已报名同学</h3><span class="spacer"></span><span class="badge">386 人</span></div><p class="hint">仅展示可见的最小身份信息</p>${participantMarkup}<button class="btn soft" style="width:100%;margin-top:14px">查看全部参与者</button></aside></div>`);
     }
 
     function createPage() {
