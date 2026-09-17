@@ -191,6 +191,7 @@ def validate_database(filename: Path) -> dict:
         "official_dormitory_revisions",
         "activities",
         "activity_target_grades",
+        "activity_scope_grades",
         "activity_target_groups",
         "activity_target_members",
         "activity_registrations",

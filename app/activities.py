@@ -95,24 +95,14 @@ def activity_group_rows(db: Session, activity_id: int) -> list[dict]:
 
 
 def activity_scope_grade_ids(db: Session, activity: dict) -> list[int]:
-    grade_ids = set(activity_grade_ids(db, activity["id"]))
-    if activity["status"] == "DRAFT":
-        rows = all_rows(
+    return [
+        row["grade_id"]
+        for row in all_rows(
             db,
-            """SELECT DISTINCT u.grade_id FROM activity_target_groups target
-            JOIN student_selection_group_members member ON member.group_id=target.source_group_id
-            JOIN users u ON u.id=member.user_id WHERE target.activity_id=:id AND u.grade_id IS NOT NULL""",
+            "SELECT grade_id FROM activity_scope_grades WHERE activity_id=:id ORDER BY grade_id",
             {"id": activity["id"]},
         )
-    else:
-        rows = all_rows(
-            db,
-            """SELECT DISTINCT u.grade_id FROM activity_target_members target JOIN users u ON u.id=target.user_id
-            WHERE target.activity_id=:id AND u.grade_id IS NOT NULL""",
-            {"id": activity["id"]},
-        )
-    grade_ids.update(row["grade_id"] for row in rows)
-    return sorted(grade_ids)
+    ]
 
 
 def group_covers(group: dict, permission: str, grade_ids: list[int]) -> bool:
@@ -273,7 +263,22 @@ def validate_targets(db: Session, user: dict, body: dict, personal: bool) -> tup
     return grade_ids, selected_groups, sorted(audience_grade_ids)
 
 
-def write_targets(db: Session, activity_id: int, grade_ids: list[int], groups: list[dict]) -> None:
+def write_scope_grades(db: Session, activity_id: int, grade_ids: list[int]) -> None:
+    db.execute(text("DELETE FROM activity_scope_grades WHERE activity_id=:id"), {"id": activity_id})
+    for grade_id in grade_ids:
+        db.execute(
+            text("INSERT INTO activity_scope_grades(activity_id,grade_id) VALUES(:activity,:grade)"),
+            {"activity": activity_id, "grade": grade_id},
+        )
+
+
+def write_targets(
+    db: Session,
+    activity_id: int,
+    grade_ids: list[int],
+    groups: list[dict],
+    scope_grade_ids: list[int],
+) -> None:
     db.execute(text("DELETE FROM activity_target_grades WHERE activity_id=:id"), {"id": activity_id})
     db.execute(text("DELETE FROM activity_target_groups WHERE activity_id=:id"), {"id": activity_id})
     for grade_id in grade_ids:
@@ -289,6 +294,7 @@ def write_targets(db: Session, activity_id: int, grade_ids: list[int], groups: l
             ),
             {"activity": activity_id, "group": group["id"], "name": group["name"]},
         )
+    write_scope_grades(db, activity_id, scope_grade_ids)
 
 
 def expand_target_members(db: Session, user: dict, activity: dict) -> int:
@@ -307,11 +313,11 @@ def expand_target_members(db: Session, user: dict, activity: dict) -> int:
     for group_id in group_ids:
         rows = all_rows(
             db,
-            """SELECT u.id,u.name,u.grade,u.status FROM student_selection_group_members member
+            """SELECT u.id,u.name,u.grade,u.grade_id,u.status FROM student_selection_group_members member
             JOIN users u ON u.id=member.user_id WHERE member.group_id=:group""",
             {"group": group_id},
         )
-        if not rows or any(row["status"] != "ACTIVE" for row in rows):
+        if not rows or any(row["status"] != "ACTIVE" or row["grade_id"] is None for row in rows):
             raise ApiError(400, "INVALID_ACTIVITY_TARGET", "目标群组包含不可用账号")
         members.update({row["id"]: row for row in rows})
     if grade_ids:
@@ -319,7 +325,7 @@ def expand_target_members(db: Session, user: dict, activity: dict) -> int:
         params = {f"grade{index}": grade_id for index, grade_id in enumerate(grade_ids)}
         rows = all_rows(
             db,
-            f"""SELECT id,name,grade,status FROM users WHERE account_type='USER' AND status='ACTIVE'
+            f"""SELECT id,name,grade,grade_id,status FROM users WHERE account_type='USER' AND status='ACTIVE'
             AND grade_id IN ({placeholders})""",
             params,
         )
@@ -341,6 +347,11 @@ def expand_target_members(db: Session, user: dict, activity: dict) -> int:
                 "grade": member["grade"],
             },
         )
+    write_scope_grades(
+        db,
+        activity["id"],
+        sorted(set(grade_ids) | {member["grade_id"] for member in members.values()}),
+    )
     return len(members)
 
 
@@ -479,19 +490,40 @@ def calendar_range(view: str, selected: date) -> tuple[datetime, datetime]:
 
 
 def range_activities(db: Session, user: dict, start: datetime, end: datetime, filters: dict) -> list[dict]:
+    visibility_sql = "1=1"
+    if user["account_type"] != "SUPER_ADMIN":
+        visibility_sql = """a.created_by=:viewer
+        OR EXISTS (SELECT 1 FROM activity_target_members target
+          WHERE target.activity_id=a.id AND target.user_id=:viewer)
+        OR (a.organizer_type='ADMIN_GROUP' AND EXISTS (
+          SELECT 1 FROM admin_group_members manager
+          JOIN admin_groups admin_group ON admin_group.id=manager.group_id AND admin_group.status='ACTIVE'
+          WHERE manager.user_id=:viewer AND manager.group_id=a.organizer_group_id
+          AND EXISTS (SELECT 1 FROM admin_group_permissions permission
+            WHERE permission.group_id=manager.group_id
+            AND permission.permission_code IN ('ACTIVITY_READ','ACTIVITY_PUBLISH'))
+          AND EXISTS (SELECT 1 FROM activity_scope_grades scope WHERE scope.activity_id=a.id)
+          AND NOT EXISTS (
+            SELECT 1 FROM activity_scope_grades target_scope WHERE target_scope.activity_id=a.id
+            AND NOT EXISTS (SELECT 1 FROM admin_group_scopes manager_scope
+              WHERE manager_scope.group_id=manager.group_id AND manager_scope.scope_type='GRADE'
+              AND CAST(manager_scope.scope_value AS INTEGER)=target_scope.grade_id)
+          )
+        ))"""
+    params = {
+        "viewer": user["id"],
+        "start": start.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        "end": end.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
     rows = all_rows(
         db,
         ACTIVITY_SELECT
-        + """ WHERE a.status='PUBLISHED' AND a.start_at<:end AND a.end_at>:start
+        + f""" WHERE a.status='PUBLISHED' AND a.start_at<:end AND a.end_at>:start
+        AND ({visibility_sql})
         ORDER BY a.is_all_day DESC,a.start_at,a.importance DESC,a.id DESC""",
-        {
-            "viewer": user["id"],
-            "start": start.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-            "end": end.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-        },
+        params,
     )
-    visible = [activity for activity in rows if can_read_activity(db, user, activity)]
-    return filtered_activities(visible, user, filters)
+    return filtered_activities(rows, user, filters)
 
 
 @router.post("/markdown/preview")
@@ -632,7 +664,7 @@ def create_activity(request: Request, body: dict, db: DB) -> dict:
             "now": timestamp,
         },
     )
-    write_targets(db, result.lastrowid, grade_ids, groups)
+    write_targets(db, result.lastrowid, grade_ids, groups, scope_grade_ids)
     audit(
         db,
         user,
@@ -671,14 +703,27 @@ def activity_participants(activity_id: int, request: Request, db: DB, cursor: in
         ORDER BY registration.id LIMIT 21 OFFSET :offset""",
         {"activity": activity_id, "offset": offset},
     )
+    participant_ids = [row["user_id"] for row in rows[:20] if row["user_id"] is not None]
+    blocked_ids = set()
+    if participant_ids:
+        placeholders = ",".join(f":participant{index}" for index in range(len(participant_ids)))
+        block_params = {"viewer": user["id"]}
+        block_params.update(
+            {f"participant{index}": participant_id for index, participant_id in enumerate(participant_ids)}
+        )
+        blocked_ids = {
+            row["other_id"]
+            for row in all_rows(
+                db,
+                f"""SELECT CASE WHEN blocker_id=:viewer THEN blocked_id ELSE blocker_id END AS other_id
+                FROM blocks WHERE (blocker_id=:viewer AND blocked_id IN ({placeholders}))
+                OR (blocked_id=:viewer AND blocker_id IN ({placeholders}))""",
+                block_params,
+            )
+        }
     participants = []
     for row in rows[:20]:
-        blocked = row["user_id"] is not None and one(
-            db,
-            """SELECT 1 AS found FROM blocks WHERE
-            (blocker_id=:viewer AND blocked_id=:other) OR (blocker_id=:other AND blocked_id=:viewer)""",
-            {"viewer": user["id"], "other": row["user_id"]},
-        )
+        blocked = row["user_id"] is not None and row["user_id"] in blocked_ids
         if blocked or row["card_status"] != "PUBLISHED":
             participants.append({"name": "匿名同学", "grade": "", "avatarUrl": "", "cardId": None})
         else:
@@ -786,7 +831,7 @@ def update_activity(activity_id: int, request: Request, body: dict, db: DB) -> d
         {**values, "now": timestamp, "id": activity_id},
     )
     if targets_changed:
-        write_targets(db, activity_id, grade_ids, groups)
+        write_targets(db, activity_id, grade_ids, groups, scope_grade_ids)
         if activity["status"] == "PUBLISHED":
             expand_target_members(db, user, {**activity, **values})
     audit(
@@ -820,6 +865,7 @@ def publish_activity(activity_id: int, request: Request, body: dict, db: DB) -> 
         raise ApiError(409, "ACTIVITY_EDIT_CONFLICT", "活动已被其他人修改，请重新加载")
     if activity["start_at"] <= now():
         raise ApiError(409, "ACTIVITY_ALREADY_STARTED", "活动已经开始")
+    member_count = expand_target_members(db, user, activity)
     if activity["organizer_type"] == "ADMIN_GROUP":
         grant = official_group_grant(
             db,
@@ -828,7 +874,6 @@ def publish_activity(activity_id: int, request: Request, body: dict, db: DB) -> 
             activity_scope_grade_ids(db, activity),
             activity["importance"],
         )
-    member_count = expand_target_members(db, user, activity)
     timestamp = now()
     db.execute(
         text(

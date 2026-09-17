@@ -85,6 +85,10 @@ def test_group_target_snapshot_visibility_registration_and_markdown(client: Test
     assert registered.json() == {"registered": True, "registrationCount": 1}
     participants = target.get(f"/api/activities/{activity['id']}/participants").json()["participants"]
     assert participants[0]["name"] == "江晚"
+    with SessionLocal.begin() as db:
+        db.execute(text("INSERT INTO blocks(blocker_id,blocked_id,created_at) VALUES(2,3,:now)"), {"now": now()})
+    hidden_participant = client.get(f"/api/activities/{activity['id']}/participants").json()["participants"]
+    assert hidden_participant[0] == {"name": "匿名同学", "grade": "", "avatarUrl": "", "cardId": None}
     assert target.delete(f"/api/activities/{activity['id']}/registration").json() == {
         "registered": False,
         "registrationCount": 0,
@@ -223,6 +227,74 @@ def test_official_activity_uses_one_active_admin_group_and_revokes_immediately(c
     assert revoked.status_code == 404
     detail = client.get(f"/api/activities/{official['id']}").json()["activity"]
     assert detail["capabilities"]["canPublish"] is False
+
+
+def test_official_activity_scope_does_not_follow_later_user_grade_changes(client: TestClient):
+    timestamp = now()
+    with SessionLocal.begin() as db:
+        group_id = db.execute(
+            text(
+                """INSERT INTO admin_groups(code,name,description,status,created_by,created_at,updated_at)
+                VALUES('SNAPSHOT_TEAM','范围快照组','','ACTIVE',1,:now,:now)"""
+            ),
+            {"now": timestamp},
+        ).lastrowid
+        db.execute(
+            text("INSERT INTO admin_group_members(group_id,user_id,created_by,created_at) VALUES(:group,2,1,:now)"),
+            {"group": group_id, "now": timestamp},
+        )
+        db.execute(
+            text(
+                """INSERT INTO admin_group_permissions(group_id,permission_code,created_by,created_at)
+                VALUES(:group,'ACTIVITY_PUBLISH',1,:now)"""
+            ),
+            {"group": group_id, "now": timestamp},
+        )
+        for grade_id in (1, 2):
+            db.execute(
+                text(
+                    """INSERT INTO admin_group_scopes(group_id,scope_type,scope_value,created_by,created_at)
+                    VALUES(:group,'GRADE',:grade,1,:now)"""
+                ),
+                {"group": group_id, "grade": str(grade_id), "now": timestamp},
+            )
+
+    login(client, "2026001")
+    target_group = client.post(
+        "/api/student-selection-groups",
+        json={"name": "跨年级目标", "description": "", "memberIds": [4]},
+    ).json()["group"]
+    published = publish_activity(
+        client,
+        create_activity(
+            client,
+            organizerGroupId=group_id,
+            targetGradeIds=[],
+            targetGroupIds=[target_group["id"]],
+        ),
+    )
+    with SessionLocal.begin() as db:
+        scope = (
+            db.execute(
+                text("SELECT grade_id FROM activity_scope_grades WHERE activity_id=:activity"),
+                {"activity": published["id"]},
+            )
+            .scalars()
+            .all()
+        )
+        assert scope == [2]
+        db.execute(text("UPDATE users SET grade='2026级',grade_id=1 WHERE id=4"))
+        db.execute(
+            text("DELETE FROM admin_group_scopes WHERE group_id=:group AND scope_value='2'"),
+            {"group": group_id},
+        )
+
+    cancelled = client.post(
+        f"/api/activities/{published['id']}/cancel",
+        json={"version": published["version"], "confirmed": True, "reason": ""},
+    )
+    assert cancelled.status_code == 404
+    assert cancelled.json()["error"]["code"] == "ACTIVITY_NOT_FOUND"
 
 
 def test_markdown_preview_audit_and_permanent_delete(client: TestClient):
