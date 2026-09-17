@@ -43,11 +43,21 @@ let browser;
       endAt: '2026-09-16T17:30:00.000Z',
     }),
     timestamp: activityTimestamp('2026-09-17T00:30'),
+    weekTop: (() => {
+      state.activityDate = activityDateFromKey('2026-09-17');
+      const host = document.createElement('div');
+      host.innerHTML = activityWeekMarkup({
+        rangeStart: '2026-09-14',
+        activities: [{ id: 1, title: '时区检查', startAt: '2026-09-17T06:00:00.000Z', endAt: '2026-09-17T07:00:00.000Z', isAllDay: false, importance: 3 }],
+      });
+      return host.querySelector('.activity-week-cluster').style.top;
+    })(),
   }));
   assert.deepEqual(activityTimezone, {
     date: '2026-09-17',
     time: '00:30–01:30',
     timestamp: '2026-09-16T16:30:00.000Z',
+    weekTop: '260px',
   });
   await timezonePage.close();
 
@@ -216,15 +226,38 @@ let browser;
   await desktop.waitForSelector('.activity-month-grid');
   assert.equal(new URL(desktop.url()).pathname, '/activities');
   assert.equal(await desktop.locator('.sidebar-brand strong').textContent(), '活动广场');
+  assert.equal(await desktop.locator('.activity-filters > label').count(), 4);
+  assert.equal(await desktop.locator('.activity-filters [name="location"]').count(), 0);
+  assert.match(await desktop.locator('[data-activity-groups]').textContent(), /我的群组/);
+  await desktop.locator('[data-activity-view="year"]').click();
+  await desktop.waitForSelector('.activity-year-grid');
+  assert.equal(await desktop.locator('.activity-mini-month').count(), 12);
+  await desktop.locator('[data-activity-view="month"]').click();
+  await desktop.waitForSelector('.activity-month-grid');
   assert.equal(await desktop.locator('[data-activity-date="2026-09-24"]').count(), 1);
   await desktop.locator('[data-activity-date="2026-09-24"]').click();
   await desktop.waitForSelector('.activity-day-layout');
+  assert.equal(await desktop.locator('.activity-day-picker').count(), 7);
+  assert.match(await desktop.locator('.activity-date-nav h2').textContent(), /9 月 24 日 · 星期四/);
   assert.match(await desktop.locator('.activity-time-group').first().textContent(), /18 个活动/);
   assert.match(await desktop.locator('[data-activity-expand]').first().textContent(), /展开其余 15 个/);
   await desktop.locator('[data-activity-view="week"]').click();
   await desktop.waitForSelector('.activity-week-cluster');
   assert.match(await desktop.locator('.activity-cluster-more').first().textContent(), /另有 18 个/);
   await desktop.screenshot({ path: path.join(outputDir, 'activity-plaza-desktop.png'), fullPage: true });
+  await desktop.locator('.activity-week-cluster [data-activity-open]').first().click();
+  await desktop.waitForSelector('.activity-detail-hero');
+  assert.equal(await desktop.locator('.activity-detail-eyebrow').textContent(), 'CAMPUS EVENT');
+  assert.match(await desktop.locator('.activity-registration-panel').textContent(), /当前报名.*还剩/s);
+  assert.equal(await desktop.locator('[data-activity-copy-link]').count(), 1);
+  await desktop.screenshot({ path: path.join(outputDir, 'activity-detail-desktop.png'), fullPage: true });
+  await desktop.locator('[data-activity-template]').click();
+  await desktop.waitForSelector('#activity-form');
+  assert.match(await desktop.locator('.activity-template-note').textContent(), /正在以“.*”为模板/);
+  await desktop.locator('[data-activity-clear-template]').click();
+  await desktop.waitForFunction(() => !document.querySelector('.activity-template-note'));
+  await desktop.locator('[data-activity-form-back]').click();
+  await desktop.waitForSelector('.activity-week-cluster');
   await desktop.locator('[data-view="activities-groups"]').first().click();
   await desktop.waitForSelector('.activity-group-card');
   await desktop.locator('[data-create-activity-group]').click();
@@ -235,6 +268,10 @@ let browser;
   await desktop.locator('[data-view="activities-calendar"]').first().click();
   await desktop.locator('[data-activity-create]').click();
   await desktop.waitForSelector('#activity-form');
+  assert.match(await desktop.locator('.activity-target-groups').textContent(), /浏览器验收群组.*我的群组/s);
+  assert.equal(await desktop.locator('.activity-check-row').count(), 4);
+  assert.equal(await desktop.locator('.activity-target-groups input').first().evaluate((input) => getComputedStyle(input).width), '16px');
+  await desktop.screenshot({ path: path.join(outputDir, 'activity-form-desktop.png'), fullPage: true });
   await desktop.locator('#activity-form [name="title"]').fill('浏览器验收活动');
   await desktop.locator('#activity-form [name="location"]').fill('创新工坊 A201');
   await desktop.locator('#activity-form button[value="draft"]').click();
@@ -567,6 +604,14 @@ let browser;
   await mobile.locator('#activity-system-btn').click();
   await mobile.waitForSelector('.activity-day-layout');
   assert.equal(await mobile.locator('.mobile-nav button').count(), 2);
+  assert.equal(await mobile.locator('.activity-day-picker').count(), 7);
+  assert.equal(await mobile.locator('.activity-filters').isVisible(), false);
+  await mobile.locator('[data-activity-toggle-filters]').click();
+  await mobile.waitForFunction(() => document.querySelector('.activity-filters')?.classList.contains('open'));
+  assert.equal(await mobile.locator('.activity-filters').isVisible(), true);
+  assert.equal(await mobile.locator('[data-activity-toggle-filters]').getAttribute('aria-expanded'), 'true');
+  await mobile.locator('[data-activity-toggle-filters]').click();
+  await mobile.waitForFunction(() => !document.querySelector('.activity-filters')?.classList.contains('open'));
   await mobile.locator('[data-activity-view="month"]').click();
   await mobile.waitForSelector('.activity-month-grid');
   await mobile.locator('[data-activity-date="2026-09-24"]').click();
