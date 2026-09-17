@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow">
+  <title>活动广场 · 交互设计 Demo</title>
+  <link rel="stylesheet" href="activity-plaza-demo.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">活</span>
+        <div><strong>活动广场</strong><small>发现校园好活动</small></div>
+      </div>
+      <span class="nav-label">校园生活</span>
+      <nav class="nav-list" aria-label="主导航">
+        <button class="nav-item"><i data-lucide="users-round"></i><span>找室友</span></button>
+        <button class="nav-item"><i data-lucide="contact"></i><span>我的卡片</span></button>
+        <button class="nav-item"><i data-lucide="message-square"></i><span>私信</span></button>
+        <button class="nav-item"><i data-lucide="bed-double"></i><span>宿舍组</span></button>
+        <button class="nav-item"><i data-lucide="history"></i><span>历史结果</span></button>
+        <button class="nav-item active" data-go-calendar><i data-lucide="calendar-days"></i><span>活动广场</span></button>
+        <button class="nav-item"><i data-lucide="settings"></i><span>账号设置</span></button>
+      </nav>
+      <div class="sidebar-user"><strong>林夏</strong><span>2026级</span></div>
+    </aside>
+
+    <header class="topbar">
+      <button class="mobile-menu" aria-label="打开导航"><i data-lucide="menu"></i></button>
+      <div class="topbar-title"><h1 id="page-title">活动广场</h1><p id="page-subtitle">按时间发现和参加校园活动</p></div>
+      <div class="topbar-actions">
+        <button class="btn top-link"><i data-lucide="home"></i><span>首页</span></button>
+        <button class="btn top-link"><i data-lucide="trees"></i><span>树洞道理</span></button>
+        <button class="btn top-link"><i data-lucide="house-heart"></i><span>宿得道理</span></button>
+        <button class="btn top-link"><i data-lucide="log-out"></i><span>退出</span></button>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="demo-notice" aria-label="演示说明">
+        <i data-lucide="flask-conical"></i>
+        <span><strong>交互设计 Demo</strong> · 数据仅保存在当前浏览器，可自由报名、筛选和创建活动。</span>
+        <button class="btn btn-sm" data-reset-demo><i data-lucide="rotate-ccw"></i>重置演示</button>
+      </section>
+
+      <section id="calendar-page">
+        <div class="calendar-toolbar">
+          <div class="date-navigation">
+            <button class="btn" data-nav="today">今天</button>
+            <button class="btn btn-icon" data-nav="previous" aria-label="上一个时间段"><i data-lucide="chevron-left"></i></button>
+            <button class="btn btn-icon" data-nav="next" aria-label="下一个时间段"><i data-lucide="chevron-right"></i></button>
+            <h2 id="range-title"></h2>
+          </div>
+          <div class="toolbar-spacer"></div>
+          <div class="heat-legend" aria-label="活动热力图例">
+            <span>热力</span><i class="heat heat-1"></i><i class="heat heat-2"></i><i class="heat heat-3"></i><i class="heat heat-4"></i><i class="heat heat-5"></i>
+          </div>
+          <div class="view-switch" role="group" aria-label="日历视图">
+            <button data-view="year">年</button><button data-view="month">月</button><button data-view="week">周</button><button data-view="day">日</button>
+          </div>
+          <button class="btn" data-manage-groups><i data-lucide="users-round"></i>我的群组</button>
+          <button class="btn btn-primary" data-create><i data-lucide="plus"></i>创建活动</button>
+        </div>
+
+        <div class="mobile-view-row">
+          <div class="view-switch" role="group" aria-label="移动端日历视图">
+            <button data-view="year">年</button><button data-view="month">月</button><button data-view="week">周</button><button data-view="day">日</button>
+          </div>
+          <button class="btn btn-icon" data-toggle-filters aria-label="展开筛选" aria-expanded="false"><i data-lucide="filter"></i></button>
+          <button class="btn btn-icon" data-manage-groups aria-label="管理我的群组"><i data-lucide="users-round"></i></button>
+          <button class="btn btn-primary btn-icon" data-create aria-label="创建活动"><i data-lucide="plus"></i></button>
+        </div>
+
+        <form class="filters" id="activity-filters">
+          <label class="search-field"><i data-lucide="search"></i><input id="filter-search" maxlength="80" placeholder="搜索活动、地点或主办者"></label>
+          <label><span>活动类型</span><select id="filter-type"><option value="all">全部活动</option><option value="official">官方活动</option><option value="personal">个人活动</option></select></label>
+          <label><span>重要程度</span><select id="filter-importance"><option value="all">全部重要程度</option><option value="5">V · 必须关注</option><option value="4">IV · 很重要</option><option value="3">III · 重要</option><option value="2">II · 关注</option><option value="1">I · 一般</option></select></label>
+          <label><span>报名状态</span><select id="filter-registration"><option value="all">全部报名状态</option><option value="joined">我已报名</option><option value="available">仍有名额</option><option value="mine">我创建的</option></select></label>
+          <button type="button" class="btn filter-clear" data-clear-filters><i data-lucide="x"></i>清除</button>
+        </form>
+
+        <div id="calendar-content" aria-live="polite"></div>
+      </section>
+
+      <section id="detail-page" hidden></section>
+      <section id="form-page" hidden></section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="移动端主导航">
+      <button><i data-lucide="users-round"></i><span>找室友</span></button>
+      <button><i data-lucide="contact"></i><span>我的卡片</span></button>
+      <button><i data-lucide="message-square"></i><span>私信</span></button>
+      <button><i data-lucide="bed-double"></i><span>宿舍组</span></button>
+      <button class="active" data-go-calendar><i data-lucide="calendar-days"></i><span>活动</span></button>
+      <button><i data-lucide="settings"></i><span>设置</span></button>
+    </nav>
+  </div>
+
+  <aside id="activity-drawer" class="drawer" aria-label="活动列表" aria-hidden="true"></aside>
+  <div id="modal-root"></div>
+  <div id="toast-root" class="toast-root" aria-live="polite"></div>
+
+  <script src="../../public/vendor/lucide.min.js"></script>
+  <script src="activity-plaza-demo.js"></script>
+</body>
+</html>

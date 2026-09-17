@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>活动广场页面示意图</title>
+  <style>
+    :root {
+      --bg: #f7f5fb;
+      --surface: #fff;
+      --surface-soft: #f1edf8;
+      --surface-warm: #fff4f9;
+      --ink: #241b2f;
+      --muted: #70667c;
+      --line: #e5def0;
+      --line-strong: #d2c7e2;
+      --primary: #6f42c1;
+      --primary-dark: #563092;
+      --primary-soft: #eee6fa;
+      --accent: #cf568b;
+      --accent-soft: #fbe4ef;
+      --warning: #93631c;
+      --warning-soft: #f9edcf;
+      --info: #2c6195;
+      --info-soft: #e4eef8;
+      --shadow: 0 12px 30px rgba(70, 45, 96, .11);
+      font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); }
+    button, input, select, textarea { font: inherit; }
+    button { cursor: default; }
+    svg { width: 17px; height: 17px; stroke-width: 1.9; }
+    .desktop { min-height: 900px; background: var(--bg); }
+    .sidebar { position: fixed; inset: 0 auto 0 0; width: 224px; padding: 22px 14px; color: white; background: #21142f; z-index: 5; }
+    .brand { display: flex; align-items: center; gap: 12px; padding: 0 8px 24px; }
+    .brand-mark { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 8px; background: #8255d7; font-size: 21px; font-weight: 800; }
+    .brand strong { display: block; font-size: 18px; }
+    .brand small { color: #cbbdde; }
+    .nav-label { margin: 12px 12px 8px; color: #9b86b2; font-size: 11px; }
+    .nav-item { display: flex; align-items: center; gap: 12px; height: 42px; margin: 3px 0; padding: 0 12px; border-radius: 7px; color: #e4dbee; font-size: 15px; }
+    .nav-item.active { color: white; background: #643d98; font-weight: 700; }
+    .sidebar-user { position: absolute; inset: auto 14px 22px; padding: 15px 8px 0; border-top: 1px solid #49355a; }
+    .sidebar-user strong { display: block; }
+    .sidebar-user small { color: #bba8d2; }
+    .topbar { position: fixed; inset: 0 0 auto 224px; height: 66px; display: flex; align-items: center; padding: 0 28px; border-bottom: 1px solid var(--line); background: rgba(247,245,251,.96); z-index: 4; }
+    .topbar h1 { margin: 0; font-size: 20px; }
+    .topbar p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+    .top-actions { display: flex; gap: 8px; margin-left: auto; }
+    .main { margin-left: 224px; padding: 92px 28px 34px; min-height: 900px; }
+    .btn { height: 39px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: 7px; background: white; color: var(--ink); font-weight: 650; }
+    .btn.primary { border-color: var(--primary); background: var(--primary); color: white; }
+    .btn.soft { border-color: var(--primary-soft); background: var(--primary-soft); color: var(--primary-dark); }
+    .btn.icon { width: 39px; padding: 0; }
+    .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .toolbar h2 { min-width: 190px; margin: 0 16px 0 4px; font-size: 22px; }
+    .spacer { flex: 1; }
+    .segmented { display: inline-flex; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: white; }
+    .segment { min-width: 48px; height: 32px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); }
+    .segment.active { background: var(--primary-soft); color: var(--primary-dark); font-weight: 750; }
+    .filters { display: flex; gap: 10px; margin-bottom: 14px; }
+    .field { height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 7px; background: white; color: var(--muted); }
+    .field.search { min-width: 320px; }
+    .field input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--ink); }
+    .field select { border: 0; outline: 0; background: transparent; color: var(--ink); }
+    .panel { border: 1px solid var(--line); border-radius: 9px; background: white; box-shadow: 0 5px 18px rgba(70,45,96,.04); }
+    .legend { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+    .heat { width: 16px; height: 16px; border-radius: 4px; border: 1px solid rgba(86,48,146,.08); }
+    .h0 { background: #fbfafd; } .h1 { background: #f1eafa; } .h2 { background: #dfcff3; }
+    .h3 { background: #c3a5e8; } .h4 { background: #8d62cb; } .h5 { background: #cf568b; }
+    .calendar-layout { position: relative; padding-right: 378px; }
+    .calendar { overflow: hidden; }
+    .week-head { display: grid; grid-template-columns: repeat(7, 1fr); border-bottom: 1px solid var(--line); background: #fbfafd; }
+    .week-head div { padding: 10px; text-align: center; color: var(--muted); font-size: 12px; font-weight: 700; }
+    .month-grid { display: grid; grid-template-columns: repeat(7, minmax(0,1fr)); grid-auto-rows: 101px; }
+    .day { position: relative; padding: 7px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: white; overflow: hidden; }
+    .day:nth-child(7n) { border-right: 0; }
+    .day.muted { background: #fbfafd; color: #aaa0b5; }
+    .day.selected { background: #faf7ff; box-shadow: inset 0 0 0 2px var(--primary); }
+    .day-number { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; font-size: 12px; font-weight: 750; }
+    .day-number b { display: grid; place-items: center; min-width: 23px; height: 23px; border-radius: 50%; }
+    .today .day-number b { background: var(--primary); color: white; }
+    .day-count { color: var(--muted); font-size: 10px; font-weight: 500; }
+    .event-line { display: flex; align-items: center; gap: 4px; min-width: 0; margin: 3px 0; padding: 3px 5px; border-radius: 4px; background: var(--primary-soft); color: #57358b; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .event-line.high { background: #e2d2f3; color: #3f1f72; font-weight: 700; }
+    .event-line.critical { background: var(--accent-soft); color: #9e3262; font-weight: 700; }
+    .more-link { margin-top: 3px; color: var(--primary-dark); font-size: 10px; font-weight: 750; }
+    .drawer { position: absolute; inset: 0 0 auto auto; width: 362px; height: 641px; padding: 18px; border: 1px solid var(--line-strong); border-radius: 9px; background: white; box-shadow: var(--shadow); }
+    .drawer-head { display: flex; align-items: flex-start; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+    .drawer-head h3 { margin: 0; font-size: 18px; }
+    .drawer-head p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+    .drawer-close { margin-left: auto; color: var(--muted); }
+    .drawer-summary { display: flex; gap: 8px; margin: 12px 0; }
+    .mini-stat { flex: 1; padding: 9px; border-radius: 7px; background: var(--surface-soft); }
+    .mini-stat strong { display: block; font-size: 16px; }
+    .mini-stat span { color: var(--muted); font-size: 10px; }
+    .activity-card { margin: 9px 0; padding: 11px; border: 1px solid var(--line); border-left: 4px solid #9f7bd1; border-radius: 7px; background: white; }
+    .activity-card.critical { border-left-color: var(--accent); background: #fffafd; }
+    .activity-card h4 { margin: 0 0 6px; font-size: 13px; }
+    .activity-card p { display: flex; gap: 5px; margin: 3px 0; color: var(--muted); font-size: 10px; }
+    .activity-card p svg { width: 12px; height: 12px; }
+    .badges { display: flex; gap: 5px; margin-bottom: 6px; }
+    .badge { display: inline-flex; align-items: center; gap: 3px; padding: 3px 6px; border-radius: 5px; background: var(--primary-soft); color: var(--primary-dark); font-size: 9px; font-weight: 750; }
+    .badge.official { background: var(--accent-soft); color: #9c3764; }
+    .badge.warning { background: var(--warning-soft); color: var(--warning); }
+    .progress { height: 5px; overflow: hidden; border-radius: 3px; background: var(--surface-soft); }
+    .progress span { display: block; height: 100%; border-radius: inherit; background: var(--primary); }
+    .week-layout { position: relative; padding-right: 378px; }
+    .week-panel { height: 643px; overflow: hidden; }
+    .week-days { display: grid; grid-template-columns: 54px repeat(7, 1fr); height: 62px; border-bottom: 1px solid var(--line); background: #fbfafd; }
+    .week-days > div { display: grid; place-items: center; border-right: 1px solid var(--line); font-size: 12px; }
+    .week-days b { display: block; font-size: 17px; }
+    .week-days .active { color: var(--primary-dark); background: var(--primary-soft); }
+    .week-canvas { position: relative; height: 581px; margin-left: 54px; background: repeating-linear-gradient(to bottom, transparent 0, transparent 72px, var(--line) 72px, var(--line) 73px); }
+    .week-canvas::before { content:""; position:absolute; inset:0; background: repeating-linear-gradient(to right, transparent 0, transparent calc(14.2857% - 1px), var(--line) calc(14.2857% - 1px), var(--line) 14.2857%); pointer-events:none; }
+    .time-labels { position: absolute; left: -54px; top: 0; width: 54px; }
+    .time-labels span { display: block; height: 73px; transform: translateY(-7px); color: var(--muted); font-size: 10px; }
+    .week-event { position: absolute; z-index: 1; padding: 6px; overflow: hidden; border-left: 3px solid var(--primary); border-radius: 5px; background: #eadff7; color: #42216f; font-size: 9px; line-height: 1.35; }
+    .week-event strong { display: block; font-size: 10px; }
+    .week-event.critical { border-left-color: var(--accent); background: var(--accent-soft); color: #8d2f5a; }
+    .week-event.info { border-left-color: var(--info); background: var(--info-soft); color: #244f7b; }
+    .cluster { position: absolute; z-index: 2; display: grid; place-items: center; border: 1px dashed #8a66bd; border-radius: 5px; background: rgba(238,230,250,.95); color: var(--primary-dark); font-size: 9px; font-weight: 800; }
+    .conflict-drawer .drawer-filters { display: flex; gap: 7px; margin: 10px 0; }
+    .conflict-drawer .field { min-width: 0; flex: 1; height: 34px; padding: 0 8px; font-size: 10px; }
+    .conflict-drawer .activity-card { margin: 7px 0; padding: 9px; }
+    .conflict-drawer .activity-card h4 { font-size: 12px; }
+    .conflict-drawer .activity-card p { margin: 2px 0; }
+    .hero { display: grid; grid-template-columns: 1fr 330px; gap: 20px; padding: 24px; border-top: 4px solid var(--primary); background: linear-gradient(135deg,#fff 0,#fff8fc 100%); }
+    .hero .eyebrow { color: var(--primary); font-size: 11px; letter-spacing: .16em; font-weight: 800; }
+    .hero h2 { margin: 10px 0; font-size: 30px; }
+    .hero p { margin: 6px 0; color: var(--muted); }
+    .hero-meta { display: flex; flex-wrap: wrap; gap: 12px 22px; margin-top: 22px; }
+    .meta-item { display: flex; align-items: center; gap: 7px; color: #554a61; font-size: 13px; }
+    .hero-action { padding: 17px; border: 1px solid var(--line); border-radius: 9px; background: white; }
+    .hero-action .capacity { display: flex; align-items: end; justify-content: space-between; }
+    .hero-action .capacity strong { font-size: 24px; }
+    .hero-action .capacity span { color: var(--muted); font-size: 12px; }
+    .hero-action .progress { height: 8px; margin: 11px 0 17px; }
+    .hero-action .btn { width: 100%; }
+    .detail-grid { display: grid; grid-template-columns: minmax(0,1.5fr) minmax(300px,.7fr); gap: 18px; margin-top: 18px; }
+    .detail-panel { padding: 22px; }
+    .detail-panel h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 16px; }
+    .detail-panel article { color: #4e4359; font-size: 14px; line-height: 1.75; }
+    .detail-panel article h4 { color: var(--ink); }
+    .participant { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .participant:last-child { border-bottom: 0; }
+    .avatar { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: #dcefe9; color: #21755f; font-size: 12px; font-weight: 800; }
+    .participant strong { display: block; font-size: 12px; }
+    .participant span { color: var(--muted); font-size: 10px; }
+    .form-layout { display: grid; grid-template-columns: minmax(0,1fr) 290px; gap: 18px; }
+    .form-panel { padding: 22px; }
+    .template-note { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 18px; padding: 14px; border: 1px solid #d4c1ee; border-radius: 8px; background: var(--primary-soft); }
+    .template-note strong { display: block; font-size: 13px; }
+    .template-note p { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+    .form-section { padding: 4px 0 18px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
+    .form-section h3 { margin: 0 0 13px; font-size: 15px; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .input-group { margin-bottom: 12px; }
+    .input-group label { display: block; margin-bottom: 6px; font-size: 11px; font-weight: 700; }
+    .input { width: 100%; min-height: 40px; padding: 10px 11px; border: 1px solid var(--line-strong); border-radius: 7px; background: white; color: var(--ink); font-size: 12px; }
+    textarea.input { height: 83px; resize: none; }
+    .hint { margin: 5px 0 0; color: var(--muted); font-size: 10px; }
+    .hint.warn { color: var(--warning); }
+    .publish-card { position: sticky; top: 90px; padding: 18px; }
+    .publish-card h3 { margin-top: 0; }
+    .check-row { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0; color: #51465c; font-size: 11px; }
+    .check { display: grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 50%; background: #e4f3eb; color: #287452; }
+    .publish-card .btn { width: 100%; margin-top: 8px; }
+    .mobile { width: 390px; min-height: 844px; background: var(--bg); }
+    .mobile-top { height: 60px; display: flex; align-items: center; padding: 0 15px; border-bottom: 1px solid var(--line); background: rgba(247,245,251,.98); }
+    .mobile-top h1 { margin: 0; font-size: 19px; }
+    .mobile-top .btn { margin-left: auto; width: 36px; height: 36px; padding: 0; }
+    .mobile-content { padding: 13px 14px 92px; }
+    .mobile-date-nav { display: flex; align-items: center; margin-bottom: 11px; }
+    .mobile-date-nav h2 { margin: 0; font-size: 18px; }
+    .mobile-date-nav .nav-buttons { display: flex; gap: 6px; margin-left: auto; }
+    .mobile-date-nav .btn { height: 33px; padding: 0 10px; font-size: 11px; }
+    .day-strip { display: grid; grid-template-columns: repeat(7,1fr); padding: 7px; border: 1px solid var(--line); border-radius: 9px; background: white; }
+    .day-pill { display: grid; place-items: center; gap: 4px; height: 54px; color: var(--muted); font-size: 9px; }
+    .day-pill b { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 50%; font-size: 12px; }
+    .day-pill.active { color: var(--primary-dark); font-weight: 700; }
+    .day-pill.active b { background: var(--primary); color: white; }
+    .mobile-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin: 11px 0; }
+    .mobile-stat { padding: 9px; border: 1px solid var(--line); border-radius: 7px; background: white; }
+    .mobile-stat strong { display: block; font-size: 16px; }
+    .mobile-stat span { color: var(--muted); font-size: 9px; }
+    .time-group { margin-top: 14px; }
+    .time-group-head { display: flex; align-items: center; margin-bottom: 7px; }
+    .time-group-head strong { font-size: 13px; }
+    .time-group-head span { margin-left: 7px; color: var(--muted); font-size: 10px; }
+    .mobile-card { margin-bottom: 8px; padding: 12px; border: 1px solid var(--line); border-left: 4px solid var(--primary); border-radius: 8px; background: white; }
+    .mobile-card.critical { border-left-color: var(--accent); background: #fffafd; }
+    .mobile-card h3 { margin: 6px 0; font-size: 14px; }
+    .mobile-card p { display: flex; align-items: center; gap: 5px; margin: 4px 0; color: var(--muted); font-size: 10px; }
+    .mobile-card p svg { width: 12px; height: 12px; }
+    .mobile-card-foot { display: flex; align-items: center; margin-top: 9px; }
+    .mobile-card-foot .progress { width: 100px; margin-right: 7px; }
+    .mobile-card-foot span { color: var(--muted); font-size: 9px; }
+    .mobile-card-foot .btn { height: 30px; margin-left: auto; padding: 0 10px; font-size: 10px; }
+    .expand { width: 100%; height: 34px; border: 1px dashed var(--line-strong); border-radius: 7px; background: white; color: var(--primary-dark); font-size: 11px; font-weight: 700; }
+    .bottom-nav { position: fixed; left: 0; bottom: 0; width: 390px; height: 66px; display: grid; grid-template-columns: repeat(6,1fr); border-top: 1px solid var(--line); background: white; z-index: 5; }
+    .bottom-item { display: grid; place-items: center; align-content: center; gap: 3px; color: var(--muted); font-size: 9px; }
+    .bottom-item svg { width: 18px; height: 18px; }
+    .bottom-item.active { color: var(--primary); font-weight: 750; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="../../public/vendor/lucide.min.js"></script>
+  <script>
+    const icon = (name) => `<i data-lucide="${name}"></i>`;
+
+    function sidebar() {
+      const items = [
+        ['users-round', '找室友'], ['contact', '我的卡片'], ['message-square', '私信'],
+        ['bed-double', '宿舍组'], ['history', '历史结果'], ['calendar-days', '活动广场'], ['settings', '账号设置'],
+      ];
+      return `<aside class="sidebar"><div class="brand"><div class="brand-mark">活</div><div><strong>活动广场</strong><small>发现校园好活动</small></div></div><div class="nav-label">校园生活</div>${items.map(([name,label]) => `<div class="nav-item ${label === '活动广场' ? 'active' : ''}">${icon(name)}${label}</div>`).join('')}<div class="sidebar-user"><strong>林夏</strong><small>2026级</small></div></aside>`;
+    }
+
+    function topbar(title, subtitle) {
+      return `<header class="topbar"><div><h1>${title}</h1><p>${subtitle}</p></div><div class="top-actions"><button class="btn">${icon('home')}首页</button><button class="btn">${icon('trees')}树洞道理</button><button class="btn">${icon('house-heart')}宿得道理</button><button class="btn">${icon('log-out')}退出</button></div></header>`;
+    }
+
+    function viewToolbar(active, title) {
+      return `<div class="toolbar"><button class="btn">今天</button><button class="btn icon">${icon('chevron-left')}</button><button class="btn icon">${icon('chevron-right')}</button><h2>${title}</h2><div class="spacer"></div><div class="legend"><span>热力</span><i class="heat h1"></i><i class="heat h2"></i><i class="heat h3"></i><i class="heat h4"></i><i class="heat h5"></i></div><div class="segmented">${['年','月','周','日'].map(label => `<button class="segment ${label === active ? 'active' : ''}">${label}</button>`).join('')}</div><button class="btn primary">${icon('plus')}创建活动</button></div>`;
+    }
+
+    function filters() {
+      return `<div class="filters"><label class="field search">${icon('search')}<input value="" placeholder="搜索活动、地点或主办者"></label><label class="field">${icon('sliders-horizontal')}<select><option>全部活动</option></select></label><label class="field"><select><option>全部重要程度</option></select></label><label class="field"><select><option>全部报名状态</option></select></label></div>`;
+    }
+
+    function desktopPage(title, subtitle, content) {
+      return `<div class="desktop">${sidebar()}${topbar(title, subtitle)}<main class="main">${content}</main></div>`;
+    }
+
+    const monthEvents = {
+      2: [['19:00','摄影夜拍','']], 4: [['14:00','羽毛球新生赛','']], 7: [['全天','社团招新周','high']],
+      8: [['全天','社团招新周','high'],['19:30','电影分享会','']], 9: [['全天','社团招新周','high']],
+      10: [['全天','社团招新周','high'],['18:30','飞盘体验','']], 11: [['全天','社团招新周','high']],
+      14: [['16:00','城市漫步','']], 15: [['19:00','开源入门工作坊','high']],
+      17: [['14:00','新生安全教育','critical'],['14:00','AI 创作沙龙','high'],['14:00','秋季摄影外拍','']],
+      18: [['10:00','院系开放日','critical'],['19:00','乐队排练开放场','']], 20: [['08:00','校园定向赛','high']],
+      22: [['19:00','读书分享夜','']], 24: [['18:30','手作工坊','']], 26: [['15:00','篮球友谊赛','high']],
+      29: [['19:00','英语角','']], 30: [['14:00','职业规划讲座','critical']],
+    };
+
+    function monthCell(day, muted = false) {
+      const events = muted ? [] : (monthEvents[day] || []);
+      const count = day === 17 ? 23 : events.length;
+      return `<div class="day ${muted ? 'muted' : ''} ${day === 17 && !muted ? 'selected today' : ''}"><div class="day-number"><b>${day}</b>${count ? `<span class="day-count">${count} 个</span>` : ''}</div>${events.slice(0,3).map(([time,name,type]) => `<div class="event-line ${type}"><span>${time}</span><span>${name}</span></div>`).join('')}${count > 3 ? `<div class="more-link">另有 ${count - 3} 个活动</div>` : ''}</div>`;
+    }
+
+    function monthPage() {
+      const cells = monthCell(31, true) + Array.from({length:30},(_,i)=>monthCell(i+1)).join('') + Array.from({length:11},(_,i)=>monthCell(i+1,true)).join('');
+      const drawer = `<aside class="drawer"><div class="drawer-head"><div><h3>9 月 17 日 · 星期四</h3><p>共 23 个活动 · 热力 38（很高）</p></div><span class="drawer-close">${icon('x')}</span></div><div class="drawer-summary"><div class="mini-stat"><strong>23</strong><span>全部活动</span></div><div class="mini-stat"><strong>4</strong><span>我已报名</span></div><div class="mini-stat"><strong>16</strong><span>仍有名额</span></div></div>${activityCard('新生安全教育','14:00–15:30','大学生活动中心礼堂','学生工作处','386 / 500','critical',true)}${activityCard('AI 创作沙龙','14:00–16:00','创新工坊 A201','计算机协会','42 / 60','',false)}${activityCard('秋季摄影外拍','14:00–17:30','东门广场集合','叶澜','18 / 20','',false)}${activityCard('英语角特别场','19:00–20:30','图书馆研讨室','外语社','26 / 40','',false)}<button class="btn soft" style="width:100%;margin-top:6px">查看其余 19 个活动</button></aside>`;
+      return desktopPage('活动广场','按时间发现和参加校园活动',`${viewToolbar('月','2026 年 9 月')}${filters()}<div class="calendar-layout"><section class="panel calendar"><div class="week-head">${['周一','周二','周三','周四','周五','周六','周日'].map(x=>`<div>${x}</div>`).join('')}</div><div class="month-grid">${cells}</div></section>${drawer}</div>`);
+    }
+
+    function activityCard(title,time,location,organizer,capacity,type='',official=false) {
+      return `<article class="activity-card ${type}"><div class="badges">${official ? '<span class="badge official">官方</span>' : ''}<span class="badge">${type === 'critical' ? 'V · 必须关注' : 'III · 重要'}</span>${time.startsWith('14:00') && title !== '新生安全教育' ? '<span class="badge warning">时间冲突</span>' : ''}</div><h4>${title}</h4><p>${icon('clock-3')}${time}</p><p>${icon('map-pin')}${location} · ${organizer}</p><div style="display:flex;align-items:center;gap:7px;margin-top:7px"><div class="progress" style="flex:1"><span style="width:${capacity.startsWith('18') ? '90' : capacity.startsWith('42') ? '70' : '65'}%"></span></div><span style="font-size:9px;color:var(--muted)">${capacity}</span></div></article>`;
+    }
+
+    function weekPage() {
+      const drawer = `<aside class="drawer conflict-drawer"><div class="drawer-head"><div><h3>星期四 · 14:00</h3><p>20 个同时段活动</p></div><span class="drawer-close">${icon('x')}</span></div><div class="drawer-filters"><label class="field">${icon('search')}搜索</label><label class="field">${icon('circle-check')}仅看有名额</label></div>${activityCard('新生安全教育','14:00–15:30','大学生活动中心礼堂','学生工作处','386 / 500','critical',true)}${activityCard('AI 创作沙龙','14:00–16:00','创新工坊 A201','计算机协会','42 / 60')}${activityCard('秋季摄影外拍','14:00–17:30','东门广场集合','叶澜','18 / 20')}${activityCard('城市速写练习','14:30–16:00','艺术楼中庭','美术社','12 / 25')}<button class="btn soft" style="width:100%;margin-top:5px">加载更多 16 个</button></aside>`;
+      return desktopPage('活动广场','按时间发现和参加校园活动',`${viewToolbar('周','9 月 14 日–20 日')}${filters()}<div class="week-layout"><section class="panel week-panel"><div class="week-days"><div></div>${[['一','14'],['二','15'],['三','16'],['四','17'],['五','18'],['六','19'],['日','20']].map(([w,d])=>`<div class="${d==='17'?'active':''}"><span>${w}<b>${d}</b></span></div>`).join('')}</div><div class="week-canvas"><div class="time-labels">${['08:00','10:00','12:00','14:00','16:00','18:00','20:00','22:00'].map(t=>`<span>${t}</span>`).join('')}</div><div class="week-event info" style="left:1%;top:74px;width:12%;height:68px"><strong>10:00 城市漫步</strong>南门集合</div><div class="week-event" style="left:15.3%;top:329px;width:12%;height:75px"><strong>19:00 开源入门</strong>创新工坊</div><div class="week-event critical" style="left:43.5%;top:219px;width:5.7%;height:63px"><strong>14:00 安全教育</strong>官方 · V</div><div class="week-event" style="left:49.5%;top:219px;width:5.7%;height:78px"><strong>14:00 AI 沙龙</strong>III</div><div class="cluster" style="left:43.5%;top:301px;width:11.7%;height:43px">还有 18 个<br>同时段活动</div><div class="week-event critical" style="left:58%;top:73px;width:12%;height:64px"><strong>10:00 院系开放日</strong>官方 · IV</div><div class="week-event" style="left:72.2%;top:364px;width:12%;height:70px"><strong>20:00 乐队开放场</strong>音乐教室</div><div class="week-event info" style="left:86.4%;top:38px;width:12%;height:94px"><strong>09:00 校园定向赛</strong>操场</div></div></section>${drawer}</div>`);
+    }
+
+    function detailPage() {
+      const participants = [['林夏','2026级 · 计算机科学与技术'],['江晚','2026级 · 工商管理'],['叶澜','2026级 · 计算机科学与技术'],['苏晴','2025级 · 工商管理'],['唐宁','2025级 · 视觉传达设计']];
+      return desktopPage('活动详情','查看活动安排与报名信息',`<div class="toolbar"><button class="btn">${icon('arrow-left')}返回活动广场</button><div class="spacer"></div><button class="btn">${icon('copy')}以此为模板</button><button class="btn">${icon('share-2')}复制链接</button></div><section class="panel hero"><div><div class="badges"><span class="badge official">官方活动</span><span class="badge official">V · 必须关注</span><span class="badge">报名中</span></div><span class="eyebrow">CAMPUS EVENT</span><h2>新生安全教育与校园生活说明会</h2><p>面向 2026 级新生的重要入学活动，请提前 15 分钟到场。</p><div class="hero-meta"><div class="meta-item">${icon('calendar-days')}9 月 17 日 星期四</div><div class="meta-item">${icon('clock-3')}14:00–15:30</div><div class="meta-item">${icon('map-pin')}大学生活动中心礼堂</div><div class="meta-item">${icon('building-2')}学生工作处</div></div></div><aside class="hero-action"><div class="capacity"><div><span>当前报名</span><br><strong>386</strong><span> / 500 人</span></div><span>还剩 114 个名额</span></div><div class="progress"><span style="width:77%"></span></div><button class="btn primary">${icon('ticket-check')}立即报名</button><p class="hint" style="text-align:center">活动开始前可取消报名</p></aside></section><div class="detail-grid"><section class="panel detail-panel"><h3>${icon('notebook-text')}活动介绍</h3><article><h4>活动内容</h4><p>本次说明会将介绍校园安全、宿舍生活、实验室规范和紧急联络方式，并现场解答新生常见问题。</p><h4>到场须知</h4><ul><li>请携带校园卡，并按照学院指引分区就座。</li><li>活动开始后停止入场，请合理安排时间。</li><li>如无法参加，请在开始前取消报名释放名额。</li></ul></article></section><aside class="panel detail-panel"><div style="display:flex;align-items:center"><h3 style="margin:0">${icon('users')}已报名同学</h3><span class="spacer"></span><span class="badge">386 人</span></div><p class="hint">仅展示可见的最小身份信息</p>${participants.map(([name,meta],i)=>`<div class="participant"><div class="avatar">${name.slice(0,1)}</div><div><strong>${name}</strong><span>${meta}</span></div>${i===0?'<span class="badge" style="margin-left:auto">我的报名</span>':''}</div>`).join('')}<button class="btn soft" style="width:100%;margin-top:14px">查看全部参与者</button></aside></div>`);
+    }
+
+    function createPage() {
+      return desktopPage('创建活动','完善信息后保存草稿或发布',`<div class="toolbar"><button class="btn">${icon('arrow-left')}返回活动广场</button><div class="spacer"></div><span class="badge">草稿未保存</span></div><div class="form-layout"><section class="panel form-panel"><div class="template-note">${icon('copy-check')}<div><strong>正在以“新生安全教育与校园生活说明会”为模板</strong><p>已复制公开配置；主办者、报名人员和原活动时间不会复制。官方 V 级已按你的权限调整为 III 级。</p></div><button class="btn" style="margin-left:auto;height:32px">清除模板</button></div><div class="form-section"><h3>基本信息</h3><div class="input-group"><label>活动名称</label><input class="input" value="新生学习经验分享会"></div><div class="input-group"><label>活动介绍 · 支持 Markdown</label><textarea class="input">邀请高年级同学分享课程学习、实验室选择和校园生活经验。</textarea><p class="hint">0 / 5000 字 · 原始 HTML 不会渲染</p></div></div><div class="form-section"><h3>时间与地点</h3><div class="form-row"><div class="input-group"><label>开始时间</label><input class="input" value="2026-09-24 19:00"></div><div class="input-group"><label>结束时间</label><input class="input" value="2026-09-24 20:30"></div></div><div class="input-group"><label>活动地点</label><input class="input" value="大学生活动中心 203"></div></div><div class="form-section"><h3>报名与展示</h3><div class="form-row"><div class="input-group"><label>活动容量</label><input class="input" value="120"><p class="hint">最多 500 人</p></div><div class="input-group"><label>目标年级</label><input class="input" value="2026级" readonly><p class="hint">个人活动只能选择自己的年级</p></div></div><div class="input-group"><label>重要程度</label><div class="segmented">${['I','II','III','IV','V'].map(v=>`<button class="segment ${v==='III'?'active':''}" ${['IV','V'].includes(v)?'style="opacity:.38"':''}>${v}</button>`).join('')}</div><p class="hint warn">原模板为 V 级；个人活动最高可设为 III 级。</p></div></div></section><aside><section class="panel publish-card"><h3>发布检查</h3><div class="check-row"><span class="check">✓</span><span>名称与介绍已填写</span></div><div class="check-row"><span class="check">✓</span><span>时间为未来日期，持续 1 小时 30 分</span></div><div class="check-row"><span class="check">✓</span><span>容量与目标年级有效</span></div><div class="check-row"><span class="check">✓</span><span>重要程度符合当前权限</span></div><button class="btn primary">${icon('send')}发布活动</button><button class="btn">${icon('save')}保存草稿</button><button class="btn">${icon('eye')}预览</button><p class="hint" style="margin-top:14px">发布后活动会立即出现在目标年级的活动广场。开始前可继续编辑。</p></section></aside></div>`);
+    }
+
+    function mobileCard(title, time, place, capacity, critical=false, official=false) {
+      return `<article class="mobile-card ${critical?'critical':''}"><div class="badges">${official?'<span class="badge official">官方</span>':''}<span class="badge">${critical?'V · 必须关注':'III · 重要'}</span></div><h3>${title}</h3><p>${icon('clock-3')}${time}</p><p>${icon('map-pin')}${place}</p><div class="mobile-card-foot"><div class="progress"><span style="width:${capacity==='18 / 20'?'90':'68'}%"></span></div><span>${capacity} 人</span><button class="btn ${capacity==='18 / 20'?'':'primary'}">${capacity==='18 / 20'?'查看':'报名'}</button></div></article>`;
+    }
+
+    function mobilePage() {
+      return `<div class="mobile"><header class="mobile-top"><h1>活动广场</h1><button class="btn">${icon('filter')}</button><button class="btn primary" style="margin-left:7px">${icon('plus')}</button></header><main class="mobile-content"><div class="mobile-date-nav"><h2>9 月 17 日 · 星期四</h2><div class="nav-buttons"><button class="btn">今天</button><button class="btn">${icon('chevron-left')}</button><button class="btn">${icon('chevron-right')}</button></div></div><div class="day-strip">${[['一','14'],['二','15'],['三','16'],['四','17'],['五','18'],['六','19'],['日','20']].map(([w,d])=>`<div class="day-pill ${d==='17'?'active':''}"><span>${w}</span><b>${d}</b></div>`).join('')}</div><div class="mobile-stats"><div class="mobile-stat"><strong>23</strong><span>今天活动</span></div><div class="mobile-stat"><strong>4</strong><span>我已报名</span></div><div class="mobile-stat"><strong>16</strong><span>仍有名额</span></div></div><section class="time-group"><div class="time-group-head"><strong>14:00</strong><span>20 个同时段活动</span><span class="badge warning" style="margin-left:auto">3 个冲突</span></div>${mobileCard('新生安全教育','14:00–15:30','大学生活动中心礼堂','386 / 500',true,true)}${mobileCard('AI 创作沙龙','14:00–16:00','创新工坊 A201','42 / 60')}${mobileCard('秋季摄影外拍','14:00–17:30','东门广场集合','18 / 20')}<button class="expand">展开其余 17 个同时段活动</button></section><section class="time-group"><div class="time-group-head"><strong>19:00</strong><span>3 个活动</span></div>${mobileCard('英语角特别场','19:00–20:30','图书馆研讨室','26 / 40')}</section></main><nav class="bottom-nav">${[['users-round','找室友'],['contact','我的卡片'],['message-square','私信'],['bed-double','宿舍组'],['calendar-days','活动'],['settings','设置']].map(([name,label])=>`<div class="bottom-item ${label==='活动'?'active':''}">${icon(name)}<span>${label}</span></div>`).join('')}</nav></div>`;
+    }
+
+    const pages = { month: monthPage, week: weekPage, detail: detailPage, create: createPage, mobile: mobilePage };
+    const screen = new URLSearchParams(location.search).get('screen') || 'month';
+    document.getElementById('root').innerHTML = (pages[screen] || monthPage)();
+    if (window.lucide) lucide.createIcons();
+  </script>
+</body>
+</html>
