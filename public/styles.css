@@ -546,7 +546,7 @@ input:disabled { color: #62586d; background: #f0edf4; cursor: not-allowed; }
 .heat-1 { background: #f1eafa !important; }
 .heat-2 { background: #dfcff3 !important; }
 .heat-3 { background: #c3a5e8 !important; }
-.heat-4 { color: white !important; background: #8d62cb !important; }
+.heat-4 { color: white !important; background: #6f42c1 !important; }
 .heat-5 { color: white !important; background: var(--accent) !important; }
 .activity-calendar-content { max-width: 1160px; margin: 0 auto; }
 .activity-month { overflow: hidden; padding: 0; }

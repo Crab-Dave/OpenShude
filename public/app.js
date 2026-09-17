@@ -832,7 +832,8 @@ function activityWeekMarkup(data) {
   const allDayCells = days.map((day) => {
     const key = activityDateKey(day);
     const activities = data.activities.filter((activity) => activity.isAllDay && activityDateKey(activity.startAt) === key);
-    return `<div class="activity-week-all-day-cell">${activities.map((activity) => `<button data-activity-open="${activity.id}">${escapeHtml(activity.title)}</button>`).join('')}</div>`;
+    const buttons = activities.map((activity) => `<button data-activity-open="${activity.id}">${escapeHtml(activity.title)}</button>`).join('');
+    return `<div class="activity-week-all-day-cell">${buttons}</div>`;
   }).join('');
   const allDay = data.activities.some((activity) => activity.isAllDay)
     ? `<div class="activity-week-all-day"><span>全天</span>${allDayCells}</div>` : '';
@@ -882,7 +883,8 @@ function activityDayMarkup(data, weekDays) {
     const cards = shown.map((activity) => activitySummaryCard(activity)).join('');
     const expandLabel = expanded ? `${icon('chevron-up')}收起` : `${icon('chevron-down')}展开其余 ${activities.length - 3} 个`;
     const expand = activities.length > 3 ? `<button class="btn btn-secondary" data-activity-expand="${escapeHtml(key)}">${expandLabel}</button>` : '';
-    return `<section class="activity-time-group"><div class="activity-time-label"><strong>${slot}</strong><span>${activities.length} 个活动</span></div><div class="activity-time-cards">${cards}</div>${expand ? `<div class="activity-time-actions">${expand}</div>` : ''}</section>`;
+    const actions = expand ? `<div class="activity-time-actions">${expand}</div>` : '';
+    return `<section class="activity-time-group"><div class="activity-time-label"><strong>${slot}</strong><span>${activities.length} 个活动</span></div><div class="activity-time-cards">${cards}</div>${actions}</section>`;
   }).join('') : emptyState('calendar-x', '这一天还没有符合条件的活动', '可以清除筛选或创建一个新活动', `<button class="btn btn-primary" data-activity-create>${icon('plus')}创建活动</button>`);
   const list = data.activities.length ? `<section class="panel activity-day-list">${groups}</section>` : groups;
   return `<div class="activity-day-layout"><div class="panel activity-day-strip">${strip}</div><section class="activity-day-stats"><div><strong>${data.total}</strong><span>当天活动</span></div><div><strong>${joined}</strong><span>我已报名</span></div><div><strong>${available}</strong><span>仍有名额</span></div></section>${list}</div>`;
