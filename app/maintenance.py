@@ -57,6 +57,16 @@ REQUIRED_CHECKS = {
         "field_name IN ('NICKNAME','DESCRIPTION','RULES')",
         "to_version > from_version",
     ),
+    "activities": (
+        "end_at > start_at",
+        "is_all_day IN (0,1)",
+        "organizer_type IN ('USER','ADMIN_GROUP')",
+        "capacity BETWEEN 1 AND 500",
+        "importance BETWEEN 1 AND 5",
+        "status IN ('DRAFT','PUBLISHED','CANCELLED')",
+        "version > 0",
+    ),
+    "activity_registrations": ("status IN ('REGISTERED','CANCELLED')",),
 }
 
 
@@ -179,6 +189,11 @@ def validate_database(filename: Path) -> dict:
         "official_dormitories",
         "official_dormitory_members",
         "official_dormitory_revisions",
+        "activities",
+        "activity_target_grades",
+        "activity_target_groups",
+        "activity_target_members",
+        "activity_registrations",
         "alembic_version",
     } | set(REQUIRED_CHECKS)
     with closing(sqlite3.connect(filename)) as database:
