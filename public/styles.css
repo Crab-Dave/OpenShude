@@ -686,6 +686,8 @@ input:disabled { color: #62586d; background: #f0edf4; cursor: not-allowed; }
 .activity-form-section > h2,
 .activity-publish-panel h2 { margin: 0 0 13px; font-size: 15px; }
 .activity-form-section .form-field + .form-field { margin-top: 13px; }
+.activity-form-layout input[type="checkbox"] { width: 16px; height: 16px; flex: none; accent-color: var(--primary); }
+.activity-form-layout .checkbox-row { width: fit-content; display: flex; align-items: center; gap: 7px; margin-bottom: 12px; font-weight: 650; }
 .activity-template-note { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 18px; padding: 14px; border: 1px solid #d4c1ee; border-radius: 8px; background: var(--primary-soft); }
 .activity-template-note svg { flex: none; }
 .activity-template-note p { margin: 4px 0 0; color: var(--muted); }
