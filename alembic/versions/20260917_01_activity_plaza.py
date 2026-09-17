@@ -34,6 +34,7 @@ def upgrade() -> None:
     activity_tables = {
         "activities",
         "activity_target_grades",
+        "activity_scope_grades",
         "activity_target_groups",
         "activity_target_members",
         "activity_registrations",
@@ -84,6 +85,16 @@ def upgrade() -> None:
 
     op.create_table(
         "activity_target_grades",
+        sa.Column(
+            "activity_id",
+            sa.Integer(),
+            sa.ForeignKey(ACTIVITIES_ID, ondelete="CASCADE"),
+            primary_key=True,
+        ),
+        sa.Column("grade_id", sa.Integer(), sa.ForeignKey(GRADES_ID), primary_key=True),
+    )
+    op.create_table(
+        "activity_scope_grades",
         sa.Column(
             "activity_id",
             sa.Integer(),

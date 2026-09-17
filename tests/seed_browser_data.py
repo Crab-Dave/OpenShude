@@ -489,6 +489,10 @@ def main() -> None:
                 text("INSERT INTO activity_target_grades(activity_id,grade_id) VALUES(:activity,:grade)"),
                 {"activity": activity_id, "grade": grade_ids["2026级"]},
             )
+            db.execute(
+                text("INSERT INTO activity_scope_grades(activity_id,grade_id) VALUES(:activity,:grade)"),
+                {"activity": activity_id, "grade": grade_ids["2026级"]},
+            )
             for member in activity_members:
                 db.execute(
                     text(

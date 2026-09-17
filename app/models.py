@@ -325,6 +325,12 @@ class ActivityTargetGrade(Base):
     grade_id: Mapped[int] = mapped_column(ForeignKey(GRADES_ID), primary_key=True)
 
 
+class ActivityScopeGrade(Base):
+    __tablename__ = "activity_scope_grades"
+    activity_id: Mapped[int] = mapped_column(ForeignKey(ACTIVITIES_ID, ondelete="CASCADE"), primary_key=True)
+    grade_id: Mapped[int] = mapped_column(ForeignKey(GRADES_ID), primary_key=True)
+
+
 class ActivityTargetGroup(Base):
     __tablename__ = "activity_target_groups"
     id: Mapped[int] = mapped_column(primary_key=True)
