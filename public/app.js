@@ -1065,7 +1065,7 @@ async function renderActivityForm() { // NOSONAR
   let templateNotice = '';
   if (state.activityEditId) source = (await api(`/api/activities/${state.activityEditId}`)).activity;
   else if (state.activityTemplateId) {
-    source = (await api(`/api/activities/${state.activityTemplateId}/copy`)).template;
+    source = (await api(`/api/activities/${state.activityTemplateId}/copy`, { method: 'POST', body: '{}' })).template;
     templateNotice = `<div class="activity-template-note">${icon('copy-check')}<div><strong>正在以“${escapeHtml(source.title)}”为模板</strong><p>已复制公开配置；主办者、报名人员和原活动状态不会复制。</p></div><button type="button" class="btn btn-sm btn-secondary" data-activity-clear-template>清除模板</button></div>`;
   }
   const defaultStart = new Date();
