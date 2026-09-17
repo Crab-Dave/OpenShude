@@ -12,11 +12,18 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .common import all_rows, clean_text, current_user, now, one, require_user
+from .common import all_rows, audit, clean_text, current_user, now, one, require_user
 from .config import get_settings
 from .database import get_db
 from .errors import ApiError
 from .rate_limit import enforce_rate_limit
+from .selection_groups import (
+    SELECTION_GROUP_BY_ID,
+    selectable_groups,
+    selection_group_details,
+    selection_group_name_exists,
+    validate_selection_group,
+)
 from .treehole import prune_treehole_report_snapshots, treehole_report_snapshot
 
 router = APIRouter(prefix="/api")
@@ -231,6 +238,153 @@ def validate_publish(card: dict) -> None:
     )
     if any(not card.get(field) for field in fields):
         raise ApiError(400, "CARD_INCOMPLETE", "请完整填写所有必填字段后再发布")
+
+
+@router.get("/student-selection-groups")
+def my_selection_groups(request: Request, db: DB) -> dict:
+    user = current_user(request, db)
+    require_user(user)
+    enforce_rate_limit("selection-group-read-user", str(user["id"]), 120, 60, "SELECTION_GROUP_RATE_LIMITED")
+    groups = []
+    for group in selectable_groups(db, user["id"]):
+        details = selection_group_details(db, group)
+        details["owned"] = group["source"] == "OWN"
+        details.pop("created_by", None)
+        groups.append(details)
+    return {"groups": groups}
+
+
+@router.get("/student-selection-groups/candidates")
+def selection_group_candidates(request: Request, db: DB) -> dict:
+    user = current_user(request, db)
+    require_user(user)
+    enforce_rate_limit("selection-group-read-user", str(user["id"]), 120, 60, "SELECTION_GROUP_RATE_LIMITED")
+    return {
+        "candidates": all_rows(
+            db,
+            """SELECT id,name,grade,status FROM users
+            WHERE account_type='USER' AND status='ACTIVE' ORDER BY grade,name,id""",
+        )
+    }
+
+
+@router.post("/student-selection-groups", status_code=201)
+def create_my_selection_group(request: Request, body: dict, db: DB) -> dict:
+    user = current_user(request, db)
+    require_user(user)
+    if user["status"] != "ACTIVE":
+        raise ApiError(403, "ACCOUNT_UNAVAILABLE", "账号当前不可用")
+    enforce_rate_limit("selection-group-write-user", str(user["id"]), 20, 60, "SELECTION_GROUP_RATE_LIMITED")
+    name, description, member_ids = validate_selection_group(db, body)
+    if selection_group_name_exists(db, user["id"], name):
+        raise ApiError(409, "DUPLICATE_SELECTION_GROUP_NAME", "群组名称已存在")
+    timestamp = now()
+    result = db.execute(
+        text(
+            """INSERT INTO student_selection_groups(name,description,created_by,created_at,updated_at)
+            VALUES(:name,:description,:user,:now,:now)"""
+        ),
+        {"name": name, "description": description, "user": user["id"], "now": timestamp},
+    )
+    for member_id in member_ids:
+        db.execute(
+            text("INSERT INTO student_selection_group_members(group_id,user_id,created_at) VALUES(:group,:user,:now)"),
+            {"group": result.lastrowid, "user": member_id, "now": timestamp},
+        )
+    audit(
+        db,
+        user,
+        request,
+        "CREATE_STUDENT_SELECTION_GROUP",
+        "STUDENT_SELECTION_GROUP",
+        result.lastrowid,
+        metadata={"memberCount": len(member_ids)},
+        grant={"permissionCode": "SELF"},
+        after={"name": name, "description": description},
+    )
+    db.commit()
+    group = selection_group_details(db, one(db, SELECTION_GROUP_BY_ID, {"id": result.lastrowid}))
+    group["source"] = "OWN"
+    group["owned"] = True
+    group.pop("created_by", None)
+    return {"group": group}
+
+
+@router.patch("/student-selection-groups/{group_id}")
+def update_my_selection_group(group_id: int, request: Request, body: dict, db: DB) -> dict:
+    user = current_user(request, db)
+    require_user(user)
+    if user["status"] != "ACTIVE":
+        raise ApiError(403, "ACCOUNT_UNAVAILABLE", "账号当前不可用")
+    enforce_rate_limit("selection-group-write-user", str(user["id"]), 20, 60, "SELECTION_GROUP_RATE_LIMITED")
+    before = one(
+        db,
+        "SELECT * FROM student_selection_groups WHERE id=:id AND created_by=:user",
+        {"id": group_id, "user": user["id"]},
+    )
+    if not before:
+        raise ApiError(404, "SELECTION_GROUP_NOT_FOUND", "群组不存在")
+    name, description, member_ids = validate_selection_group(db, body)
+    if selection_group_name_exists(db, user["id"], name, group_id):
+        raise ApiError(409, "DUPLICATE_SELECTION_GROUP_NAME", "群组名称已存在")
+    timestamp = now()
+    db.execute(
+        text("UPDATE student_selection_groups SET name=:name,description=:description,updated_at=:now WHERE id=:id"),
+        {"name": name, "description": description, "now": timestamp, "id": group_id},
+    )
+    db.execute(text("DELETE FROM student_selection_group_members WHERE group_id=:id"), {"id": group_id})
+    for member_id in member_ids:
+        db.execute(
+            text("INSERT INTO student_selection_group_members(group_id,user_id,created_at) VALUES(:group,:user,:now)"),
+            {"group": group_id, "user": member_id, "now": timestamp},
+        )
+    audit(
+        db,
+        user,
+        request,
+        "UPDATE_STUDENT_SELECTION_GROUP",
+        "STUDENT_SELECTION_GROUP",
+        group_id,
+        metadata={"memberCount": len(member_ids)},
+        grant={"permissionCode": "SELF"},
+        before={"name": before["name"], "description": before["description"]},
+        after={"name": name, "description": description},
+    )
+    db.commit()
+    group = selection_group_details(db, one(db, SELECTION_GROUP_BY_ID, {"id": group_id}))
+    group["source"] = "OWN"
+    group["owned"] = True
+    group.pop("created_by", None)
+    return {"group": group}
+
+
+@router.delete("/student-selection-groups/{group_id}")
+def delete_my_selection_group(group_id: int, request: Request, db: DB) -> dict:
+    user = current_user(request, db)
+    require_user(user)
+    if user["status"] != "ACTIVE":
+        raise ApiError(403, "ACCOUNT_UNAVAILABLE", "账号当前不可用")
+    enforce_rate_limit("selection-group-write-user", str(user["id"]), 20, 60, "SELECTION_GROUP_RATE_LIMITED")
+    group = one(
+        db,
+        "SELECT * FROM student_selection_groups WHERE id=:id AND created_by=:user",
+        {"id": group_id, "user": user["id"]},
+    )
+    if not group:
+        raise ApiError(404, "SELECTION_GROUP_NOT_FOUND", "群组不存在")
+    audit(
+        db,
+        user,
+        request,
+        "DELETE_STUDENT_SELECTION_GROUP",
+        "STUDENT_SELECTION_GROUP",
+        group_id,
+        grant={"permissionCode": "SELF"},
+        before={"name": group["name"], "description": group["description"]},
+    )
+    db.execute(text("DELETE FROM student_selection_groups WHERE id=:id"), {"id": group_id})
+    db.commit()
+    return {"ok": True}
 
 
 def get_or_create_conversation(db: Session, user_id: int, other_id: int) -> dict:
