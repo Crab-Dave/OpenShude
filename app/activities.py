@@ -18,6 +18,7 @@ router = APIRouter(prefix="/api/activities")
 DB = Annotated[Session, Depends(get_db)]
 SHANGHAI = timezone(timedelta(hours=8), "Asia/Shanghai")
 ACTIVITY_NOT_FOUND = "活动不存在或暂不可访问"
+UTC_OFFSET = "+00:00"
 ACTIVITY_SELECT = """SELECT a.*,
   (SELECT COUNT(*) FROM activity_registrations r WHERE r.activity_id=a.id AND r.status='REGISTERED')
     AS registration_count,
@@ -43,20 +44,25 @@ def require_active_account(user: dict) -> None:
         raise ApiError(403, "ACCOUNT_UNAVAILABLE", "账号当前不可用")
 
 
+def require_activity_version(body: dict, activity: dict) -> None:
+    if type(body.get("version")) is not int or body["version"] != activity["version"]:
+        raise ApiError(409, "ACTIVITY_EDIT_CONFLICT", "活动已被其他人修改，请重新加载")
+
+
 def parse_timestamp(value: object) -> str:
     if not isinstance(value, str):
         raise ApiError(400, "INVALID_ACTIVITY_TIME", "活动时间无效")
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.replace("Z", UTC_OFFSET))
     except ValueError as error:
         raise ApiError(400, "INVALID_ACTIVITY_TIME", "活动时间无效") from error
     if parsed.tzinfo is None:
         raise ApiError(400, "INVALID_ACTIVITY_TIME", "活动时间必须包含时区")
-    return parsed.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return parsed.astimezone(UTC).isoformat(timespec="milliseconds").replace(UTC_OFFSET, "Z")
 
 
 def parse_stored_timestamp(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return datetime.fromisoformat(value.replace("Z", UTC_OFFSET))
 
 
 def parse_date(value: str) -> date:
@@ -72,6 +78,17 @@ def integer_ids(value: object) -> list[int]:
 
 def activity_row(db: Session, activity_id: int, viewer_id: int) -> dict | None:
     return one(db, ACTIVITY_SELECT + " WHERE a.id=:id", {"id": activity_id, "viewer": viewer_id})
+
+
+def target_member_exists(db: Session, activity_id: int, user_id: int) -> bool:
+    return (
+        one(
+            db,
+            "SELECT 1 AS found FROM activity_target_members WHERE activity_id=:activity AND user_id=:user",
+            {"activity": activity_id, "user": user_id},
+        )
+        is not None
+    )
 
 
 def activity_grade_ids(db: Session, activity_id: int) -> list[int]:
@@ -171,11 +188,7 @@ def activity_manager_grant(
 def can_read_activity(db: Session, user: dict, activity: dict) -> bool:
     if activity["created_by"] == user["id"]:
         return True
-    if activity["status"] != "DRAFT" and one(
-        db,
-        "SELECT 1 AS found FROM activity_target_members WHERE activity_id=:activity AND user_id=:user",
-        {"activity": activity["id"], "user": user["id"]},
-    ):
+    if activity["status"] != "DRAFT" and target_member_exists(db, activity["id"], user["id"]):
         return True
     if user["account_type"] == "SUPER_ADMIN":
         return True
@@ -393,11 +406,7 @@ def activity_detail(db: Session, user: dict, activity: dict) -> dict:
         }
     )
     manager = activity_manager_grant(db, user, activity)
-    targeted = one(
-        db,
-        "SELECT 1 AS found FROM activity_target_members WHERE activity_id=:activity AND user_id=:user",
-        {"activity": activity["id"], "user": user["id"]},
-    )
+    targeted = target_member_exists(db, activity["id"], user["id"])
     started = activity["start_at"] <= now()
     result["capabilities"] = {
         "canEdit": manager is not None and activity["status"] != "CANCELLED",
@@ -416,39 +425,42 @@ def activity_detail(db: Session, user: dict, activity: dict) -> dict:
     return result
 
 
+def activity_matches_filters(
+    activity: dict,
+    user: dict,
+    filters: dict,
+    keyword: str,
+    location: str,
+) -> bool:
+    searchable = " ".join(
+        (
+            activity["title"],
+            activity["description_summary"],
+            activity["location"],
+            activity["organizer_name_snapshot"],
+        )
+    ).casefold()
+    if keyword and keyword not in searchable:
+        return False
+    if location and location not in activity["location"].casefold():
+        return False
+    if filters["activity_type"] == "official" and activity["organizer_type"] != "ADMIN_GROUP":
+        return False
+    if filters["activity_type"] == "personal" and activity["organizer_type"] != "USER":
+        return False
+    if filters["importances"] and activity["importance"] not in filters["importances"]:
+        return False
+    if filters["registration"] == "joined" and activity["current_registration_status"] != "REGISTERED":
+        return False
+    if filters["registration"] == "mine" and activity["created_by"] != user["id"]:
+        return False
+    return not (filters["registration"] == "available" and activity["registration_count"] >= activity["capacity"])
+
+
 def filtered_activities(activities: list[dict], user: dict, filters: dict) -> list[dict]:
     keyword = filters["keyword"].casefold()
     location = filters["location"].casefold()
-    importances = filters["importances"]
-    result = []
-    for activity in activities:
-        searchable = " ".join(
-            (
-                activity["title"],
-                activity["description_summary"],
-                activity["location"],
-                activity["organizer_name_snapshot"],
-            )
-        ).casefold()
-        if keyword and keyword not in searchable:
-            continue
-        if location and location not in activity["location"].casefold():
-            continue
-        if filters["activity_type"] == "official" and activity["organizer_type"] != "ADMIN_GROUP":
-            continue
-        if filters["activity_type"] == "personal" and activity["organizer_type"] != "USER":
-            continue
-        if importances and activity["importance"] not in importances:
-            continue
-        registration = filters["registration"]
-        if registration == "joined" and activity["current_registration_status"] != "REGISTERED":
-            continue
-        if registration == "mine" and activity["created_by"] != user["id"]:
-            continue
-        if registration == "available" and activity["registration_count"] >= activity["capacity"]:
-            continue
-        result.append(activity)
-    return result
+    return [activity for activity in activities if activity_matches_filters(activity, user, filters, keyword, location)]
 
 
 def query_filters(keyword: str, activity_type: str, importance: str, registration: str, location: str) -> dict:
@@ -512,8 +524,8 @@ def range_activities(db: Session, user: dict, start: datetime, end: datetime, fi
         ))"""
     params = {
         "viewer": user["id"],
-        "start": start.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-        "end": end.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        "start": start.astimezone(UTC).isoformat(timespec="milliseconds").replace(UTC_OFFSET, "Z"),
+        "end": end.astimezone(UTC).isoformat(timespec="milliseconds").replace(UTC_OFFSET, "Z"),
     }
     rows = all_rows(
         db,
@@ -775,6 +787,22 @@ def copy_activity(activity_id: int, request: Request, db: DB) -> dict:
     }
 
 
+def updated_activity_targets(
+    db: Session,
+    user: dict,
+    activity: dict,
+    body: dict,
+    started: bool,
+) -> tuple[bool, list[int], list[dict], list[int]]:
+    targets_changed = "targetGradeIds" in body or "targetGroupIds" in body
+    if started and targets_changed:
+        raise ApiError(409, "ACTIVITY_ALREADY_STARTED", "活动开始后不能修改目标人群")
+    if targets_changed:
+        grade_ids, groups, scope_grade_ids = validate_targets(db, user, body, activity["organizer_type"] == "USER")
+        return True, grade_ids, groups, scope_grade_ids
+    return False, activity_grade_ids(db, activity["id"]), [], activity_scope_grade_ids(db, activity)
+
+
 @router.patch("/{activity_id}")
 def update_activity(activity_id: int, request: Request, body: dict, db: DB) -> dict:
     user = current_user(request, db)
@@ -786,8 +814,7 @@ def update_activity(activity_id: int, request: Request, body: dict, db: DB) -> d
         raise ApiError(404, "ACTIVITY_NOT_FOUND", ACTIVITY_NOT_FOUND)
     if activity["status"] == "CANCELLED":
         raise ApiError(409, "ACTIVITY_CANCELLED", "已取消活动不能编辑")
-    if type(body.get("version")) is not int or body["version"] != activity["version"]:
-        raise ApiError(409, "ACTIVITY_EDIT_CONFLICT", "活动已被其他人修改，请重新加载")
+    require_activity_version(body, activity)
     merged = {
         "title": body.get("title", activity["title"]),
         "descriptionMarkdown": body.get("descriptionMarkdown", activity["description_markdown"]),
@@ -807,15 +834,7 @@ def update_activity(activity_id: int, request: Request, body: dict, db: DB) -> d
         raise ApiError(409, "ACTIVITY_ALREADY_STARTED", "活动开始后只能补充介绍")
     if values["capacity"] < activity["registration_count"]:
         raise ApiError(409, "ACTIVITY_CAPACITY_TOO_SMALL", "活动容量不能小于当前报名人数")
-    targets_changed = "targetGradeIds" in body or "targetGroupIds" in body
-    if started and targets_changed:
-        raise ApiError(409, "ACTIVITY_ALREADY_STARTED", "活动开始后不能修改目标人群")
-    if targets_changed:
-        grade_ids, groups, scope_grade_ids = validate_targets(db, user, body, activity["organizer_type"] == "USER")
-    else:
-        grade_ids = activity_grade_ids(db, activity_id)
-        groups = []
-        scope_grade_ids = activity_scope_grade_ids(db, activity)
+    targets_changed, grade_ids, groups, scope_grade_ids = updated_activity_targets(db, user, activity, body, started)
     if activity["organizer_type"] == "USER" and values["importance"] > 3:
         raise ApiError(403, "ACTIVITY_IMPORTANCE_FORBIDDEN", "个人活动最高可设为 III 级")
     if activity["organizer_type"] == "ADMIN_GROUP":
@@ -861,8 +880,7 @@ def publish_activity(activity_id: int, request: Request, body: dict, db: DB) -> 
         raise ApiError(404, "ACTIVITY_NOT_FOUND", ACTIVITY_NOT_FOUND)
     if activity["status"] != "DRAFT":
         raise ApiError(409, "ACTIVITY_NOT_DRAFT", "只有草稿可以发布")
-    if type(body.get("version")) is not int or body["version"] != activity["version"]:
-        raise ApiError(409, "ACTIVITY_EDIT_CONFLICT", "活动已被其他人修改，请重新加载")
+    require_activity_version(body, activity)
     if activity["start_at"] <= now():
         raise ApiError(409, "ACTIVITY_ALREADY_STARTED", "活动已经开始")
     member_count = expand_target_members(db, user, activity)
@@ -911,8 +929,7 @@ def cancel_activity(activity_id: int, request: Request, body: dict, db: DB) -> d
         raise ApiError(409, "ACTIVITY_CANCELLED", "活动已经取消")
     if body.get("confirmed") is not True:
         raise ApiError(400, "ACTIVITY_CONFIRMATION_REQUIRED", "请确认取消活动")
-    if type(body.get("version")) is not int or body["version"] != activity["version"]:
-        raise ApiError(409, "ACTIVITY_EDIT_CONFLICT", "活动已被其他人修改，请重新加载")
+    require_activity_version(body, activity)
     reason = clean_text(body.get("reason"), 500, activity["registration_count"] > 0)
     timestamp = now()
     db.execute(
@@ -977,11 +994,7 @@ def register_activity(activity_id: int, request: Request, db: DB) -> dict:
         activity = activity_row(db, activity_id, user["id"])
         if not activity or not can_read_activity(db, user, activity):
             raise ApiError(404, "ACTIVITY_NOT_FOUND", ACTIVITY_NOT_FOUND)
-        if not one(
-            db,
-            "SELECT 1 AS found FROM activity_target_members WHERE activity_id=:activity AND user_id=:user",
-            {"activity": activity_id, "user": user["id"]},
-        ):
+        if not target_member_exists(db, activity_id, user["id"]):
             raise ApiError(404, "ACTIVITY_NOT_FOUND", ACTIVITY_NOT_FOUND)
         if activity["status"] != "PUBLISHED":
             raise ApiError(409, "ACTIVITY_NOT_OPEN", "活动当前不能报名")

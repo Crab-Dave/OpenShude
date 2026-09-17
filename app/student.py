@@ -32,6 +32,7 @@ REPORT_REASONS = {"人身攻击", "隐私泄露", "不当内容", "广告或诈�
 MESSAGE_PAGE_SIZE = 50
 CARD_NOT_FOUND_MESSAGE = "室友卡片不存在"
 AVATAR_NOT_FOUND_MESSAGE = "头像不存在"
+ACCOUNT_UNAVAILABLE_MESSAGE = "账号当前不可用"
 AVATAR_SIGNATURES = {
     "data:image/png;base64": lambda data: data.startswith(b"\x89PNG\r\n\x1a\n"),
     "data:image/jpeg;base64": lambda data: data.startswith(b"\xff\xd8\xff"),
@@ -273,7 +274,7 @@ def create_my_selection_group(request: Request, body: dict, db: DB) -> dict:
     user = current_user(request, db)
     require_user(user)
     if user["status"] != "ACTIVE":
-        raise ApiError(403, "ACCOUNT_UNAVAILABLE", "账号当前不可用")
+        raise ApiError(403, "ACCOUNT_UNAVAILABLE", ACCOUNT_UNAVAILABLE_MESSAGE)
     enforce_rate_limit("selection-group-write-user", str(user["id"]), 20, 60, "SELECTION_GROUP_RATE_LIMITED")
     name, description, member_ids = validate_selection_group(db, body)
     if selection_group_name_exists(db, user["id"], name):
@@ -315,7 +316,7 @@ def update_my_selection_group(group_id: int, request: Request, body: dict, db: D
     user = current_user(request, db)
     require_user(user)
     if user["status"] != "ACTIVE":
-        raise ApiError(403, "ACCOUNT_UNAVAILABLE", "账号当前不可用")
+        raise ApiError(403, "ACCOUNT_UNAVAILABLE", ACCOUNT_UNAVAILABLE_MESSAGE)
     enforce_rate_limit("selection-group-write-user", str(user["id"]), 20, 60, "SELECTION_GROUP_RATE_LIMITED")
     before = one(
         db,
@@ -363,7 +364,7 @@ def delete_my_selection_group(group_id: int, request: Request, db: DB) -> dict:
     user = current_user(request, db)
     require_user(user)
     if user["status"] != "ACTIVE":
-        raise ApiError(403, "ACCOUNT_UNAVAILABLE", "账号当前不可用")
+        raise ApiError(403, "ACCOUNT_UNAVAILABLE", ACCOUNT_UNAVAILABLE_MESSAGE)
     enforce_rate_limit("selection-group-write-user", str(user["id"]), 20, 60, "SELECTION_GROUP_RATE_LIMITED")
     group = one(
         db,
