@@ -266,7 +266,8 @@ function renderMiniMonth(year, month) {
     const today = dateKey(date) === dateKey(DEMO_NOW) ? 'today' : '';
     return `<button class="mini-day heat-${heatLevel(events)} ${today}" data-date="${dateKey(date)}" data-open-view="day" aria-label="${month + 1} 月 ${day} 日，${events.length} 个活动">${day}</button>`;
   }).join('');
-  return `<section class="mini-month"><div class="mini-month-head"><button data-month="${year}-${String(month + 1).padStart(2, '0')}">${month + 1} 月</button><span>${monthEvents.length} 个活动</span></div><div class="mini-weekdays">${shortWeekNames.map((name) => `<span>${name}</span>`).join('')}</div><div class="mini-days">${cells}</div></section>`;
+  const weekdays = shortWeekNames.map((name) => `<span>${name}</span>`).join('');
+  return `<section class="mini-month"><div class="mini-month-head"><button data-month="${year}-${String(month + 1).padStart(2, '0')}">${month + 1} 月</button><span>${monthEvents.length} 个活动</span></div><div class="mini-weekdays">${weekdays}</div><div class="mini-days">${cells}</div></section>`;
 }
 
 function renderMonth() {
@@ -292,8 +293,12 @@ function renderWeek() {
   const days = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
   const header = days.map((date) => `<div class="${dateKey(date) === dateKey(state.date) ? 'selected' : ''}"><button class="plain-button" data-date="${dateKey(date)}" data-open-view="day">${shortWeekNames[(date.getDay() + 6) % 7]}<strong>${date.getDate()}</strong></button></div>`).join('');
   const allDayByDate = days.map((date) => eventsForDay(date).filter((activity) => activity.allDay));
+  const allDayCells = allDayByDate.map((events) => {
+    const buttons = events.map((activity) => `<button class="all-day-event" data-event="${activity.id}">${escapeHtml(activity.title)}</button>`).join('');
+    return `<div class="all-day-cell">${buttons}</div>`;
+  }).join('');
   const allDayRow = allDayByDate.some((events) => events.length)
-    ? `<div class="week-all-day"><span>全天</span>${allDayByDate.map((events) => `<div class="all-day-cell">${events.map((activity) => `<button class="all-day-event" data-event="${activity.id}">${escapeHtml(activity.title)}</button>`).join('')}</div>`).join('')}</div>`
+    ? `<div class="week-all-day"><span>全天</span>${allDayCells}</div>`
     : '';
   const times = Array.from({ length: 11 }, (_, index) => `<span style="top:${index * 65}px">${String(index * 2 + 6).padStart(2, '0')}:00</span>`).join('');
   const columns = days.map((date) => renderWeekColumn(date)).join('');
@@ -310,7 +315,10 @@ function renderWeekColumn(date) {
     const top = Math.min(620, minutes / 120 * 65);
     const duration = Math.max(35, Math.min(125, (group.end - start) / 60000 / 120 * 65));
     const visible = group.events.slice(0, 2);
-    content += visible.map((activity, index) => `<button class="week-event importance-${activity.importance} ${group.events.length === 1 ? 'single' : `lane-${index + 1}`}" style="top:${top}px;height:${duration}px" data-event="${activity.id}"><strong>${timeLabel(activity).slice(0, 5)} ${escapeHtml(activity.title)}</strong>${escapeHtml(activity.location)}</button>`).join('');
+    content += visible.map((activity, index) => {
+      const laneClass = group.events.length === 1 ? 'single' : `lane-${index + 1}`;
+      return `<button class="week-event importance-${activity.importance} ${laneClass}" style="top:${top}px;height:${duration}px" data-event="${activity.id}"><strong>${timeLabel(activity).slice(0, 5)} ${escapeHtml(activity.title)}</strong>${escapeHtml(activity.location)}</button>`;
+    }).join('');
     if (group.events.length > 2) {
       const startTime = `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`;
       const endTime = `${String(group.end.getHours()).padStart(2, '0')}:${String(group.end.getMinutes()).padStart(2, '0')}`;
@@ -352,7 +360,13 @@ function renderActivityCard(activity, controls = false) {
   const count = participantCount(activity);
   const joined = isJoined(activity);
   const percent = Math.min(100, Math.round(count / activity.capacity * 100));
-  const actions = controls ? `<div class="drawer-actions"><button class="btn btn-sm" data-event="${activity.id}">${icon('eye')}详情</button><button class="btn btn-sm ${joined ? '' : 'btn-primary'}" data-join="${activity.id}" ${!joined && count >= activity.capacity ? 'disabled' : ''}>${joined ? '取消报名' : '报名'}</button></div>` : '';
+  let actions = '';
+  if (controls) {
+    const joinClass = joined ? '' : 'btn-primary';
+    const disabled = !joined && count >= activity.capacity ? 'disabled' : '';
+    const joinLabel = joined ? '取消报名' : '报名';
+    actions = `<div class="drawer-actions"><button class="btn btn-sm" data-event="${activity.id}">${icon('eye')}详情</button><button class="btn btn-sm ${joinClass}" data-join="${activity.id}" ${disabled}>${joinLabel}</button></div>`;
+  }
   return `<article class="activity-card importance-${activity.importance}" role="button" tabindex="0" data-event="${activity.id}"><div class="card-top">${activity.type === 'official' ? '<span class="badge badge-official">官方</span>' : ''}<span class="badge">${importanceLabel(activity.importance)}</span>${joined ? '<span class="badge badge-success">已报名</span>' : ''}${count >= activity.capacity ? '<span class="badge badge-warning">已满</span>' : ''}</div><h3>${escapeHtml(activity.title)}</h3><p>${icon('clock-3')}${timeLabel(activity)}</p><p>${icon('map-pin')}${escapeHtml(activity.location)} · ${escapeHtml(activity.organizer)}</p><div class="capacity-row"><div class="progress"><span style="width:${percent}%"></span></div><small>${count} / ${activity.capacity}</small></div>${actions}</article>`;
 }
 
@@ -380,6 +394,24 @@ function renderDrawer() {
   drawer.setAttribute('aria-hidden', 'false');
 }
 
+function detailRegistration(activity, joined, count) {
+  if (activity.status === 'DRAFT') {
+    return {
+      action: `<button class="btn btn-primary" data-publish="${activity.id}">${icon('send')}发布活动</button>`,
+      hint: '草稿不会出现在活动日历中',
+    };
+  }
+  const ended = isEnded(activity);
+  const buttonClass = joined ? '' : 'btn-primary';
+  const disabled = !joined && (count >= activity.capacity || ended) ? 'disabled' : '';
+  const label = joined ? `${icon('ticket-x')}取消报名` : `${icon('ticket-check')}立即报名`;
+  return {
+    action: `<button class="btn ${buttonClass}" data-join="${activity.id}" ${disabled}>${label}</button>`,
+    hint: ended ? '活动已经结束' : '活动开始前可取消报名',
+  };
+}
+
+
 function renderDetail() {
   const activity = findActivity(state.detailId);
   if (!activity) { goCalendar(); return; }
@@ -393,11 +425,7 @@ function renderDetail() {
   if (joined && !people.includes('林夏')) people.unshift('林夏');
   const organizerBadge = activity.type === 'official' ? '<span class="badge badge-official">官方活动</span>' : '<span class="badge">个人活动</span>';
   const statusClass = activity.status === 'DRAFT' ? 'badge-warning' : 'badge-success';
-  const joinLabel = joined ? `${icon('ticket-x')}取消报名` : `${icon('ticket-check')}立即报名`;
-  const registrationAction = activity.status === 'DRAFT' ? `<button class="btn btn-primary" data-publish="${activity.id}">${icon('send')}发布活动</button>` : `<button class="btn ${joined ? '' : 'btn-primary'}" data-join="${activity.id}" ${!joined && (count >= activity.capacity || isEnded(activity)) ? 'disabled' : ''}>${joinLabel}</button>`;
-  let registrationHint = '活动开始前可取消报名';
-  if (activity.status === 'DRAFT') registrationHint = '草稿不会出现在活动日历中';
-  else if (isEnded(activity)) registrationHint = '活动已经结束';
+  const { action: registrationAction, hint: registrationHint } = detailRegistration(activity, joined, count);
   const description = activity.description.split('\n').filter(Boolean).map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join('');
   const participants = people.slice(0, 6).map((name) => {
     const ownBadge = name === '林夏' ? '<span class="badge badge-success" style="margin-left:auto">我的报名</span>' : '';
@@ -570,48 +598,90 @@ function showToast(message) {
   window.setTimeout(() => toast.remove(), 2600);
 }
 
+function resetDemo(target) {
+  if (!target.matches('[data-reset-demo]')) return false;
+  if (window.confirm('重置报名和你创建的演示活动？')) {
+    localStorage.removeItem(STORAGE_KEY);
+    customActivities = [];
+    customGroups = initialOwnGroups.map((group) => ({ ...group, members: [...group.members] }));
+    joinedIds = new Set([2, 3, 4, 6]);
+    participantDeltas = {};
+    state = { page: 'calendar', view: window.innerWidth < 768 ? 'day' : 'month', date: new Date(DEMO_NOW), detailId: null, templateId: null, drawer: null, filtersOpen: false, expandedSlots: new Set(), filters: { search: '', type: 'all', importance: 'all', registration: 'all' } };
+    showToast('演示数据已重置');
+    render();
+  }
+  return true;
+}
+
+function handlePageNavigation(target) {
+  if (target.matches('[data-go-calendar]')) { goCalendar(); return true; }
+  if (target.matches('[data-manage-groups]')) { openGroupManager(); return true; }
+  if (target.matches('[data-delete-group]')) { deleteGroup(target.dataset.deleteGroup); return true; }
+  if (target.matches('[data-create]')) { openForm(); return true; }
+  if (target.matches('[data-toggle-filters]')) { state.filtersOpen = !state.filtersOpen; render(); return true; }
+  if (target.matches('[data-view]')) { state.view = target.dataset.view; state.drawer = null; render(); return true; }
+  if (target.matches('[data-nav="today"]')) { state.date = new Date(DEMO_NOW); state.drawer = null; render(); return true; }
+  if (target.matches('[data-nav="previous"]')) { navigatePeriod('previous'); return true; }
+  if (target.matches('[data-nav="next"]')) { navigatePeriod('next'); return true; }
+  if (target.matches('[data-month]')) {
+    const [year, month] = target.dataset.month.split('-').map(Number);
+    state.date = new Date(year, month - 1, 1);
+    state.view = 'month';
+    render();
+    return true;
+  }
+  if (target.matches('[data-date]')) {
+    state.date = parseDate(target.dataset.date);
+    state.view = target.dataset.openView || state.view;
+    state.drawer = null;
+    render();
+    return true;
+  }
+  return false;
+}
+
+function handleCalendarDrawer(target) {
+  if (target.matches('[data-open-day]')) { state.date = parseDate(target.dataset.openDay); state.drawer = { date: target.dataset.openDay }; render(); return true; }
+  if (target.matches('[data-open-slot]')) {
+    const [date, startTime, endTime] = target.dataset.openSlot.split('|');
+    state.drawer = { date, startTime, endTime };
+    render();
+    return true;
+  }
+  if (target.matches('[data-close-drawer]')) { state.drawer = null; renderDrawer(); return true; }
+  if (target.matches('[data-clear-filters]')) { state.filters = { search: '', type: 'all', importance: 'all', registration: 'all' }; render(); return true; }
+  if (target.matches('[data-expand-slot]')) {
+    const key = target.dataset.expandSlot;
+    if (state.expandedSlots.has(key)) state.expandedSlots.delete(key);
+    else state.expandedSlots.add(key);
+    render();
+    return true;
+  }
+  return false;
+}
+
+function handleActivityAction(event, target) {
+  if (target.matches('[data-join]')) { event.stopPropagation(); toggleRegistration(target.dataset.join); return true; }
+  if (target.matches('[data-event]')) { event.stopPropagation(); openDetail(target.dataset.event); return true; }
+  if (target.matches('[data-template]')) { openForm(target.dataset.template); return true; }
+  if (target.matches('[data-clear-template]')) { state.templateId = null; render(); return true; }
+  if (target.matches('[data-preview-form]')) { showPreview(); return true; }
+  if (target.matches('[data-close-modal]')) { closeModal(); return true; }
+  if (target.matches('[data-publish]')) { publishDraft(target.dataset.publish); return true; }
+  if (target.matches('[data-copy-link]')) { navigator.clipboard?.writeText(`activity-demo:${state.detailId}`); showToast('演示链接已复制'); return true; }
+  if (target.matches('[data-show-participants]')) { showToast('Demo 仅展示前 6 位参与者'); return true; }
+  if (target.matches('.top-link, .nav-item:not(.active), .bottom-nav button:not(.active)')) { showToast('该入口不属于本次活动广场 Demo'); return true; }
+  return false;
+}
+
 document.addEventListener('click', (event) => {
+  if (event.target.classList.contains('modal-backdrop')) { closeModal(); return; }
   const target = event.target.closest('button, [role="button"]');
   if (!target) return;
-  if (target.matches('[data-reset-demo]')) {
-    if (window.confirm('重置报名和你创建的演示活动？')) {
-      localStorage.removeItem(STORAGE_KEY);
-      customActivities = [];
-      customGroups = initialOwnGroups.map((group) => ({ ...group, members: [...group.members] }));
-      joinedIds = new Set([2, 3, 4, 6]);
-      participantDeltas = {};
-      state = { page: 'calendar', view: window.innerWidth < 768 ? 'day' : 'month', date: new Date(DEMO_NOW), detailId: null, templateId: null, drawer: null, filtersOpen: false, expandedSlots: new Set(), filters: { search: '', type: 'all', importance: 'all', registration: 'all' } };
-      showToast('演示数据已重置');
-      render();
-    }
-    return;
-  }
-  if (target.matches('[data-go-calendar]')) return goCalendar();
-  if (target.matches('[data-manage-groups]')) return openGroupManager();
-  if (target.matches('[data-delete-group]')) return deleteGroup(target.dataset.deleteGroup);
-  if (target.matches('[data-create]')) return openForm();
-  if (target.matches('[data-toggle-filters]')) { state.filtersOpen = !state.filtersOpen; return render(); }
-  if (target.matches('[data-view]')) { state.view = target.dataset.view; state.drawer = null; return render(); }
-  if (target.matches('[data-nav="today"]')) { state.date = new Date(DEMO_NOW); state.drawer = null; return render(); }
-  if (target.matches('[data-nav="previous"]')) return navigatePeriod('previous');
-  if (target.matches('[data-nav="next"]')) return navigatePeriod('next');
-  if (target.matches('[data-month]')) { const [year, month] = target.dataset.month.split('-').map(Number); state.date = new Date(year, month - 1, 1); state.view = 'month'; return render(); }
-  if (target.matches('[data-date]')) { state.date = parseDate(target.dataset.date); state.view = target.dataset.openView || state.view; state.drawer = null; return render(); }
-  if (target.matches('[data-open-day]')) { state.date = parseDate(target.dataset.openDay); state.drawer = { date: target.dataset.openDay }; return render(); }
-  if (target.matches('[data-open-slot]')) { const [date, startTime, endTime] = target.dataset.openSlot.split('|'); state.drawer = { date, startTime, endTime }; return render(); }
-  if (target.matches('[data-close-drawer]')) { state.drawer = null; return renderDrawer(); }
-  if (target.matches('[data-join]')) { event.stopPropagation(); return toggleRegistration(target.dataset.join); }
-  if (target.matches('[data-event]')) { event.stopPropagation(); return openDetail(target.dataset.event); }
-  if (target.matches('[data-template]')) return openForm(target.dataset.template);
-  if (target.matches('[data-clear-template]')) { state.templateId = null; return render(); }
-  if (target.matches('[data-preview-form]')) return showPreview();
-  if (target.matches('[data-close-modal]') || target.classList.contains('modal-backdrop')) return closeModal();
-  if (target.matches('[data-clear-filters]')) { state.filters = { search: '', type: 'all', importance: 'all', registration: 'all' }; return render(); }
-  if (target.matches('[data-expand-slot]')) { const key = target.dataset.expandSlot; state.expandedSlots.has(key) ? state.expandedSlots.delete(key) : state.expandedSlots.add(key); return render(); }
-  if (target.matches('[data-publish]')) return publishDraft(target.dataset.publish);
-  if (target.matches('[data-copy-link]')) { navigator.clipboard?.writeText(`activity-demo:${state.detailId}`); return showToast('演示链接已复制'); }
-  if (target.matches('[data-show-participants]')) return showToast('Demo 仅展示前 6 位参与者');
-  if (target.matches('.top-link, .nav-item:not(.active), .bottom-nav button:not(.active)')) showToast('该入口不属于本次活动广场 Demo');
+  if (resetDemo(target)) return;
+  if (handlePageNavigation(target)) return;
+  if (handleCalendarDrawer(target)) return;
+  handleActivityAction(event, target);
 });
 
 document.addEventListener('keydown', (event) => {
