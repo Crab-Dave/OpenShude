@@ -66,16 +66,17 @@
         </div>
 
         <div class="mobile-view-row">
-          <div class="view-switch" role="group" aria-label="移动端日历视图">
+          <fieldset class="view-switch">
+            <legend class="visually-hidden">移动端日历视图</legend>
             <button data-view="year">年</button><button data-view="month">月</button><button data-view="week">周</button><button data-view="day">日</button>
-          </div>
+          </fieldset>
           <button class="btn btn-icon" data-toggle-filters aria-label="展开筛选" aria-expanded="false"><i data-lucide="filter"></i></button>
           <button class="btn btn-icon" data-manage-groups aria-label="管理我的群组"><i data-lucide="users-round"></i></button>
           <button class="btn btn-primary btn-icon" data-create aria-label="创建活动"><i data-lucide="plus"></i></button>
         </div>
 
         <form class="filters" id="activity-filters">
-          <label class="search-field"><i data-lucide="search"></i><input id="filter-search" maxlength="80" placeholder="搜索活动、地点或主办者"></label>
+          <label class="search-field"><span class="visually-hidden">搜索活动、地点或主办者</span><i data-lucide="search"></i><input id="filter-search" maxlength="80" placeholder="搜索活动、地点或主办者"></label>
           <label><span>活动类型</span><select id="filter-type"><option value="all">全部活动</option><option value="official">官方活动</option><option value="personal">个人活动</option></select></label>
           <label><span>重要程度</span><select id="filter-importance"><option value="all">全部重要程度</option><option value="5">V · 必须关注</option><option value="4">IV · 很重要</option><option value="3">III · 重要</option><option value="2">II · 关注</option><option value="1">I · 一般</option></select></label>
           <label><span>报名状态</span><select id="filter-registration"><option value="all">全部报名状态</option><option value="joined">我已报名</option><option value="available">仍有名额</option><option value="mine">我创建的</option></select></label>

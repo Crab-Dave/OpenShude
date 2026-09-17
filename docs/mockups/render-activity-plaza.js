@@ -22,7 +22,7 @@ const screens = [
   try {
     for (const [screen, filename, viewport] of screens) {
       const page = await browser.newPage({ viewport, deviceScaleFactor: 1 });
-      await page.goto(`${pathToFileURL(source).href}?screen=${encodeURIComponent(String(screen))}`, { waitUntil: 'load' });
+      await page.goto(`${pathToFileURL(source).href}?screen=${encodeURIComponent(screen)}`, { waitUntil: 'load' });
       await page.screenshot({ path: path.join(output, filename) });
       await page.close();
     }
