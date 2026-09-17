@@ -39,6 +39,12 @@ from .dormitories import (
 )
 from .errors import ApiError
 from .security import hash_password
+from .selection_groups import (
+    SELECTION_GROUP_BY_ID,
+    selection_group_details,
+    selection_group_name_exists,
+    validate_selection_group,
+)
 from .student import CARD_SELECT, card_by_id
 from .treehole import prune_treehole_report_snapshots
 
@@ -46,7 +52,6 @@ router = APIRouter(prefix="/api/admin")
 DB = Annotated[Session, Depends(get_db)]
 ADMIN_GROUP_BY_ID = "SELECT * FROM admin_groups WHERE id=:id"
 USER_BY_ID = "SELECT * FROM users WHERE id=:id"
-SELECTION_GROUP_BY_ID = "SELECT * FROM student_selection_groups WHERE id=:id"
 DORMITORY_ROUND_BY_ID = "SELECT * FROM dormitory_selection_rounds WHERE id=:id"
 PERMISSION_DENIED_MESSAGE = "当前账号缺少所需管理权限"
 NOT_FOUND_MESSAGE = "接口不存在"
@@ -121,19 +126,6 @@ def group_details(db: Session, group: dict) -> dict:
             db,
             """SELECT u.id,u.login_identifier,u.name,u.grade,u.status FROM admin_group_members m
           JOIN users u ON u.id=m.user_id WHERE m.group_id=:id ORDER BY u.name,u.id""",
-            {"id": group["id"]},
-        ),
-    }
-
-
-def selection_group_details(db: Session, group: dict) -> dict:
-    return {
-        **group,
-        "members": all_rows(
-            db,
-            """SELECT u.id,u.login_identifier,u.name,u.grade,u.status
-      FROM student_selection_group_members m JOIN users u ON u.id=m.user_id
-      WHERE m.group_id=:id ORDER BY u.name,u.id""",
             {"id": group["id"]},
         ),
     }
@@ -993,7 +985,7 @@ def moderate_card(card_id: int, action: str, request: Request, body: dict, db: D
 def selection_groups(request: Request, db: DB, search: str = "") -> dict:
     require_super_admin(admin_user(request, db))
     groups = [
-        selection_group_details(db, group)
+        selection_group_details(db, group, True)
         for group in all_rows(db, "SELECT * FROM student_selection_groups ORDER BY name,id")
     ]
     if search.strip():
@@ -1004,15 +996,6 @@ def selection_groups(request: Request, db: DB, search: str = "") -> dict:
             if value in group["name"].lower() or any(value in member["name"].lower() for member in group["members"])
         ]
     return {"groups": groups}
-
-
-def validate_selection_group(db: Session, body: dict) -> tuple[str, str, list[int]]:
-    name = clean_text(body.get("name"), 80, True)
-    description = clean_text(body.get("description"), 500)
-    member_ids = valid_user_ids(db, body.get("memberIds"), True)
-    if not member_ids:
-        raise ApiError(400, "SELECTION_GROUP_MEMBERS_REQUIRED", "请至少选择一名学生")
-    return name, description, member_ids
 
 
 GROUP_CARD_HEADERS = [
@@ -1207,7 +1190,7 @@ def create_selection_group(request: Request, body: dict, db: DB) -> dict:
     admin = admin_user(request, db)
     grant = require_super_admin(admin)
     name, description, member_ids = validate_selection_group(db, body)
-    if one(db, "SELECT 1 AS found FROM student_selection_groups WHERE name=:name", {"name": name}):
+    if selection_group_name_exists(db, admin["id"], name):
         raise ApiError(409, "DUPLICATE_SELECTION_GROUP_NAME", "预设群组名称已存在")
     timestamp = now()
     result = db.execute(
@@ -1234,7 +1217,7 @@ def create_selection_group(request: Request, body: dict, db: DB) -> dict:
         after={"name": name, "description": description},
     )
     db.commit()
-    return {"group": selection_group_details(db, one(db, SELECTION_GROUP_BY_ID, {"id": result.lastrowid}))}
+    return {"group": selection_group_details(db, one(db, SELECTION_GROUP_BY_ID, {"id": result.lastrowid}), True)}
 
 
 @router.patch("/student-selection-groups/{group_id}")
@@ -1246,11 +1229,7 @@ def update_selection_group(group_id: int, request: Request, body: dict, db: DB) 
         raise ApiError(404, "SELECTION_GROUP_NOT_FOUND", SELECTION_GROUP_NOT_FOUND_MESSAGE)
     name, description, member_ids = validate_selection_group(db, body)
     reason = clean_text(body.get("reason"), 200, True)
-    if one(
-        db,
-        "SELECT 1 AS found FROM student_selection_groups WHERE name=:name AND id!=:id",
-        {"name": name, "id": group_id},
-    ):
+    if selection_group_name_exists(db, before["created_by"], name, group_id):
         raise ApiError(409, "DUPLICATE_SELECTION_GROUP_NAME", "预设群组名称已存在")
     db.execute(
         text("UPDATE student_selection_groups SET name=:name,description=:description,updated_at=:now WHERE id=:id"),
@@ -1276,7 +1255,7 @@ def update_selection_group(group_id: int, request: Request, body: dict, db: DB) 
         after={"name": name, "description": description},
     )
     db.commit()
-    return {"group": selection_group_details(db, one(db, SELECTION_GROUP_BY_ID, {"id": group_id}))}
+    return {"group": selection_group_details(db, one(db, SELECTION_GROUP_BY_ID, {"id": group_id}), True)}
 
 
 @router.delete("/student-selection-groups/{group_id}")
