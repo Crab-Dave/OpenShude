@@ -547,7 +547,7 @@ input:disabled { color: #62586d; background: #f0edf4; cursor: not-allowed; }
 .activity-month-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-template-rows: repeat(6, 132px); }
 .activity-month-day { position: relative; min-width: 0; overflow: hidden; padding: 7px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: white; }
 .activity-month-day:nth-child(7n) { border-right: 0; }
-.activity-month-day.outside { color: #9b99a0; background: #fafafa; }
+.activity-month-day.outside { color: var(--muted); background: #fafafa; }
 .activity-month-day.today { box-shadow: inset 0 0 0 2px #2f8066; }
 .activity-day-number { width: 100%; min-height: 25px; display: flex; align-items: center; justify-content: space-between; padding: 0; border: 0; color: inherit; background: transparent; text-align: left; }
 .activity-day-number span { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; font-weight: 800; }

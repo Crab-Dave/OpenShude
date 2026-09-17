@@ -9,7 +9,7 @@
 </head>
 <body>
   <div class="app-shell">
-    <aside class="sidebar">
+    <aside class="sidebar" aria-label="主导航">
       <div class="brand">
         <span class="brand-mark">活</span>
         <div><strong>活动广场</strong><small>发现校园好活动</small></div>
@@ -51,15 +51,16 @@
             <button class="btn" data-nav="today">今天</button>
             <button class="btn btn-icon" data-nav="previous" aria-label="上一个时间段"><i data-lucide="chevron-left"></i></button>
             <button class="btn btn-icon" data-nav="next" aria-label="下一个时间段"><i data-lucide="chevron-right"></i></button>
-            <h2 id="range-title"></h2>
+            <h2 id="range-title">2026 年 9 月</h2>
           </div>
           <div class="toolbar-spacer"></div>
           <div class="heat-legend" aria-label="活动热力图例">
             <span>热力</span><i class="heat heat-1"></i><i class="heat heat-2"></i><i class="heat heat-3"></i><i class="heat heat-4"></i><i class="heat heat-5"></i>
           </div>
-          <div class="view-switch" role="group" aria-label="日历视图">
+          <fieldset class="view-switch">
+            <legend class="visually-hidden">日历视图</legend>
             <button data-view="year">年</button><button data-view="month">月</button><button data-view="week">周</button><button data-view="day">日</button>
-          </div>
+          </fieldset>
           <button class="btn" data-manage-groups><i data-lucide="users-round"></i>我的群组</button>
           <button class="btn btn-primary" data-create><i data-lucide="plus"></i>创建活动</button>
         </div>
