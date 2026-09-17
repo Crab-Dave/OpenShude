@@ -30,6 +30,27 @@ let browser;
   browser = await chromium.launch({ executablePath: browserExecutable, headless: true });
   const errors = [];
 
+  const timezonePage = await browser.newPage({
+    viewport: { width: 800, height: 600 },
+    timezoneId: 'America/Los_Angeles',
+  });
+  await timezonePage.goto(`${baseUrl}/login`, { waitUntil: 'networkidle' });
+  const activityTimezone = await timezonePage.evaluate(() => ({
+    date: activityDateKey('2026-09-16T16:30:00.000Z'),
+    time: activityTimeLabel({
+      isAllDay: false,
+      startAt: '2026-09-16T16:30:00.000Z',
+      endAt: '2026-09-16T17:30:00.000Z',
+    }),
+    timestamp: activityTimestamp('2026-09-17T00:30'),
+  }));
+  assert.deepEqual(activityTimezone, {
+    date: '2026-09-17',
+    time: '00:30–01:30',
+    timestamp: '2026-09-16T16:30:00.000Z',
+  });
+  await timezonePage.close();
+
   const desktop = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
   desktop.on('console', (message) => { if (message.type() === 'error' && !message.text().startsWith('Failed to load resource')) errors.push(`desktop console: ${message.text()}`); });
   desktop.on('pageerror', (error) => errors.push(`desktop page: ${error.message}`));
