@@ -216,9 +216,7 @@ def test_official_activity_uses_one_active_admin_group_and_revokes_immediately(c
     assert official["organizerType"] == "ADMIN_GROUP"
     with SessionLocal.begin() as db:
         db.execute(
-            text(
-                "DELETE FROM admin_group_permissions WHERE group_id=:group AND permission_code='ACTIVITY_PUBLISH'"
-            ),
+            text("DELETE FROM admin_group_permissions WHERE group_id=:group AND permission_code='ACTIVITY_PUBLISH'"),
             {"group": group_id},
         )
     revoked = client.post(f"/api/activities/{official['id']}/publish", json={"version": official["version"]})
@@ -248,9 +246,9 @@ def test_markdown_preview_audit_and_permanent_delete(client: TestClient):
     assert deleted.status_code == 200
     assert client.get(f"/api/activities/{activity['id']}").status_code == 404
     with SessionLocal() as db:
-        actions = db.execute(
-            text("SELECT action FROM audit_logs WHERE target_type='ACTIVITY' ORDER BY id")
-        ).scalars().all()
+        actions = (
+            db.execute(text("SELECT action FROM audit_logs WHERE target_type='ACTIVITY' ORDER BY id")).scalars().all()
+        )
     assert actions == ["CREATE_ACTIVITY", "DELETE_ACTIVITY"]
     admin.close()
 

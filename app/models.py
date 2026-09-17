@@ -329,9 +329,7 @@ class ActivityTargetGroup(Base):
     __tablename__ = "activity_target_groups"
     id: Mapped[int] = mapped_column(primary_key=True)
     activity_id: Mapped[int] = mapped_column(ForeignKey(ACTIVITIES_ID, ondelete="CASCADE"))
-    source_group_id: Mapped[int | None] = mapped_column(
-        ForeignKey("student_selection_groups.id", ondelete=SET_NULL)
-    )
+    source_group_id: Mapped[int | None] = mapped_column(ForeignKey("student_selection_groups.id", ondelete=SET_NULL))
     group_name_snapshot: Mapped[str] = mapped_column(Text)
     __table_args__ = (
         UniqueConstraint("activity_id", "source_group_id"),

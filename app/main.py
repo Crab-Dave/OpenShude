@@ -156,8 +156,7 @@ class SecurityMiddleware:
                 response_status = message["status"]
                 response_headers = list(message.get("headers", []))
                 protected_page = request.url.path in ("/roommates", "/shudong", "/sude", "/activities") or (
-                    request.url.path.startswith("/sude/dormitories/")
-                    or request.url.path.startswith("/activities/")
+                    request.url.path.startswith("/sude/dormitories/") or request.url.path.startswith("/activities/")
                 )
                 api_request = (
                     "avatar"
