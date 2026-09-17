@@ -48,12 +48,16 @@ def test_user_manages_own_group_and_names_are_scoped_by_owner(client: TestClient
     assert client.delete(f"/api/student-selection-groups/{group['id']}").json() == {"ok": True}
 
     with SessionLocal() as db:
-        actions = db.execute(
-            text(
-                """SELECT action FROM audit_logs WHERE target_type='STUDENT_SELECTION_GROUP'
+        actions = (
+            db.execute(
+                text(
+                    """SELECT action FROM audit_logs WHERE target_type='STUDENT_SELECTION_GROUP'
                 AND admin_id=2 ORDER BY id"""
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     assert actions == [
         "CREATE_STUDENT_SELECTION_GROUP",
         "UPDATE_STUDENT_SELECTION_GROUP",
@@ -87,10 +91,13 @@ def test_admin_and_user_groups_share_storage_and_card_export(client: TestClient)
     shared_for_user = next(group for group in visible if group["id"] == shared.json()["group"]["id"])
     assert shared_for_user["owned"] is False
     assert shared_for_user["source"] == "ADMIN"
-    assert client.patch(
-        f"/api/student-selection-groups/{shared_for_user['id']}",
-        json={"name": "不能修改", "description": "", "memberIds": [2]},
-    ).status_code == 404
+    assert (
+        client.patch(
+            f"/api/student-selection-groups/{shared_for_user['id']}",
+            json={"name": "不能修改", "description": "", "memberIds": [2]},
+        ).status_code
+        == 404
+    )
 
 
 def test_group_candidates_and_members_require_active_users(client: TestClient):

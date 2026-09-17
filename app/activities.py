@@ -149,7 +149,9 @@ def official_group_grant(
     }
 
 
-def activity_manager_grant(db: Session, user: dict, activity: dict, permission: str = "ACTIVITY_PUBLISH") -> dict | None:
+def activity_manager_grant(
+    db: Session, user: dict, activity: dict, permission: str = "ACTIVITY_PUBLISH"
+) -> dict | None:
     if activity["organizer_type"] == "USER":
         if activity["created_by"] == user["id"]:
             return {"permissionCode": "SELF", "groupId": None, "scopeType": "", "scopeValue": ""}
@@ -189,9 +191,10 @@ def can_read_activity(db: Session, user: dict, activity: dict) -> bool:
         return True
     if activity["organizer_type"] != "ADMIN_GROUP":
         return False
-    return activity_manager_grant(db, user, activity, "ACTIVITY_READ") is not None or activity_manager_grant(
-        db, user, activity
-    ) is not None
+    return (
+        activity_manager_grant(db, user, activity, "ACTIVITY_READ") is not None
+        or activity_manager_grant(db, user, activity) is not None
+    )
 
 
 def visible_activity(db: Session, user: dict, activity_id: int) -> dict:
@@ -763,9 +766,7 @@ def update_activity(activity_id: int, request: Request, body: dict, db: DB) -> d
     if started and targets_changed:
         raise ApiError(409, "ACTIVITY_ALREADY_STARTED", "活动开始后不能修改目标人群")
     if targets_changed:
-        grade_ids, groups, scope_grade_ids = validate_targets(
-            db, user, body, activity["organizer_type"] == "USER"
-        )
+        grade_ids, groups, scope_grade_ids = validate_targets(db, user, body, activity["organizer_type"] == "USER")
     else:
         grade_ids = activity_grade_ids(db, activity_id)
         groups = []
@@ -773,9 +774,7 @@ def update_activity(activity_id: int, request: Request, body: dict, db: DB) -> d
     if activity["organizer_type"] == "USER" and values["importance"] > 3:
         raise ApiError(403, "ACTIVITY_IMPORTANCE_FORBIDDEN", "个人活动最高可设为 III 级")
     if activity["organizer_type"] == "ADMIN_GROUP":
-        grant = official_group_grant(
-            db, user, activity["organizer_group_id"], scope_grade_ids, values["importance"]
-        )
+        grant = official_group_grant(db, user, activity["organizer_group_id"], scope_grade_ids, values["importance"])
     timestamp = now()
     db.execute(
         text(
