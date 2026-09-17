@@ -405,6 +405,104 @@ def main() -> None:
             )
 
         student_ids = dict(db.execute(text("SELECT login_identifier,id FROM users WHERE account_type='USER'")).all())
+        shared_group_id = db.execute(
+            text(
+                """INSERT INTO student_selection_groups(name,description,created_by,created_at,updated_at)
+                VALUES('2026 级志愿服务队','管理员共享活动目标',:admin,:now,:now) RETURNING id"""
+            ),
+            {"admin": admin_id, "now": timestamp},
+        ).scalar_one()
+        own_group_id = db.execute(
+            text(
+                """INSERT INTO student_selection_groups(name,description,created_by,created_at,updated_at)
+                VALUES('AI 学习搭子','林夏创建的活动群组',:owner,:now,:now) RETURNING id"""
+            ),
+            {"owner": student_ids["2026001"], "now": timestamp},
+        ).scalar_one()
+        for group_id, logins in (
+            (shared_group_id, ["2026002", "2026003", "2026006"]),
+            (own_group_id, ["2026002", "2026010"]),
+        ):
+            for login_identifier in logins:
+                db.execute(
+                    text(
+                        """INSERT INTO student_selection_group_members(group_id,user_id,created_at)
+                        VALUES(:group,:user,:now)"""
+                    ),
+                    {"group": group_id, "user": student_ids[login_identifier], "now": timestamp},
+                )
+
+        activity_names = [
+            "AI 创作沙龙",
+            "城市速写练习",
+            "飞盘体验课",
+            "桌游新手局",
+            "模拟联合国说明会",
+            "新生辩论体验",
+            "咖啡手冲入门",
+            "开源项目结对",
+            "校园植物观察",
+            "街舞公开课",
+            "心理健康工作坊",
+            "法语零基础体验",
+            "乐高机器人体验",
+            "诗歌朗读会",
+            "排球新生训练",
+            "志愿服务宣讲",
+            "手语体验活动",
+            "生涯探索小组",
+            "摄影外拍",
+            "英语角特别场",
+        ]
+        activity_members = list(
+            db.execute(
+                text("SELECT id,name,grade FROM users WHERE account_type='USER' AND grade_id=:grade"),
+                {"grade": grade_ids["2026级"]},
+            ).mappings()
+        )
+        for index, title in enumerate(activity_names):
+            start_at = "2026-09-24T06:00:00.000Z" if index < 18 else "2026-09-24T06:30:00.000Z"
+            end_at = "2026-09-24T08:00:00.000Z" if index % 3 else "2026-09-24T08:30:00.000Z"
+            activity_id = db.execute(
+                text(
+                    """INSERT INTO activities(title,description_markdown,description_html,description_summary,
+                    start_at,end_at,is_all_day,location,organizer_type,organizer_user_id,organizer_name_snapshot,
+                    capacity,importance,status,version,created_by,created_at,updated_at,published_at)
+                    VALUES(:title,:description,:html,:summary,:start,:end,0,:location,'USER',:owner,'林夏',
+                    :capacity,:importance,'PUBLISHED',1,:owner,:now,:now,:now) RETURNING id"""
+                ),
+                {
+                    "title": title,
+                    "description": f"## {title}\n\n欢迎感兴趣的同学参加。",
+                    "html": f"<h2>{title}</h2><p>欢迎感兴趣的同学参加。</p>",
+                    "summary": "欢迎感兴趣的同学参加。",
+                    "start": start_at,
+                    "end": end_at,
+                    "location": f"学生活动中心 {index + 101}",
+                    "owner": student_ids["2026001"],
+                    "capacity": 20 + index,
+                    "importance": 5 if index == 15 else 3 if index % 5 == 0 else 1,
+                    "now": timestamp,
+                },
+            ).scalar_one()
+            db.execute(
+                text("INSERT INTO activity_target_grades(activity_id,grade_id) VALUES(:activity,:grade)"),
+                {"activity": activity_id, "grade": grade_ids["2026级"]},
+            )
+            for member in activity_members:
+                db.execute(
+                    text(
+                        """INSERT INTO activity_target_members
+                        (activity_id,user_id,participant_name_snapshot,grade_snapshot)
+                        VALUES(:activity,:user,:name,:grade)"""
+                    ),
+                    {
+                        "activity": activity_id,
+                        "user": member["id"],
+                        "name": member["name"],
+                        "grade": member["grade"],
+                    },
+                )
         official_dormitories = [
             (
                 "明德-101",
