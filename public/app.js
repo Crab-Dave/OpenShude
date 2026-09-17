@@ -21,6 +21,8 @@ const activityDateDisplayFormatter = new Intl.DateTimeFormat('zh-CN', {
   month: 'numeric',
   day: 'numeric',
 });
+const activityWeekdayNames = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+const activityShortWeekdayNames = ['一', '二', '三', '四', '五', '六', '日'];
 
 function activityDateParts(value) {
   return Object.fromEntries(
@@ -72,7 +74,8 @@ const state = {
   adminOfficialDormitoryOffset: 0,
   activityView: window.innerWidth < 768 ? 'day' : 'month',
   activityDate: activityDateFromKey(activityDateKey(new Date())),
-  activityFilters: { keyword: '', type: 'all', importance: '', registration: 'all', location: '' },
+  activityFilters: { keyword: '', type: 'all', importance: '', registration: 'all' },
+  activityFiltersOpen: false,
   activityDetailId: null,
   activityTemplateId: null,
   activityEditId: null,
@@ -351,7 +354,7 @@ const officialDormitoryNav = [
 
 const activityNav = [
   ['activities-calendar', 'calendar-days', '活动日历'],
-  ['activities-groups', 'users-round', '目标群组'],
+  ['activities-groups', 'users-round', '我的群组'],
 ];
 
 const adminNav = [
@@ -420,7 +423,7 @@ const titles = {
   'activities-calendar': ['活动广场', '按时间发现和参加校园活动'],
   'activities-detail': ['活动详情', '查看安排、名额与参与者'],
   'activities-form': ['创建活动', '设置时间、容量和目标人群'],
-  'activities-groups': ['目标群组', '维护创建活动时使用的学生名单'],
+  'activities-groups': ['我的群组', '维护创建活动时使用的学生名单'],
   rounds: ['选宿舍轮次', '配置参与学生并分别保留每轮结果'],
   groups: ['宿舍组管理', '查看和处理异常宿舍组'],
   reports: ['举报处理', '仅查看用户主动提交的举报快照'],
@@ -584,7 +587,7 @@ function renderShell() { // NOSONAR
     : '';
   const loading = emptyState('loader-circle', '正在加载', '正在读取最新数据');
   app.replaceChildren(...parseSafeHtml(`
-    <div class="app-shell">
+    <div class="app-shell ${activities ? 'activity-shell' : ''}">
       <aside class="sidebar">
         <div class="sidebar-brand"><div class="brand-mark">${brandSymbol}</div><div><strong>${brandName}</strong><small>${brandDescription}</small></div></div>
         <div class="nav-label">${navLabel}</div>
@@ -771,15 +774,16 @@ function activitySummaryCard(activity, controls = false) {
 
 function activityMonthMarkup(data) {
   const selectedMonth = state.activityDate.getUTCMonth();
-  const weekdays = ['一', '二', '三', '四', '五', '六', '日'].map((day) => `<span>${day}</span>`).join('');
+  const selectedDate = activityDateKey(state.activityDate);
+  const weekdays = activityShortWeekdayNames.map((day) => `<span>周${day}</span>`).join('');
   const days = data.days.map((day) => {
     const value = activityDateFromKey(day.date);
     const outside = value.getUTCMonth() !== selectedMonth;
     const summaries = day.activities.map((activity) => `<button data-activity-open="${activity.id}" class="activity-month-event importance-${activity.importance}"><time>${activity.isAllDay ? '全天' : activityTimeLabel(activity).split('–')[0]}</time><span>${escapeHtml(activity.title)}</span></button>`).join('');
-    const classes = `activity-month-day ${outside ? 'outside' : ''} ${day.date === activityDateKey(new Date()) ? 'today' : ''}`;
+    const classes = `activity-month-day ${outside ? 'outside' : ''} ${day.date === selectedDate ? 'selected' : ''} ${day.date === activityDateKey(new Date()) ? 'today' : ''}`;
     const count = day.count ? `${day.count} 个` : '';
     const more = day.count > 3 ? `<button class="activity-more" data-activity-day="${day.date}">另有 ${day.count - 3} 个活动</button>` : '';
-    return `<div class="${classes}"><button class="activity-day-number" data-activity-date="${day.date}"><span>${value.getUTCDate()}</span><small>${count}</small></button>${summaries}${more}<i class="activity-heat heat-${activityHeatLevel(day.score)}"></i></div>`;
+    return `<div class="${classes}"><button class="activity-day-number" data-activity-date="${day.date}" aria-label="${value.getUTCMonth() + 1} 月 ${value.getUTCDate()} 日，${day.count} 个活动"><span>${value.getUTCDate()}</span><small>${count}</small></button>${summaries}${more}</div>`;
   }).join('');
   return `<section class="panel activity-month"><div class="activity-weekdays">${weekdays}</div><div class="activity-month-grid">${days}</div></section>`;
 }
@@ -787,7 +791,8 @@ function activityMonthMarkup(data) {
 function activityYearMarkup(data) {
   const byDate = new Map(data.days.map((day) => [day.date, day]));
   const year = state.activityDate.getUTCFullYear();
-  const weekdays = ['一', '二', '三', '四', '五', '六', '日'].map((name) => `<span>${name}</span>`).join('');
+  const weekdays = activityShortWeekdayNames.map((name) => `<span>${name}</span>`).join('');
+  const today = activityDateKey(new Date());
   const months = Array.from({ length: 12 }, (_, month) => {
     const first = new Date(Date.UTC(year, month, 1, 12));
     const offset = (first.getUTCDay() + 6) % 7;
@@ -797,8 +802,9 @@ function activityYearMarkup(data) {
       const key = activityDateKey(new Date(Date.UTC(year, month, day, 12)));
       const aggregate = byDate.get(key) || { count: 0, score: 0 };
       const heat = activityHeatLevel(aggregate.score);
-      cells.push(`<button class="heat-${heat}" data-activity-date="${key}" title="${month + 1} 月 ${day} 日 · ${aggregate.count} 个活动">${day}</button>`);
+      cells.push(`<button class="heat-${heat} ${key === today ? 'today' : ''}" data-activity-date="${key}" title="${month + 1} 月 ${day} 日 · ${aggregate.count} 个活动">${day}</button>`);
     }
+    while (cells.length < 42) cells.push('<span></span>');
     const monthCount = data.days.filter((item) => Number(item.date.slice(5, 7)) - 1 === month).reduce((sum, item) => sum + item.count, 0);
     return `<section class="panel activity-mini-month"><button class="activity-mini-title" data-activity-month="${year}-${month + 1}"><strong>${month + 1} 月</strong><small>${monthCount} 个活动</small></button><div class="activity-mini-weekdays">${weekdays}</div><div class="activity-mini-days">${cells.join('')}</div></section>`;
   }).join('');
@@ -824,26 +830,49 @@ function activityClusters(activities) {
 function activityWeekMarkup(data) {
   const start = activityDateFromKey(data.rangeStart);
   const days = Array.from({ length: 7 }, (_, index) => new Date(start.getTime() + index * 86400000));
-  const headers = days.map((day) => `<button data-activity-date="${activityDateKey(day)}"><small>${['周日', '周一', '周二', '周三', '周四', '周五', '周六'][day.getUTCDay()]}</small><strong>${day.getUTCMonth() + 1}/${day.getUTCDate()}</strong></button>`).join('');
-  const timeAxis = Array.from({ length: 10 }, (_, index) => `<span style="top:${index * 96}px">${String(index * 2 + 6).padStart(2, '0')}:00</span>`).join('');
+  const selectedDate = activityDateKey(state.activityDate);
+  const headers = days.map((day, index) => {
+    const key = activityDateKey(day);
+    return `<button class="${key === selectedDate ? 'selected' : ''}" data-activity-date="${key}"><small>${activityShortWeekdayNames[index]}</small><strong>${day.getUTCDate()}</strong></button>`;
+  }).join('');
+  const allDayCells = days.map((day) => {
+    const key = activityDateKey(day);
+    const activities = data.activities.filter((activity) => activity.isAllDay && activityDateKey(activity.startAt) === key);
+    return `<div class="activity-week-all-day-cell">${activities.map((activity) => `<button data-activity-open="${activity.id}">${escapeHtml(activity.title)}</button>`).join('')}</div>`;
+  }).join('');
+  const allDay = data.activities.some((activity) => activity.isAllDay)
+    ? `<div class="activity-week-all-day"><span>全天</span>${allDayCells}</div>` : '';
+  const timeAxis = Array.from({ length: 11 }, (_, index) => `<span style="top:${index * 65}px">${String(index * 2 + 6).padStart(2, '0')}:00</span>`).join('');
   const columns = days.map((day) => {
     const key = activityDateKey(day);
     const dayActivities = data.activities.filter((activity) => activityDateKey(activity.startAt) === key && !activity.isAllDay);
     const clusters = activityClusters(dayActivities);
     const clusterMarkup = clusters.map((cluster) => {
       const ordered = [...cluster.activities].sort((first, second) => second.importance - first.importance || second.id - first.id);
-      const top = Math.max(0, ((cluster.start.getHours() + cluster.start.getMinutes() / 60) - 6) * 48);
-      const height = Math.max(38, Math.min(160, (cluster.end - cluster.start) / 3600000 * 48));
+      const startParts = activityDateParts(cluster.start);
+      const minutes = Math.max(0, Number(startParts.hour) * 60 + Number(startParts.minute) - 360);
+      const top = Math.min(620, minutes / 120 * 65);
+      const height = Math.max(35, Math.min(125, (cluster.end - cluster.start) / 3600000 / 2 * 65));
       const activities = ordered.slice(0, 2).map((activity) => `<button class="importance-${activity.importance}" data-activity-open="${activity.id}"><time>${activityTimeLabel(activity).split('–')[0]}</time><span>${escapeHtml(activity.title)}</span></button>`).join('');
       const more = ordered.length > 2 ? `<button class="activity-cluster-more" data-activity-slot="${key}">另有 ${ordered.length - 2} 个</button>` : '';
       return `<div class="activity-week-cluster" style="top:${top}px;min-height:${height}px">${activities}${more}</div>`;
     }).join('');
-    return `<div class="activity-week-column">${clusterMarkup}</div>`;
+    return `<div class="activity-week-column ${key === selectedDate ? 'selected' : ''}">${clusterMarkup}</div>`;
   }).join('');
-  return `<section class="panel activity-week-scroll"><div class="activity-week"><div class="activity-week-head"><span></span>${headers}</div><div class="activity-week-body"><div class="activity-time-axis">${timeAxis}</div>${columns}</div></div></section>`;
+  return `<section class="panel activity-week-scroll"><div class="activity-week"><div class="activity-week-head"><span></span>${headers}</div>${allDay}<div class="activity-week-body"><div class="activity-time-axis">${timeAxis}</div>${columns}</div></div></section>`;
 }
 
-function activityDayMarkup(data) {
+function activityDayMarkup(data, weekDays) {
+  const selectedDate = activityDateFromKey(data.date);
+  const weekStart = new Date(selectedDate);
+  weekStart.setUTCDate(selectedDate.getUTCDate() - ((selectedDate.getUTCDay() + 6) % 7));
+  const counts = new Map(weekDays.map((day) => [day.date, day.count]));
+  const strip = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(weekStart.getTime() + index * 86400000);
+    const key = activityDateKey(date);
+    const count = counts.get(key) || 0;
+    return `<button class="activity-day-picker ${key === data.date ? 'active' : ''}" data-activity-date="${key}"><span>${activityShortWeekdayNames[index]}</span><strong>${date.getUTCDate()}</strong><small>${count || ''}</small></button>`;
+  }).join('');
   const grouped = new Map();
   data.activities.forEach((activity) => {
     const key = activity.isAllDay ? '全天' : activityTimeLabel(activity).split('–')[0];
@@ -859,9 +888,10 @@ function activityDayMarkup(data) {
     const cards = shown.map((activity) => activitySummaryCard(activity)).join('');
     const expandLabel = expanded ? `${icon('chevron-up')}收起` : `${icon('chevron-down')}展开其余 ${activities.length - 3} 个`;
     const expand = activities.length > 3 ? `<button class="btn btn-secondary" data-activity-expand="${escapeHtml(key)}">${expandLabel}</button>` : '';
-    return `<section class="activity-time-group"><div class="activity-time-label"><strong>${slot}</strong><span>${activities.length} 个活动</span></div><div class="activity-time-cards">${cards}${expand}</div></section>`;
-  }).join('') : emptyState('calendar-x', '这一天还没有活动', '可以调整筛选或创建一个新活动');
-  return `<div class="activity-day-layout"><section class="activity-day-stats"><div><strong>${data.total}</strong><span>全部活动</span></div><div><strong>${joined}</strong><span>我已报名</span></div><div><strong>${available}</strong><span>仍有名额</span></div></section>${groups}</div>`;
+    return `<section class="activity-time-group"><div class="activity-time-label"><strong>${slot}</strong><span>${activities.length} 个活动</span></div><div class="activity-time-cards">${cards}</div>${expand ? `<div class="activity-time-actions">${expand}</div>` : ''}</section>`;
+  }).join('') : emptyState('calendar-x', '这一天还没有符合条件的活动', '可以清除筛选或创建一个新活动', `<button class="btn btn-primary" data-activity-create>${icon('plus')}创建活动</button>`);
+  const list = data.activities.length ? `<section class="panel activity-day-list">${groups}</section>` : groups;
+  return `<div class="activity-day-layout"><div class="panel activity-day-strip">${strip}</div><section class="activity-day-stats"><div><strong>${data.total}</strong><span>当天活动</span></div><div><strong>${joined}</strong><span>我已报名</span></div><div><strong>${available}</strong><span>仍有名额</span></div></section>${list}</div>`;
 }
 
 async function openActivityDayList(dateValue) {
@@ -887,22 +917,33 @@ function bindActivityOpeners(container = document) {
 async function renderActivityCalendar() {
   const params = new URLSearchParams({ view: state.activityView, date: activityDateKey(state.activityDate) });
   Object.entries(state.activityFilters).forEach(([key, value]) => { if (value && value !== 'all') params.set(key === 'type' ? 'type' : key, value); });
-  const data = await api(`/api/activities/calendar?${params}`);
   let title;
   let content;
   if (state.activityView === 'year') {
+    const data = await api(`/api/activities/calendar?${params}`);
     title = `${state.activityDate.getUTCFullYear()} 年`;
     content = activityYearMarkup(data);
   } else if (state.activityView === 'month') {
+    const data = await api(`/api/activities/calendar?${params}`);
     title = `${state.activityDate.getUTCFullYear()} 年 ${state.activityDate.getUTCMonth() + 1} 月`;
     content = activityMonthMarkup(data);
   } else if (state.activityView === 'week') {
-    title = `${data.rangeStart} 至 ${data.rangeEnd}`;
+    const data = await api(`/api/activities/calendar?${params}`);
+    const start = activityDateFromKey(data.rangeStart);
+    const end = activityDateFromKey(data.rangeEnd);
+    title = start.getUTCMonth() === end.getUTCMonth()
+      ? `${start.getUTCMonth() + 1} 月 ${start.getUTCDate()} 日–${end.getUTCDate()} 日`
+      : `${start.getUTCMonth() + 1} 月 ${start.getUTCDate()} 日–${end.getUTCMonth() + 1} 月 ${end.getUTCDate()} 日`;
     content = activityWeekMarkup(data);
   } else {
-    title = activityDateKey(state.activityDate);
-    const day = await api(`/api/activities/day?date=${activityDateKey(state.activityDate)}&${params}`);
-    content = activityDayMarkup(day);
+    const weekParams = new URLSearchParams(params);
+    weekParams.set('view', 'week');
+    const [day, week] = await Promise.all([
+      api(`/api/activities/day?date=${activityDateKey(state.activityDate)}&${params}`),
+      api(`/api/activities/calendar?${weekParams}`),
+    ]);
+    title = `${state.activityDate.getUTCMonth() + 1} 月 ${state.activityDate.getUTCDate()} 日 · ${activityWeekdayNames[state.activityDate.getUTCDay()]}`;
+    content = activityDayMarkup(day, week.days);
   }
   const views = [['year', '年'], ['month', '月'], ['week', '周'], ['day', '日']]
     .map(([view, label]) => `<button class="${state.activityView === view ? 'active' : ''}" data-activity-view="${view}">${label}</button>`)
@@ -911,7 +952,7 @@ async function renderActivityCalendar() {
     .map((level) => `<option value="${level}" ${state.activityFilters.importance === String(level) ? 'selected' : ''}>${activityImportanceLabel(level)}</option>`)
     .join('');
   const heat = [1, 2, 3, 4, 5].map((level) => `<i class="heat-${level}"></i>`).join('');
-  setPage(`<div class="activity-toolbar"><div class="activity-date-nav"><button class="btn btn-secondary" data-activity-today>今天</button><button class="btn btn-secondary icon-btn" data-activity-nav="previous" title="上一个时间段">${icon('chevron-left')}</button><button class="btn btn-secondary icon-btn" data-activity-nav="next" title="下一个时间段">${icon('chevron-right')}</button><h2>${escapeHtml(title)}</h2></div><div class="toolbar-spacer"></div><div class="segmented activity-view-switch">${views}</div><button class="btn btn-secondary" data-activity-groups>${icon('users-round')}目标群组</button><button class="btn btn-primary" data-activity-create>${icon('plus')}创建活动</button></div><form class="activity-filters" id="activity-filter-form"><div class="search-field">${icon('search')}<input name="keyword" maxlength="80" value="${escapeHtml(state.activityFilters.keyword)}" placeholder="搜索活动、地点或主办者"></div><select name="type"><option value="all">全部活动</option><option value="official" ${state.activityFilters.type === 'official' ? 'selected' : ''}>官方活动</option><option value="personal" ${state.activityFilters.type === 'personal' ? 'selected' : ''}>个人活动</option></select><select name="importance"><option value="">全部重要程度</option>${importanceOptions}</select><select name="registration"><option value="all">全部报名状态</option><option value="joined" ${state.activityFilters.registration === 'joined' ? 'selected' : ''}>我已报名</option><option value="available" ${state.activityFilters.registration === 'available' ? 'selected' : ''}>仍有名额</option><option value="mine" ${state.activityFilters.registration === 'mine' ? 'selected' : ''}>我创建的</option></select><div class="search-field">${icon('map-pin')}<input name="location" maxlength="120" value="${escapeHtml(state.activityFilters.location)}" placeholder="地点"></div><button class="btn btn-quiet" type="button" data-activity-clear>${icon('x')}清除</button></form><div class="activity-heat-legend"><span>热力</span>${heat}<small>按可见活动重要程度计算</small></div>${content}`);
+  setPage(`<div class="activity-toolbar"><div class="activity-date-nav"><button class="btn btn-secondary" data-activity-today>今天</button><button class="btn btn-secondary icon-btn" data-activity-nav="previous" title="上一个时间段">${icon('chevron-left')}</button><button class="btn btn-secondary icon-btn" data-activity-nav="next" title="下一个时间段">${icon('chevron-right')}</button><h2>${escapeHtml(title)}</h2></div><div class="toolbar-spacer"></div><div class="activity-heat-legend" aria-label="活动热力图例"><span>热力</span>${heat}</div><div class="segmented activity-view-switch">${views}</div><button class="btn btn-secondary activity-filter-toggle" data-activity-toggle-filters aria-label="展开筛选" aria-expanded="${state.activityFiltersOpen}">${icon('filter')}</button><button class="btn btn-secondary" data-activity-groups aria-label="管理我的群组">${icon('users-round')}<span>我的群组</span></button><button class="btn btn-primary" data-activity-create aria-label="创建活动">${icon('plus')}<span>创建活动</span></button></div><form class="activity-filters ${state.activityFiltersOpen ? 'open' : ''}" id="activity-filter-form"><label class="activity-search-field"><span class="sr-only">搜索活动、地点或主办者</span>${icon('search')}<input name="keyword" maxlength="80" value="${escapeHtml(state.activityFilters.keyword)}" placeholder="搜索活动、地点或主办者"></label><label><span>活动类型</span><select name="type"><option value="all">全部活动</option><option value="official" ${state.activityFilters.type === 'official' ? 'selected' : ''}>官方活动</option><option value="personal" ${state.activityFilters.type === 'personal' ? 'selected' : ''}>个人活动</option></select></label><label><span>重要程度</span><select name="importance"><option value="">全部重要程度</option>${importanceOptions}</select></label><label><span>报名状态</span><select name="registration"><option value="all">全部报名状态</option><option value="joined" ${state.activityFilters.registration === 'joined' ? 'selected' : ''}>我已报名</option><option value="available" ${state.activityFilters.registration === 'available' ? 'selected' : ''}>仍有名额</option><option value="mine" ${state.activityFilters.registration === 'mine' ? 'selected' : ''}>我创建的</option></select></label><button class="btn btn-quiet" type="button" data-activity-clear>${icon('x')}清除</button></form><div class="activity-calendar-content">${content}</div>`);
   history.replaceState({}, '', `/activities?view=${state.activityView}&date=${activityDateKey(state.activityDate)}`);
   document.querySelectorAll('[data-activity-view]').forEach((button) => button.addEventListener('click', () => { state.activityView = button.dataset.activityView; renderActivityCalendar(); }));
   document.querySelector('[data-activity-today]').addEventListener('click', () => { state.activityDate = activityDateFromKey(activityDateKey(new Date())); renderActivityCalendar(); });
@@ -928,18 +969,19 @@ async function renderActivityCalendar() {
   document.querySelectorAll('[data-activity-month]').forEach((button) => button.addEventListener('click', () => { const [year, month] = button.dataset.activityMonth.split('-'); state.activityDate = activityDateFromKey(`${year}-${String(month).padStart(2, '0')}-01`); state.activityView = 'month'; renderActivityCalendar(); }));
   document.querySelectorAll('[data-activity-day], [data-activity-slot]').forEach((button) => button.addEventListener('click', () => openActivityDayList(button.dataset.activityDay || button.dataset.activitySlot)));
   document.querySelectorAll('[data-activity-expand]').forEach((button) => button.addEventListener('click', () => { const key = button.dataset.activityExpand; state.activityExpandedSlots.has(key) ? state.activityExpandedSlots.delete(key) : state.activityExpandedSlots.add(key); renderActivityCalendar(); }));
-  document.querySelector('[data-activity-create]').addEventListener('click', () => openActivityForm());
+  document.querySelectorAll('[data-activity-create]').forEach((button) => button.addEventListener('click', () => openActivityForm()));
   document.querySelector('[data-activity-groups]').addEventListener('click', () => navigate('activities-groups'));
+  document.querySelector('[data-activity-toggle-filters]').addEventListener('click', () => { state.activityFiltersOpen = !state.activityFiltersOpen; renderActivityCalendar(); });
   const form = document.querySelector('#activity-filter-form');
   let searchTimer;
   form.addEventListener('input', (event) => {
-    if (!['keyword', 'location'].includes(event.target.name)) return;
+    if (event.target.name !== 'keyword') return;
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => { state.activityFilters[event.target.name] = event.target.value.trim(); renderActivityCalendar(); }, 300);
   });
   form.addEventListener('change', (event) => { state.activityFilters[event.target.name] = event.target.value; renderActivityCalendar(); });
-  form.addEventListener('submit', (event) => { event.preventDefault(); state.activityFilters.keyword = form.keyword.value.trim(); state.activityFilters.location = form.location.value.trim(); renderActivityCalendar(); });
-  document.querySelector('[data-activity-clear]').addEventListener('click', () => { state.activityFilters = { keyword: '', type: 'all', importance: '', registration: 'all', location: '' }; renderActivityCalendar(); });
+  form.addEventListener('submit', (event) => { event.preventDefault(); state.activityFilters.keyword = form.keyword.value.trim(); renderActivityCalendar(); });
+  document.querySelector('[data-activity-clear]').addEventListener('click', () => { state.activityFilters = { keyword: '', type: 'all', importance: '', registration: 'all' }; renderActivityCalendar(); });
   bindActivityOpeners();
 }
 
