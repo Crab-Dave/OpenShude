@@ -11,6 +11,7 @@ DORMITORY_ROUNDS_ID = "dormitory_selection_rounds.id"
 ACTIVITIES_ID = "activities.id"
 SET_NULL = "SET NULL"
 NORMAL_STATUS_SQL = "'NORMAL'"
+DRAFT_STATUS_SQL = "'DRAFT'"
 
 
 class User(Base):
@@ -90,7 +91,7 @@ class RoommateCard(Base):
     media_noise_tolerance: Mapped[str] = mapped_column(Text, server_default=text("''"))
     self_acknowledged_shortcoming: Mapped[str] = mapped_column(Text, server_default=text("''"))
     additional_note: Mapped[str] = mapped_column(Text, server_default=text("''"))
-    status: Mapped[str] = mapped_column(Text, server_default=text("'DRAFT'"))
+    status: Mapped[str] = mapped_column(Text, server_default=text(DRAFT_STATUS_SQL))
     hidden_reason: Mapped[str | None] = mapped_column(Text)
     published_at: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text)
@@ -231,7 +232,7 @@ class DormitorySelectionRound(Base):
     code: Mapped[str] = mapped_column(Text, unique=True)
     name: Mapped[str] = mapped_column(Text)
     description: Mapped[str] = mapped_column(Text, server_default=text("''"))
-    status: Mapped[str] = mapped_column(Text, server_default=text("'DRAFT'"))
+    status: Mapped[str] = mapped_column(Text, server_default=text(DRAFT_STATUS_SQL))
     starts_at: Mapped[str | None] = mapped_column(Text)
     ends_at: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID))
@@ -293,7 +294,7 @@ class Activity(Base):
     organizer_name_snapshot: Mapped[str] = mapped_column(Text)
     capacity: Mapped[int]
     importance: Mapped[int]
-    status: Mapped[str] = mapped_column(Text, server_default=text("'DRAFT'"))
+    status: Mapped[str] = mapped_column(Text, server_default=text(DRAFT_STATUS_SQL))
     version: Mapped[int] = mapped_column(server_default=text("1"))
     cancel_reason: Mapped[str] = mapped_column(Text, server_default=text("''"))
     created_by: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID, ondelete=SET_NULL))

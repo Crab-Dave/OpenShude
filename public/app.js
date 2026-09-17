@@ -950,7 +950,14 @@ async function renderActivityDetail() {
   ]);
   const percent = Math.min(100, Math.round((activity.registrationCount / activity.capacity) * 100));
   const participants = participantData.participants.map((participant) => `<div class="activity-participant">${avatar(participant.avatarUrl, participant.name)}<div><strong>${escapeHtml(participant.name)}</strong><span>${escapeHtml(participant.grade || '身份已隐藏')}</span></div></div>`).join('');
-  const action = activity.registered ? `<button class="btn btn-secondary" data-activity-registration="cancel">${icon('ticket-x')}取消报名</button>` : `<button class="btn btn-primary" data-activity-registration="register" ${activity.capabilities.canRegister ? '' : 'disabled'}>${icon('ticket-check')}${activity.registrationCount >= activity.capacity ? '名额已满' : '立即报名'}</button>`;
+  let action;
+  if (activity.registered) {
+    action = `<button class="btn btn-secondary" data-activity-registration="cancel">${icon('ticket-x')}取消报名</button>`;
+  } else {
+    const disabled = activity.capabilities.canRegister ? '' : 'disabled';
+    const label = activity.registrationCount >= activity.capacity ? '名额已满' : '立即报名';
+    action = `<button class="btn btn-primary" data-activity-registration="register" ${disabled}>${icon('ticket-check')}${label}</button>`;
+  }
   const editButton = activity.capabilities.canEdit ? `<button class="btn btn-secondary" data-activity-edit>${icon('pencil')}编辑</button>` : '';
   const cancelButton = activity.capabilities.canCancel ? `<button class="btn btn-danger" data-activity-cancel>${icon('calendar-x')}取消活动</button>` : '';
   const organizerBadge = activity.organizerType === 'ADMIN_GROUP' ? '<span class="activity-badge official">官方活动</span>' : '<span class="activity-badge">个人活动</span>';
@@ -1045,7 +1052,8 @@ async function renderActivityForm() { // NOSONAR
       if (!allowed) input.checked = false;
       label.classList.toggle('disabled', !allowed);
     });
-    const maxImportance = organizer ? (state.user.isSuperAdmin || organizer.permissions?.includes('ACTIVITY_IMPORTANCE_SET') ? 5 : 3) : 3;
+    let maxImportance = 3;
+    if (organizer && (state.user.isSuperAdmin || organizer.permissions?.includes('ACTIVITY_IMPORTANCE_SET'))) maxImportance = 5;
     form.querySelectorAll('[name="importance"]').forEach((input) => { input.disabled = Number(input.value) > maxImportance; if (input.checked && input.disabled) form.querySelector('[name="importance"][value="3"]').checked = true; });
   };
   updateGradeAvailability();
