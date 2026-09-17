@@ -8,6 +8,7 @@ USERS_ID = "users.id"
 CONVERSATIONS_ID = "conversations.id"
 ADMIN_GROUPS_ID = "admin_groups.id"
 DORMITORY_ROUNDS_ID = "dormitory_selection_rounds.id"
+ACTIVITIES_ID = "activities.id"
 SET_NULL = "SET NULL"
 NORMAL_STATUS_SQL = "'NORMAL'"
 
@@ -257,11 +258,12 @@ class DormitoryRoundParticipant(Base):
 class StudentSelectionGroup(Base):
     __tablename__ = "student_selection_groups"
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(Text, unique=True)
+    name: Mapped[str] = mapped_column(Text)
     description: Mapped[str] = mapped_column(Text, server_default=text("''"))
     created_by: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID, ondelete=SET_NULL))
     created_at: Mapped[str] = mapped_column(Text)
     updated_at: Mapped[str] = mapped_column(Text)
+    __table_args__ = (UniqueConstraint("created_by", "name", name="uq_student_selection_groups_owner_name"),)
 
 
 class StudentSelectionGroupMember(Base):
@@ -272,6 +274,100 @@ class StudentSelectionGroupMember(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey(USERS_ID, ondelete="CASCADE"), primary_key=True)
     created_at: Mapped[str] = mapped_column(Text)
     __table_args__ = (Index("idx_student_selection_group_members_user", "user_id", "group_id"),)
+
+
+class Activity(Base):
+    __tablename__ = "activities"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(Text)
+    description_markdown: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    description_html: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    description_summary: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    start_at: Mapped[str] = mapped_column(Text)
+    end_at: Mapped[str] = mapped_column(Text)
+    is_all_day: Mapped[int] = mapped_column(server_default=text("0"))
+    location: Mapped[str] = mapped_column(Text)
+    organizer_type: Mapped[str] = mapped_column(Text)
+    organizer_user_id: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID, ondelete=SET_NULL))
+    organizer_group_id: Mapped[int | None] = mapped_column(ForeignKey(ADMIN_GROUPS_ID, ondelete=SET_NULL))
+    organizer_name_snapshot: Mapped[str] = mapped_column(Text)
+    capacity: Mapped[int]
+    importance: Mapped[int]
+    status: Mapped[str] = mapped_column(Text, server_default=text("'DRAFT'"))
+    version: Mapped[int] = mapped_column(server_default=text("1"))
+    cancel_reason: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID, ondelete=SET_NULL))
+    created_at: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[str] = mapped_column(Text)
+    published_at: Mapped[str | None] = mapped_column(Text)
+    cancelled_at: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (
+        CheckConstraint("end_at > start_at"),
+        CheckConstraint("is_all_day IN (0,1)"),
+        CheckConstraint("organizer_type IN ('USER','ADMIN_GROUP')"),
+        CheckConstraint(
+            "(organizer_type='USER' AND organizer_group_id IS NULL) OR "
+            "(organizer_type='ADMIN_GROUP' AND organizer_user_id IS NULL)"
+        ),
+        CheckConstraint("capacity BETWEEN 1 AND 500"),
+        CheckConstraint("importance BETWEEN 1 AND 5"),
+        CheckConstraint("status IN ('DRAFT','PUBLISHED','CANCELLED')"),
+        CheckConstraint("version > 0"),
+        Index("idx_activities_status_time", "status", "start_at", "end_at"),
+        Index("idx_activities_organizer_user", "organizer_user_id", "status"),
+        Index("idx_activities_organizer_group", "organizer_group_id", "status"),
+    )
+
+
+class ActivityTargetGrade(Base):
+    __tablename__ = "activity_target_grades"
+    activity_id: Mapped[int] = mapped_column(ForeignKey(ACTIVITIES_ID, ondelete="CASCADE"), primary_key=True)
+    grade_id: Mapped[int] = mapped_column(ForeignKey(GRADES_ID), primary_key=True)
+
+
+class ActivityTargetGroup(Base):
+    __tablename__ = "activity_target_groups"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    activity_id: Mapped[int] = mapped_column(ForeignKey(ACTIVITIES_ID, ondelete="CASCADE"))
+    source_group_id: Mapped[int | None] = mapped_column(
+        ForeignKey("student_selection_groups.id", ondelete=SET_NULL)
+    )
+    group_name_snapshot: Mapped[str] = mapped_column(Text)
+    __table_args__ = (
+        UniqueConstraint("activity_id", "source_group_id"),
+        Index("idx_activity_target_groups_activity", "activity_id", "id"),
+    )
+
+
+class ActivityTargetMember(Base):
+    __tablename__ = "activity_target_members"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    activity_id: Mapped[int] = mapped_column(ForeignKey(ACTIVITIES_ID, ondelete="CASCADE"))
+    user_id: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID, ondelete=SET_NULL))
+    participant_name_snapshot: Mapped[str] = mapped_column(Text)
+    grade_snapshot: Mapped[str] = mapped_column(Text)
+    __table_args__ = (
+        UniqueConstraint("activity_id", "user_id"),
+        Index("idx_activity_target_members_user", "user_id", "activity_id"),
+    )
+
+
+class ActivityRegistration(Base):
+    __tablename__ = "activity_registrations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    activity_id: Mapped[int] = mapped_column(ForeignKey(ACTIVITIES_ID, ondelete="CASCADE"))
+    user_id: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID, ondelete=SET_NULL))
+    participant_name_snapshot: Mapped[str] = mapped_column(Text)
+    participant_grade_snapshot: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, server_default=text("'REGISTERED'"))
+    registered_at: Mapped[str] = mapped_column(Text)
+    cancelled_at: Mapped[str | None] = mapped_column(Text)
+    __table_args__ = (
+        UniqueConstraint("activity_id", "user_id"),
+        CheckConstraint("status IN ('REGISTERED','CANCELLED')"),
+        Index("idx_activity_registrations_activity_status", "activity_id", "status", "id"),
+        Index("idx_activity_registrations_user_status", "user_id", "status", "activity_id"),
+    )
 
 
 class Dormitory(Base):
