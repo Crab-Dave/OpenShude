@@ -32,6 +32,10 @@ PERMISSIONS = {
     "REPORT_READ": "查看举报",
     "REPORT_RESOLVE": "处理举报",
     "AUDIT_READ_SCOPED": "查看范围内审计日志",
+    "ACTIVITY_READ": "查看活动管理信息",
+    "ACTIVITY_PUBLISH": "发布官方活动",
+    "ACTIVITY_IMPORTANCE_SET": "设置活动重要程度",
+    "ACTIVITY_MODERATE": "治理活动",
 }
 
 

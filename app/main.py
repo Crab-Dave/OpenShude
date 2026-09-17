@@ -12,6 +12,7 @@ from starlette.datastructures import URL
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from .activities import router as activities_router
 from .admin import router as admin_router
 from .auth import router as auth_router
 from .config import get_settings
@@ -154,8 +155,9 @@ class SecurityMiddleware:
             if message["type"] == "http.response.start":
                 response_status = message["status"]
                 response_headers = list(message.get("headers", []))
-                protected_page = request.url.path in ("/roommates", "/shudong", "/sude") or request.url.path.startswith(
-                    "/sude/dormitories/"
+                protected_page = request.url.path in ("/roommates", "/shudong", "/sude", "/activities") or (
+                    request.url.path.startswith("/sude/dormitories/")
+                    or request.url.path.startswith("/activities/")
                 )
                 api_request = (
                     "avatar"
@@ -200,6 +202,7 @@ app.add_exception_handler(ApiError, api_error_handler)
 app.add_exception_handler(RequestValidationError, validation_error_handler)
 app.include_router(auth_router)
 app.include_router(admin_router)
+app.include_router(activities_router)
 app.include_router(student_router)
 app.include_router(dormitories_router)
 app.include_router(treehole_router)
@@ -233,7 +236,9 @@ def static_file(path: str) -> FileResponse:
     generated_page = (generated / path / "index.html").resolve() if path else generated / "index.html"
     if generated_page.is_file() and generated_page.is_relative_to(generated):
         return FileResponse(generated_page)
-    if path in ("login", "roommates", "shudong", "sude") or path.startswith("sude/dormitories/"):
+    if path in ("login", "roommates", "shudong", "sude", "activities") or path.startswith(
+        ("sude/dormitories/", "activities/")
+    ):
         application = public / "app.html"
         if application.is_file():
             return FileResponse(application)
