@@ -1034,8 +1034,23 @@ async function renderActivityDetail() {
         copied = await navigator.clipboard.writeText(text).then(() => true, () => false);
       }
       if (!copied && navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
-        const item = new ClipboardItem({ 'text/plain': new Blob([text], { type: 'text/plain' }) });
-        copied = await navigator.clipboard.write([item]).then(() => true, () => false);
+        try {
+          const item = new ClipboardItem({ 'text/plain': new Blob([text], { type: 'text/plain' }) });
+          copied = await navigator.clipboard.write([item]).then(() => true, () => false);
+        } catch { copied = false; }
+      }
+      if (!copied) {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.append(textarea);
+        try {
+          textarea.select();
+          textarea.setSelectionRange(0, text.length);
+          copied = document.execCommand('copy'); // NOSONAR -- fallback when browsers reject the async Clipboard API
+        } finally { textarea.remove(); }
       }
       if (!copied) throw new Error('copy failed');
       toast('活动链接已复制');
