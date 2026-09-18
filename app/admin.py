@@ -70,9 +70,7 @@ CARD_STATUS_LABELS = {"DRAFT": "草稿", "PUBLISHED": "已发布", "HIDDEN": "�
 
 
 def person_search_text(person: dict) -> str:
-    return " ".join(
-        str(person.get(field) or "") for field in ("name", "login_identifier", "grade", "major")
-    ).lower()
+    return " ".join(str(person.get(field) or "") for field in ("name", "login_identifier", "grade", "major")).lower()
 
 
 def admin_user(request: Request, db: Session) -> dict:
@@ -1003,8 +1001,7 @@ def selection_groups(request: Request, db: DB, search: str = "") -> dict:
         groups = [
             group
             for group in groups
-            if value in group["name"].lower()
-            or any(value in person_search_text(member) for member in group["members"])
+            if value in group["name"].lower() or any(value in person_search_text(member) for member in group["members"])
         ]
     return {"groups": groups}
 
