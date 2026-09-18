@@ -308,11 +308,12 @@ def main() -> None:
             ) = student
             password = hash_password("Student123!")
             major = ("计算机科学与技术", "视觉传达设计", "工商管理")[(index - 1) % 3]
+            status = "PENDING_ACTIVATION" if login == "2026003" else "ACTIVE"
             user_id = db.execute(
                 text("""INSERT INTO users(login_identifier,password_hash,password_salt,role,account_type,
                   must_change_password,name,grade,grade_id,gender,major,status,imported_by,
                   created_at,updated_at) VALUES(:login,:hash,:salt,'STUDENT','USER',0,:name,:grade,:grade_id,
-                  :gender,:major,'ACTIVE',:admin,:now,:now) RETURNING id"""),
+                  :gender,:major,:status,:admin,:now,:now) RETURNING id"""),
                 {
                     "login": login,
                     "hash": password.hash,
@@ -322,6 +323,7 @@ def main() -> None:
                     "grade_id": grade_ids[grade],
                     "gender": gender,
                     "major": major,
+                    "status": status,
                     "admin": admin_id,
                     "now": timestamp,
                 },
