@@ -1190,14 +1190,16 @@ def create_selection_group(request: Request, body: dict, db: DB) -> dict:
     admin = admin_user(request, db)
     grant = require_super_admin(admin)
     name, description, member_ids = validate_selection_group(db, body)
+    is_public = int(body.get("isPublic") is True)
     if selection_group_name_exists(db, admin["id"], name):
         raise ApiError(409, "DUPLICATE_SELECTION_GROUP_NAME", "预设群组名称已存在")
     timestamp = now()
     result = db.execute(
         text(
-            "INSERT INTO student_selection_groups(name,description,created_by,created_at,updated_at) VALUES(:name,:description,:admin,:now,:now)"
+            """INSERT INTO student_selection_groups(name,description,is_public,created_by,created_at,updated_at)
+            VALUES(:name,:description,:is_public,:admin,:now,:now)"""
         ),
-        {"name": name, "description": description, "admin": admin["id"], "now": timestamp},
+        {"name": name, "description": description, "is_public": is_public, "admin": admin["id"], "now": timestamp},
     )
     for user_id in member_ids:
         db.execute(
@@ -1214,7 +1216,7 @@ def create_selection_group(request: Request, body: dict, db: DB) -> dict:
         clean_text(body.get("reason"), 200),
         {"memberCount": len(member_ids)},
         grant,
-        after={"name": name, "description": description},
+        after={"name": name, "description": description, "is_public": is_public},
     )
     db.commit()
     return {"group": selection_group_details(db, one(db, SELECTION_GROUP_BY_ID, {"id": result.lastrowid}), True)}
@@ -1228,12 +1230,16 @@ def update_selection_group(group_id: int, request: Request, body: dict, db: DB) 
     if not before:
         raise ApiError(404, "SELECTION_GROUP_NOT_FOUND", SELECTION_GROUP_NOT_FOUND_MESSAGE)
     name, description, member_ids = validate_selection_group(db, body)
+    is_public = int(body.get("isPublic") is True)
     reason = clean_text(body.get("reason"), 200, True)
     if selection_group_name_exists(db, before["created_by"], name, group_id):
         raise ApiError(409, "DUPLICATE_SELECTION_GROUP_NAME", "预设群组名称已存在")
     db.execute(
-        text("UPDATE student_selection_groups SET name=:name,description=:description,updated_at=:now WHERE id=:id"),
-        {"name": name, "description": description, "now": now(), "id": group_id},
+        text(
+            """UPDATE student_selection_groups SET name=:name,description=:description,is_public=:is_public,
+            updated_at=:now WHERE id=:id"""
+        ),
+        {"name": name, "description": description, "is_public": is_public, "now": now(), "id": group_id},
     )
     db.execute(text("DELETE FROM student_selection_group_members WHERE group_id=:id"), {"id": group_id})
     for user_id in member_ids:
@@ -1252,7 +1258,7 @@ def update_selection_group(group_id: int, request: Request, body: dict, db: DB) 
         {"memberCount": len(member_ids)},
         grant,
         before=before,
-        after={"name": name, "description": description},
+        after={"name": name, "description": description, "is_public": is_public},
     )
     db.commit()
     return {"group": selection_group_details(db, one(db, SELECTION_GROUP_BY_ID, {"id": group_id}), True)}

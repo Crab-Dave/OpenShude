@@ -55,7 +55,7 @@ def selectable_groups(db: Session, user_id: int) -> list[dict]:
         db,
         """SELECT g.*,CASE WHEN g.created_by=:user THEN 'OWN' ELSE 'ADMIN' END AS source
         FROM student_selection_groups g JOIN users creator ON creator.id=g.created_by
-        WHERE g.created_by=:user OR creator.account_type='SUPER_ADMIN'
+        WHERE g.created_by=:user OR (creator.account_type='SUPER_ADMIN' AND g.is_public=1)
         ORDER BY CASE WHEN g.created_by=:user THEN 0 ELSE 1 END,g.name,g.id""",
         {"user": user_id},
     )

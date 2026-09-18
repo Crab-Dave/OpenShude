@@ -61,7 +61,7 @@ def test_alembic_upgrades_a_legacy_database(tmp_path, monkeypatch):
             database.execute("SELECT account_type FROM users WHERE login_identifier='admin'").fetchone()[0]
             == "SUPER_ADMIN"
         )
-        assert database.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "20260917_01"
+        assert database.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "20260918_01"
         assert database.execute("SELECT COUNT(*) FROM sqlite_master WHERE name='activities'").fetchone()[0] == 1
         assert (
             database.execute("SELECT COUNT(*) FROM sqlite_master WHERE name='activity_scope_grades'").fetchone()[0] == 1
