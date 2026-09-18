@@ -168,3 +168,16 @@ def test_admin_private_group_is_hidden_until_published(client: TestClient):
     assert published.json()["group"]["is_public"] == 1
     assert private["id"] in {group["id"] for group in client.get("/api/student-selection-groups").json()["groups"]}
     admin.close()
+
+
+def test_admin_group_search_matches_member_identity_fields(client: TestClient):
+    login(client, "admin", "Admin123!")
+    created = client.post(
+        "/api/admin/student-selection-groups",
+        json={"name": "复合检索群组", "description": "", "memberIds": [3], "isPublic": False},
+    )
+    assert created.status_code == 201
+
+    for query in ("2026002", "2026级", "设计"):
+        groups = client.get("/api/admin/student-selection-groups", params={"search": query}).json()["groups"]
+        assert [group["name"] for group in groups] == ["复合检索群组"]

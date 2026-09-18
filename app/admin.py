@@ -69,6 +69,12 @@ USER_STATUS_LABELS = {
 CARD_STATUS_LABELS = {"DRAFT": "草稿", "PUBLISHED": "已发布", "HIDDEN": "已隐藏"}
 
 
+def person_search_text(person: dict) -> str:
+    return " ".join(
+        str(person.get(field) or "") for field in ("name", "login_identifier", "grade", "major")
+    ).lower()
+
+
 def admin_user(request: Request, db: Session) -> dict:
     user = current_user(request, db)
     require_management(db, user)
@@ -124,7 +130,7 @@ def group_details(db: Session, group: dict) -> dict:
         ),
         "members": all_rows(
             db,
-            """SELECT u.id,u.login_identifier,u.name,u.grade,u.status FROM admin_group_members m
+            """SELECT u.id,u.login_identifier,u.name,u.grade,u.major,u.status FROM admin_group_members m
           JOIN users u ON u.id=m.user_id WHERE m.group_id=:id ORDER BY u.name,u.id""",
             {"id": group["id"]},
         ),
@@ -997,7 +1003,8 @@ def selection_groups(request: Request, db: DB, search: str = "") -> dict:
         groups = [
             group
             for group in groups
-            if value in group["name"].lower() or any(value in member["name"].lower() for member in group["members"])
+            if value in group["name"].lower()
+            or any(value in person_search_text(member) for member in group["members"])
         ]
     return {"groups": groups}
 

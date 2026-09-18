@@ -293,17 +293,33 @@ function emptyState(iconName, title, text, action = '') {
   return `<div class="empty-state">${icon(iconName)}<h3>${escapeHtml(title)}</h3><p>${escapeHtml(text)}</p>${action}</div>`;
 }
 
+function personSearchText(person) {
+  return [person.name, person.login_identifier, person.grade, person.major].filter(Boolean).join(' ').toLowerCase();
+}
+
 function personPickerTools(prefix, groups = state.selectionGroups) {
-  return `<div class="person-picker-tools"><div class="search-field">${icon('search')}<input data-person-search="${prefix}" placeholder="按姓名搜索"></div><select data-person-group="${prefix}" aria-label="预设学生群组" ${groups.length ? '' : 'disabled'}><option value="">选择预设群组</option>${groups.map((group) => `<option value="${group.id}">${escapeHtml(group.name)}（${group.members.length} 人）</option>`).join('')}</select><button type="button" class="btn btn-secondary" data-add-person-group="${prefix}" ${groups.length ? '' : 'disabled'}>${icon('user-plus')}一键添加</button></div>`;
+  return `<div class="person-picker-tools"><div class="search-field">${icon('search')}<input data-person-search="${prefix}" placeholder="按姓名搜索（也支持登录标识、年级或专业）"></div><select data-person-group="${prefix}" aria-label="预设学生群组" ${groups.length ? '' : 'disabled'}><option value="">选择预设群组</option>${groups.map((group) => `<option value="${group.id}">${escapeHtml(group.name)}（${group.members.length} 人）</option>`).join('')}</select><button type="button" class="btn btn-secondary" data-add-person-group="${prefix}" ${groups.length ? '' : 'disabled'}>${icon('user-plus')}一键添加</button><button type="button" class="btn btn-secondary" data-select-visible="${prefix}">全选当前结果</button></div>`;
+}
+
+function bindPersonSearch(form, prefix) {
+  form.querySelector(`[data-person-search="${prefix}"]`).addEventListener('input', (event) => {
+    const query = event.target.value.trim().toLowerCase();
+    form.querySelectorAll(`[data-person-picker="${prefix}"] [data-person-search-text]`).forEach((candidate) => {
+      candidate.hidden = query && !candidate.dataset.personSearchText.includes(query);
+    });
+  });
+  form.querySelector(`[data-select-visible="${prefix}"]`)?.addEventListener('click', () => {
+    const visible = form.querySelectorAll(`[data-person-picker="${prefix}"] [data-person-search-text]:not([hidden]) input[type="checkbox"]`);
+    let selected = 0;
+    visible.forEach((input) => {
+      if (!input.checked && !input.disabled) { input.checked = true; selected += 1; }
+    });
+    toast(selected ? `已选中 ${selected} 名学生` : '当前搜索结果已全部选中');
+  });
 }
 
 function bindPersonPicker(form, prefix, groups = state.selectionGroups) {
-  form.querySelector(`[data-person-search="${prefix}"]`).addEventListener('input', (event) => {
-    const query = event.target.value.trim().toLowerCase();
-    form.querySelectorAll(`[data-person-picker="${prefix}"] [data-person-name]`).forEach((candidate) => {
-      candidate.hidden = query && !candidate.dataset.personName.includes(query);
-    });
-  });
+  bindPersonSearch(form, prefix);
   form.querySelector(`[data-add-person-group="${prefix}"]`)?.addEventListener('click', () => {
     const groupId = Number(form.querySelector(`[data-person-group="${prefix}"]`).value);
     const group = groups.find((item) => item.id === groupId);
@@ -1170,7 +1186,7 @@ async function renderActivityForm() { // NOSONAR
 async function activityGroupData() {
   if (state.user.isSuperAdmin) {
     const [{ groups }, { users }] = await Promise.all([api('/api/admin/student-selection-groups'), api('/api/admin/users')]);
-    return { groups: groups.filter((group) => group.owner_type === 'SUPER_ADMIN').map((group) => ({ ...group, owned: true })), candidates: users.filter((user) => user.account_type === 'USER' && user.status === 'ACTIVE'), admin: true };
+    return { groups: groups.filter((group) => group.owner_type === 'SUPER_ADMIN').map((group) => ({ ...group, owned: true })), candidates: users.filter((user) => user.account_type === 'USER' && ['ACTIVE', 'PENDING_ACTIVATION'].includes(user.status)), admin: true };
   }
   const [{ groups }, { candidates }] = await Promise.all([api('/api/student-selection-groups'), api('/api/student-selection-groups/candidates')]);
   return { groups, candidates, admin: false };
@@ -1204,19 +1220,14 @@ function showActivityGroupEditor(group, data) {
   if (!group && !data.admin) memberIds.add(state.user.id);
   const candidates = data.candidates.map((candidate) => {
     const currentUser = !data.admin && candidate.id === state.user.id;
-    return `<div class="candidate" data-person-name="${escapeHtml(candidate.name.toLowerCase())}"><input type="checkbox" name="memberIds" value="${candidate.id}" id="activity-group-member-${candidate.id}" ${memberIds.has(candidate.id) ? 'checked' : ''} ${currentUser ? 'disabled' : ''}><label for="activity-group-member-${candidate.id}">${icon('user-round')}<span>${escapeHtml(candidate.name)}${currentUser ? '（我）' : ''}<small>${escapeHtml(candidate.grade)}${currentUser ? ' · 创建者自动加入' : ''}</small></span></label></div>`;
+    return `<div class="candidate" data-person-search-text="${escapeHtml(personSearchText(candidate))}"><input type="checkbox" name="memberIds" value="${candidate.id}" id="activity-group-member-${candidate.id}" ${memberIds.has(candidate.id) ? 'checked' : ''} ${currentUser ? 'disabled' : ''}><label for="activity-group-member-${candidate.id}">${icon('user-round')}<span>${escapeHtml(candidate.name)}${currentUser ? '（我）' : ''}<small>${escapeHtml(candidate.grade)} · ${escapeHtml(candidate.major || '-')}${currentUser ? ' · 创建者自动加入' : ''}</small></span></label></div>`;
   }).join('');
   const reason = data.admin && group ? '<div class="form-field"><label>变更原因</label><input name="reason" maxlength="200" value="活动目标群组管理" required></div>' : '';
   const publicChecked = group?.is_public ? 'checked' : '';
   const visibility = data.admin ? `<label class="checkbox-row"><input type="checkbox" name="isPublic" ${publicChecked}>公开给所有用户作为活动目标群组</label><p class="field-hint">未公开时仅管理员可维护，普通用户无法选择。</p>` : '<p class="field-hint">个人群组仅你自己可在活动表单中选择。</p>';
-  const modal = openModal(group ? '编辑目标群组' : '新建目标群组', `<form id="activity-group-form"><div class="form-grid"><div class="form-field"><label>群组名称</label><input name="name" maxlength="80" required value="${escapeHtml(group?.name || '')}"></div><div class="form-field"><label>说明</label><input name="description" maxlength="500" value="${escapeHtml(group?.description || '')}"></div></div><div class="section"><div class="section-heading"><div><h2>群组成员</h2><p>只展示正常状态学生的必要身份信息</p></div></div><div class="person-picker-tools"><div class="search-field">${icon('search')}<input data-activity-group-search placeholder="按姓名搜索"></div></div><div class="candidate-grid" data-activity-group-candidates>${candidates}</div></div>${visibility}${reason}<div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary">${icon('save')}保存群组</button></div></form>`, { wide: true });
+  const modal = openModal(group ? '编辑目标群组' : '新建目标群组', `<form id="activity-group-form"><div class="form-grid"><div class="form-field"><label>群组名称</label><input name="name" maxlength="80" required value="${escapeHtml(group?.name || '')}"></div><div class="form-field"><label>说明</label><input name="description" maxlength="500" value="${escapeHtml(group?.description || '')}"></div></div><div class="section"><div class="section-heading"><div><h2>群组成员</h2><p>展示正常或未激活学生的必要身份信息</p></div></div><div class="person-picker-tools"><div class="search-field">${icon('search')}<input data-person-search="activity-group" placeholder="按姓名搜索（也支持登录标识、年级或专业）"></div><button type="button" class="btn btn-secondary" data-select-visible="activity-group">全选当前结果</button></div><div class="candidate-grid" data-person-picker="activity-group" data-activity-group-candidates>${candidates}</div></div>${visibility}${reason}<div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary">${icon('save')}保存群组</button></div></form>`, { wide: true });
   modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
-  modal.querySelector('[data-activity-group-search]').addEventListener('input', (event) => {
-    const query = event.target.value.trim().toLowerCase();
-    modal.querySelectorAll('[data-activity-group-candidates] [data-person-name]').forEach((candidate) => {
-      candidate.hidden = query && !candidate.dataset.personName.includes(query);
-    });
-  });
+  bindPersonSearch(modal, 'activity-group');
   modal.querySelector('#activity-group-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -2986,7 +2997,8 @@ async function renderAdminRounds() {
 
 function showDormitoryRoundForm(round = null) {
   const participants = new Set(round?.participantIds || []);
-  const modal = openModal(round ? '配置选宿舍轮次' : '新建选宿舍轮次', `<form id="round-form"><div class="form-grid"><div class="form-field"><label>轮次编码</label><input name="code" maxlength="40" value="${escapeHtml(round?.code || '')}" placeholder="例如 2026_SECOND" ${round ? 'disabled' : 'required'}></div><div class="form-field"><label>轮次名称</label><input name="name" maxlength="80" value="${escapeHtml(round?.name || '')}" required></div><div class="form-field"><label>计划开始时间</label><input name="startsAt" type="datetime-local" value="${escapeHtml(round?.starts_at?.slice(0, 16) || '')}"></div><div class="form-field"><label>计划截止时间</label><input name="endsAt" type="datetime-local" value="${escapeHtml(round?.ends_at?.slice(0, 16) || '')}"></div><div class="form-field full"><label>说明</label><textarea name="description" maxlength="500">${escapeHtml(round?.description || '')}</textarea></div><div class="form-field full"><label>操作原因</label><input name="reason" maxlength="200" ${round ? 'required' : ''}></div></div><div class="section"><div class="section-heading"><div><h2>参与学生</h2><p>只有名单内学生可以在本轮创建或加入宿舍</p></div></div>${personPickerTools('round')}<div class="candidate-grid" data-person-picker="round">${state.roundParticipantCandidates.map((user) => `<div class="candidate" data-person-name="${escapeHtml(user.name.toLowerCase())}"><input type="checkbox" name="participantIds" value="${user.id}" id="round-user-${user.id}" ${participants.has(user.id) ? 'checked' : ''}><label for="round-user-${user.id}">${icon('user-round')}<span>${escapeHtml(user.name)}<small>${escapeHtml(user.grade)} · ${escapeHtml(user.login_identifier)}</small></span></label></div>`).join('')}</div></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary">${icon('save')}${round ? '保存配置' : '创建草稿'}</button></div></form>`, { wide: true });
+  const roundCandidates = state.roundParticipantCandidates.map((user) => `<div class="candidate" data-person-search-text="${escapeHtml(personSearchText(user))}"><input type="checkbox" name="participantIds" value="${user.id}" id="round-user-${user.id}" ${participants.has(user.id) ? 'checked' : ''}><label for="round-user-${user.id}">${icon('user-round')}<span>${escapeHtml(user.name)}<small>${escapeHtml(user.grade)} · ${escapeHtml(user.major || '-')} · ${escapeHtml(user.login_identifier)}</small></span></label></div>`).join('');
+  const modal = openModal(round ? '配置选宿舍轮次' : '新建选宿舍轮次', `<form id="round-form"><div class="form-grid"><div class="form-field"><label>轮次编码</label><input name="code" maxlength="40" value="${escapeHtml(round?.code || '')}" placeholder="例如 2026_SECOND" ${round ? 'disabled' : 'required'}></div><div class="form-field"><label>轮次名称</label><input name="name" maxlength="80" value="${escapeHtml(round?.name || '')}" required></div><div class="form-field"><label>计划开始时间</label><input name="startsAt" type="datetime-local" value="${escapeHtml(round?.starts_at?.slice(0, 16) || '')}"></div><div class="form-field"><label>计划截止时间</label><input name="endsAt" type="datetime-local" value="${escapeHtml(round?.ends_at?.slice(0, 16) || '')}"></div><div class="form-field full"><label>说明</label><textarea name="description" maxlength="500">${escapeHtml(round?.description || '')}</textarea></div><div class="form-field full"><label>操作原因</label><input name="reason" maxlength="200" ${round ? 'required' : ''}></div></div><div class="section"><div class="section-heading"><div><h2>参与学生</h2><p>只有名单内学生可以在本轮创建或加入宿舍</p></div></div>${personPickerTools('round')}<div class="candidate-grid" data-person-picker="round">${roundCandidates}</div></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary">${icon('save')}${round ? '保存配置' : '创建草稿'}</button></div></form>`, { wide: true });
   modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
   bindPersonPicker(modal, 'round');
   modal.querySelector('#round-form').addEventListener('submit', async (event) => {
@@ -3027,12 +3039,12 @@ function showSelectionGroups() {
       return `<section class="selection-group-item" data-selection-group-card="${group.id}"><div><strong>${escapeHtml(group.name)}</strong><span class="activity-badge">${visibility}</span><p>${escapeHtml(group.description || '暂无说明')}</p><span>${group.members.map((member) => escapeHtml(member.name)).join('、')}</span></div><div class="cell-actions"><button class="btn btn-secondary btn-sm" data-edit-selection-group="${group.id}">${icon('pencil')}编辑</button><button class="btn btn-danger btn-sm" data-delete-selection-group="${group.id}">${icon('trash-2')}删除</button></div></section>`;
     }).join('');
   }
-  const modal = openModal('预设学生群组', `<div class="toolbar"><div class="search-field">${icon('search')}<input id="selection-group-search" placeholder="按成员姓名搜索"></div><div class="toolbar-spacer"></div><button class="btn btn-primary" id="create-selection-group">${icon('plus')}新建群组</button></div><div class="selection-group-list">${groupList}</div>`, { wide: true });
+  const modal = openModal('预设学生群组', `<div class="toolbar"><div class="search-field">${icon('search')}<input id="selection-group-search" placeholder="按成员姓名搜索（也支持登录标识、年级或专业）"></div><div class="toolbar-spacer"></div><button class="btn btn-primary" id="create-selection-group">${icon('plus')}新建群组</button></div><div class="selection-group-list">${groupList}</div>`, { wide: true });
   modal.querySelector('#selection-group-search').addEventListener('input', (event) => {
     const query = event.target.value.trim().toLowerCase();
     modal.querySelectorAll('[data-selection-group-card]').forEach((card) => {
       const group = groups.find((item) => item.id === Number(card.dataset.selectionGroupCard));
-      card.hidden = query && !group.members.some((member) => member.name.toLowerCase().includes(query));
+      card.hidden = query && !group.members.some((member) => personSearchText(member).includes(query));
     });
   });
   modal.querySelector('#create-selection-group').addEventListener('click', () => showSelectionGroupForm());
@@ -3046,15 +3058,10 @@ function showSelectionGroupForm(group = null) {
   const canPublish = !group || group.owner_type === 'SUPER_ADMIN';
   const publicChecked = group?.is_public ? 'checked' : '';
   const visibility = canPublish ? `<label class="checkbox-row"><input type="checkbox" name="isPublic" ${publicChecked}>公开给所有用户作为活动目标群组</label><p class="field-hint">未公开时仅管理员可在活动中选择。</p>` : '<p class="field-hint">这是用户个人群组，只能由创建者在活动表单中选择。</p>';
-  const candidateMarkup = candidates.map((user) => `<div class="candidate" data-person-name="${escapeHtml(user.name.toLowerCase())}"><input type="checkbox" name="memberIds" value="${user.id}" id="selection-user-${user.id}" ${memberIds.has(user.id) ? 'checked' : ''}><label for="selection-user-${user.id}">${icon('user-round')}<span>${escapeHtml(user.name)}<small>${escapeHtml(user.grade)} · ${escapeHtml(user.login_identifier)}</small></span></label></div>`).join('');
-  const modal = openModal(group ? '编辑预设学生群组' : '新建预设学生群组', `<form id="selection-group-form"><div class="form-grid"><div class="form-field"><label>群组名称</label><input name="name" maxlength="80" value="${escapeHtml(group?.name || '')}" required></div><div class="form-field"><label>操作原因</label><input name="reason" maxlength="200" ${group ? 'required' : ''}></div><div class="form-field full"><label>说明</label><textarea name="description" maxlength="500">${escapeHtml(group?.description || '')}</textarea></div></div><div class="section"><div class="section-heading"><div><h2>群组成员</h2><p>群组只保存学生名单，不会随使用它创建的轮次自动变化</p></div></div><div class="person-picker-tools"><div class="search-field">${icon('search')}<input id="selection-group-member-search" placeholder="按姓名搜索"></div></div><div class="candidate-grid" id="selection-group-candidates">${candidateMarkup}</div></div>${visibility}<div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>返回</button><button class="btn btn-primary">${icon('save')}${group ? '保存群组' : '创建群组'}</button></div></form>`, { wide: true });
+  const candidateMarkup = candidates.map((user) => `<div class="candidate" data-person-search-text="${escapeHtml(personSearchText(user))}"><input type="checkbox" name="memberIds" value="${user.id}" id="selection-user-${user.id}" ${memberIds.has(user.id) ? 'checked' : ''}><label for="selection-user-${user.id}">${icon('user-round')}<span>${escapeHtml(user.name)}<small>${escapeHtml(user.grade)} · ${escapeHtml(user.major || '-')} · ${escapeHtml(user.login_identifier)}</small></span></label></div>`).join('');
+  const modal = openModal(group ? '编辑预设学生群组' : '新建预设学生群组', `<form id="selection-group-form"><div class="form-grid"><div class="form-field"><label>群组名称</label><input name="name" maxlength="80" value="${escapeHtml(group?.name || '')}" required></div><div class="form-field"><label>操作原因</label><input name="reason" maxlength="200" ${group ? 'required' : ''}></div><div class="form-field full"><label>说明</label><textarea name="description" maxlength="500">${escapeHtml(group?.description || '')}</textarea></div></div><div class="section"><div class="section-heading"><div><h2>群组成员</h2><p>群组只保存学生名单，不会随使用它创建的轮次自动变化</p></div></div><div class="person-picker-tools"><div class="search-field">${icon('search')}<input data-person-search="selection-group" placeholder="按姓名搜索（也支持登录标识、年级或专业）"></div><button type="button" class="btn btn-secondary" data-select-visible="selection-group">全选当前结果</button></div><div class="candidate-grid" data-person-picker="selection-group" id="selection-group-candidates">${candidateMarkup}</div></div>${visibility}<div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>返回</button><button class="btn btn-primary">${icon('save')}${group ? '保存群组' : '创建群组'}</button></div></form>`, { wide: true });
   modal.querySelector('[data-cancel]').addEventListener('click', showSelectionGroups);
-  modal.querySelector('#selection-group-member-search').addEventListener('input', (event) => {
-    const query = event.target.value.trim().toLowerCase();
-    modal.querySelectorAll('#selection-group-candidates [data-person-name]').forEach((candidate) => {
-      candidate.hidden = query && !candidate.dataset.personName.includes(query);
-    });
-  });
+  bindPersonSearch(modal, 'selection-group');
   modal.querySelector('#selection-group-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -3203,14 +3210,14 @@ async function renderAdminAccess() {
   ]);
   state.selectionGroups = selectionGroups;
   state.accessCatalog = { permissions, grades, users: users.filter((user) => user.account_type === 'USER') };
-  setPage(`<div class="toolbar"><div class="search-field">${icon('search')}<input id="admin-group-member-search" placeholder="按成员姓名搜索管理员组"></div><div class="toolbar-spacer"></div><button class="btn btn-secondary" id="manage-selection-groups">${icon('users-round')}预设学生群组</button><button class="btn btn-primary" id="create-admin-group">${icon('plus')}新建管理员组</button></div><div class="field-hint toolbar-note">按年级授权时，权限和年级范围必须由同一个组提供；首页更新是全局权限，不使用年级范围。</div>
+  setPage(`<div class="toolbar"><div class="search-field">${icon('search')}<input id="admin-group-member-search" placeholder="按成员姓名搜索（也支持登录标识、年级或专业）"></div><div class="toolbar-spacer"></div><button class="btn btn-secondary" id="manage-selection-groups">${icon('users-round')}预设学生群组</button><button class="btn btn-primary" id="create-admin-group">${icon('plus')}新建管理员组</button></div><div class="field-hint toolbar-note">按年级授权时，权限和年级范围必须由同一个组提供；首页更新是全局权限，不使用年级范围。</div>
     ${groups.length ? `<div class="access-grid">${groups.map((group) => `<section class="panel access-card"><div class="section-heading"><div><h2>${escapeHtml(group.name)}</h2><p><code>${escapeHtml(group.code)}</code> · ${escapeHtml(group.description || '暂无说明')}</p></div>${statusBadge(group.status === 'ACTIVE' ? '有效' : '已停用', group.status === 'ACTIVE' ? 'active' : 'closed')}</div><dl class="access-summary"><div><dt>成员</dt><dd>${group.members.map((member) => escapeHtml(member.name)).join('、') || '未配置'}</dd></div><div><dt>年级范围</dt><dd>${group.scopes.map((scope) => escapeHtml(scope.grade_name || scope.scope_value)).join('、') || '未配置'}</dd></div><div><dt>权限</dt><dd>${group.permissions.map((code) => escapeHtml(permissions.find((item) => item.code === code)?.name || code)).join('、') || '未配置'}</dd></div></dl><button class="btn btn-secondary" data-configure-group="${group.id}">${icon('settings')}配置管理员组</button></section>`).join('')}</div>` : emptyState('shield-check', '暂无管理员组', '新建管理员组后配置成员、权限和年级范围')}`);
   document.querySelector('#create-admin-group').addEventListener('click', showCreateAdminGroup);
   document.querySelector('#manage-selection-groups').addEventListener('click', openSelectionGroupManager);
   document.querySelector('#admin-group-member-search').addEventListener('input', (event) => {
     const query = event.target.value.trim().toLowerCase();
     document.querySelectorAll('.access-card').forEach((card, index) => {
-      card.hidden = query && !groups[index].members.some((member) => member.name.toLowerCase().includes(query));
+      card.hidden = query && !groups[index].members.some((member) => personSearchText(member).includes(query));
     });
   });
   document.querySelectorAll('[data-configure-group]').forEach((button) => button.addEventListener('click', () => showConfigureAdminGroup(groups.find((group) => group.id === Number(button.dataset.configureGroup)))));
@@ -3231,7 +3238,8 @@ function showConfigureAdminGroup(group) {
   const memberIds = new Set(group.members.map((item) => item.id));
   const gradeIds = new Set(group.scopes.filter((item) => item.scope_type === 'GRADE').map((item) => Number(item.scope_value)));
   const permissionCodes = new Set(group.permissions);
-  const modal = openModal('配置管理员组', `<form id="configure-group-form"><div class="form-grid"><div class="form-field"><label>组编码</label><input value="${escapeHtml(group.code)}" disabled></div><div class="form-field"><label>状态</label><select name="status"><option value="ACTIVE" ${group.status === 'ACTIVE' ? 'selected' : ''}>有效</option><option value="DISABLED" ${group.status === 'DISABLED' ? 'selected' : ''}>停用</option></select></div><div class="form-field"><label>名称</label><input name="name" value="${escapeHtml(group.name)}" maxlength="80" required></div><div class="form-field"><label>变更原因</label><input name="reason" maxlength="200" required></div><div class="form-field full"><label>说明</label><textarea name="description" maxlength="500">${escapeHtml(group.description)}</textarea></div></div><div class="section"><div class="section-heading"><div><h2>年级范围</h2><p>权限只能作用于这里选择的年级</p></div></div><div class="candidate-grid">${grades.map((grade) => `<div class="candidate"><input type="checkbox" name="gradeIds" value="${grade.id}" id="grade-${grade.id}" ${gradeIds.has(grade.id) ? 'checked' : ''}><label for="grade-${grade.id}">${icon('graduation-cap')}<span>${escapeHtml(grade.name)}</span></label></div>`).join('')}</div></div><div class="section"><div class="section-heading"><div><h2>权限</h2><p>只授予完成职责所需的权限</p></div></div><div class="candidate-grid">${permissions.map((permission) => `<div class="candidate"><input type="checkbox" name="permissions" value="${permission.code}" id="permission-${permission.code}" ${permissionCodes.has(permission.code) ? 'checked' : ''}><label for="permission-${permission.code}">${icon('key-round')}<span>${escapeHtml(permission.name)}<small>${escapeHtml(permission.code)}</small></span></label></div>`).join('')}</div></div><div class="section"><div class="section-heading"><div><h2>成员</h2><p>成员仍可使用学生端，并可切换到管理工作台</p></div></div>${personPickerTools('admin-member')}<div class="candidate-grid" data-person-picker="admin-member">${users.map((user) => `<div class="candidate" data-person-name="${escapeHtml(user.name.toLowerCase())}"><input type="checkbox" name="userIds" value="${user.id}" id="member-${user.id}" ${memberIds.has(user.id) ? 'checked' : ''}><label for="member-${user.id}">${icon('user-round')}<span>${escapeHtml(user.name)}<small>${escapeHtml(user.grade)} · ${escapeHtml(user.login_identifier)}</small></span></label></div>`).join('')}</div></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary">${icon('save')}保存全部配置</button></div></form>`, { wide: true });
+  const adminMemberCandidates = users.map((user) => `<div class="candidate" data-person-search-text="${escapeHtml(personSearchText(user))}"><input type="checkbox" name="userIds" value="${user.id}" id="member-${user.id}" ${memberIds.has(user.id) ? 'checked' : ''}><label for="member-${user.id}">${icon('user-round')}<span>${escapeHtml(user.name)}<small>${escapeHtml(user.grade)} · ${escapeHtml(user.major || '-')} · ${escapeHtml(user.login_identifier)}</small></span></label></div>`).join('');
+  const modal = openModal('配置管理员组', `<form id="configure-group-form"><div class="form-grid"><div class="form-field"><label>组编码</label><input value="${escapeHtml(group.code)}" disabled></div><div class="form-field"><label>状态</label><select name="status"><option value="ACTIVE" ${group.status === 'ACTIVE' ? 'selected' : ''}>有效</option><option value="DISABLED" ${group.status === 'DISABLED' ? 'selected' : ''}>停用</option></select></div><div class="form-field"><label>名称</label><input name="name" value="${escapeHtml(group.name)}" maxlength="80" required></div><div class="form-field"><label>变更原因</label><input name="reason" maxlength="200" required></div><div class="form-field full"><label>说明</label><textarea name="description" maxlength="500">${escapeHtml(group.description)}</textarea></div></div><div class="section"><div class="section-heading"><div><h2>年级范围</h2><p>权限只能作用于这里选择的年级</p></div></div><div class="candidate-grid">${grades.map((grade) => `<div class="candidate"><input type="checkbox" name="gradeIds" value="${grade.id}" id="grade-${grade.id}" ${gradeIds.has(grade.id) ? 'checked' : ''}><label for="grade-${grade.id}">${icon('graduation-cap')}<span>${escapeHtml(grade.name)}</span></label></div>`).join('')}</div></div><div class="section"><div class="section-heading"><div><h2>权限</h2><p>只授予完成职责所需的权限</p></div></div><div class="candidate-grid">${permissions.map((permission) => `<div class="candidate"><input type="checkbox" name="permissions" value="${permission.code}" id="permission-${permission.code}" ${permissionCodes.has(permission.code) ? 'checked' : ''}><label for="permission-${permission.code}">${icon('key-round')}<span>${escapeHtml(permission.name)}<small>${escapeHtml(permission.code)}</small></span></label></div>`).join('')}</div></div><div class="section"><div class="section-heading"><div><h2>成员</h2><p>成员仍可使用学生端，并可切换到管理工作台</p></div></div>${personPickerTools('admin-member')}<div class="candidate-grid" data-person-picker="admin-member">${adminMemberCandidates}</div></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary">${icon('save')}保存全部配置</button></div></form>`, { wide: true });
   modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
   bindPersonPicker(modal, 'admin-member');
   modal.querySelector('#configure-group-form').addEventListener('submit', async (event) => {
