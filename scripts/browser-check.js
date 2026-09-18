@@ -565,8 +565,9 @@ let browser;
   await admin.locator('#round-form [data-add-person-group="round"]').click();
   const selectedRoundParticipants = admin.locator('#round-form [name="participantIds"]:checked');
   assert.ok((await selectedRoundParticipants.count()) > 2);
-  assert.equal(await admin.locator('#round-form .candidate', { hasText: '陈遇' }).locator('input').isChecked(), true);
-  assert.equal(await admin.locator('#round-form .candidate', { hasText: '林夏' }).locator('input').isChecked(), true);
+  for (const memberName of ['苏晴', '沈知行']) {
+    assert.equal(await admin.locator('#round-form .candidate', { hasText: memberName }).locator('input').isChecked(), true);
+  }
   await admin.locator('#round-form .modal-actions .btn-primary').click();
   await admin.waitForSelector('.modal', { state: 'detached' });
   const browserRound = admin.locator('.round-admin-card', { hasText: '浏览器验收轮次' });
