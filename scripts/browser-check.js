@@ -565,7 +565,7 @@ let browser;
   await admin.locator('#round-form [data-add-person-group="round"]').click();
   const selectedRoundParticipants = admin.locator('#round-form [name="participantIds"]:checked');
   assert.ok((await selectedRoundParticipants.count()) > 2);
-  for (const memberName of ['苏晴', '沈知行']) {
+  for (const memberName of ['林夏', '周屿']) {
     assert.equal(await admin.locator('#round-form .candidate', { hasText: memberName }).locator('input').isChecked(), true);
   }
   await admin.locator('#round-form .modal-actions .btn-primary').click();
