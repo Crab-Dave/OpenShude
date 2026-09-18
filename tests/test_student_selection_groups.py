@@ -10,7 +10,7 @@ def test_user_manages_own_group_and_names_are_scoped_by_owner(client: TestClient
     candidates = client.get("/api/student-selection-groups/candidates")
     assert candidates.status_code == 200
     assert candidates.json()["candidates"]
-    assert "login_identifier" not in candidates.json()["candidates"][0]
+    assert {"login_identifier", "grade", "major", "status"} <= candidates.json()["candidates"][0].keys()
 
     created = client.post(
         "/api/student-selection-groups",
@@ -115,15 +115,29 @@ def test_admin_and_user_groups_share_storage_and_card_export(client: TestClient)
     )
 
 
-def test_group_candidates_and_members_require_active_users(client: TestClient):
+def test_group_candidates_and_members_allow_active_and_pending_users(client: TestClient):
     with SessionLocal.begin() as db:
-        db.execute(text("UPDATE users SET status='BANNED' WHERE id=3"))
+        db.execute(text("UPDATE users SET status='PENDING_ACTIVATION' WHERE id=3"))
+        db.execute(text("UPDATE users SET status='BANNED' WHERE id=4"))
     login(client, "2026001")
     candidates = client.get("/api/student-selection-groups/candidates").json()["candidates"]
-    assert 3 not in {candidate["id"] for candidate in candidates}
+    pending = next(candidate for candidate in candidates if candidate["id"] == 3)
+    assert pending["status"] == "PENDING_ACTIVATION"
+    assert pending["login_identifier"] == "2026002"
+    assert pending["grade"] == "2026级"
+    assert pending["major"] == "设计"
+    assert 4 not in {candidate["id"] for candidate in candidates}
+
+    created = client.post(
+        "/api/student-selection-groups",
+        json={"name": "待激活成员群组", "description": "", "memberIds": [3]},
+    )
+    assert created.status_code == 201, created.text
+    assert {member["id"] for member in created.json()["group"]["members"]} == {2, 3}
+
     invalid = client.post(
         "/api/student-selection-groups",
-        json={"name": "异常成员", "description": "", "memberIds": [3]},
+        json={"name": "异常成员", "description": "", "memberIds": [4]},
     )
     assert invalid.status_code == 400
     assert invalid.json()["error"]["code"] == "INVALID_SELECTION_GROUP_MEMBER"

@@ -7,9 +7,9 @@ SELECTION_GROUP_BY_ID = "SELECT * FROM student_selection_groups WHERE id=:id"
 
 
 def selection_group_details(db: Session, group: dict, include_login_identifier: bool = False) -> dict:
-    fields = "u.id,u.name,u.grade,u.status"
+    fields = "u.id,u.name,u.grade,u.major,u.status"
     if include_login_identifier:
-        fields = "u.id,u.login_identifier,u.name,u.grade,u.status"
+        fields = "u.id,u.login_identifier,u.name,u.grade,u.major,u.status"
     return {
         **group,
         "members": all_rows(
@@ -31,7 +31,8 @@ def validate_selection_group(db: Session, body: dict) -> tuple[str, str, list[in
     for user_id in member_ids:
         if not one(
             db,
-            "SELECT 1 AS found FROM users WHERE id=:id AND account_type='USER' AND status='ACTIVE'",
+            """SELECT 1 AS found FROM users WHERE id=:id AND account_type='USER'
+            AND status IN('ACTIVE','PENDING_ACTIVATION')""",
             {"id": user_id},
         ):
             raise ApiError(400, "INVALID_SELECTION_GROUP_MEMBER", "群组成员包含无效学生")
