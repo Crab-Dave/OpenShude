@@ -792,11 +792,8 @@ def updated_activity_targets(
     user: dict,
     activity: dict,
     body: dict,
-    started: bool,
 ) -> tuple[bool, list[int], list[dict], list[int]]:
     targets_changed = "targetGradeIds" in body or "targetGroupIds" in body
-    if started and targets_changed:
-        raise ApiError(409, "ACTIVITY_ALREADY_STARTED", "活动开始后不能修改目标人群")
     if targets_changed:
         grade_ids, groups, scope_grade_ids = validate_targets(db, user, body, activity["organizer_type"] == "USER")
         return True, grade_ids, groups, scope_grade_ids
@@ -826,15 +823,9 @@ def update_activity(activity_id: int, request: Request, body: dict, db: DB) -> d
         "importance": body.get("importance", activity["importance"]),
     }
     values = validate_core_fields(merged)
-    started = activity["start_at"] <= now()
-    if started and any(
-        values[field] != activity[field]
-        for field in ("title", "start_at", "end_at", "is_all_day", "location", "capacity", "importance")
-    ):
-        raise ApiError(409, "ACTIVITY_ALREADY_STARTED", "活动开始后只能补充介绍")
     if values["capacity"] < activity["registration_count"]:
         raise ApiError(409, "ACTIVITY_CAPACITY_TOO_SMALL", "活动容量不能小于当前报名人数")
-    targets_changed, grade_ids, groups, scope_grade_ids = updated_activity_targets(db, user, activity, body, started)
+    targets_changed, grade_ids, groups, scope_grade_ids = updated_activity_targets(db, user, activity, body)
     if activity["organizer_type"] == "USER" and values["importance"] > 3:
         raise ApiError(403, "ACTIVITY_IMPORTANCE_FORBIDDEN", "个人活动最高可设为 III 级")
     if activity["organizer_type"] == "ADMIN_GROUP":

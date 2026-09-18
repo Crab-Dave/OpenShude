@@ -282,7 +282,7 @@ def test_official_activity_scope_does_not_follow_later_user_grade_changes(client
             .scalars()
             .all()
         )
-        assert scope == [2]
+        assert scope == [1, 2]
         db.execute(text("UPDATE users SET grade='2026级',grade_id=1 WHERE id=4"))
         db.execute(
             text("DELETE FROM admin_group_scopes WHERE group_id=:group AND scope_value='2'"),
@@ -355,3 +355,35 @@ def test_calendar_counts_visible_published_cross_day_activities_only(client: Tes
     assert cancelled.status_code == 200
     refreshed = client.get("/api/activities/calendar?view=month&date=2026-10-31").json()
     assert next(day for day in refreshed["days"] if day["date"] == "2026-10-31")["count"] == 0
+
+
+def test_started_activity_settings_remain_editable(client: TestClient):
+    login(client, "2026001")
+    group = client.post(
+        "/api/student-selection-groups",
+        json={"name": "已开始活动新目标", "description": "", "memberIds": [3]},
+    ).json()["group"]
+    started = publish_activity(client, create_activity(client, capacity=3))
+    with SessionLocal.begin() as db:
+        db.execute(
+            text("UPDATE activities SET start_at='2026-01-01T06:00:00.000Z',end_at='2026-01-01T08:00:00.000Z' WHERE id=:id"),
+            {"id": started["id"]},
+        )
+
+    updated = client.patch(
+        f"/api/activities/{started['id']}",
+        json={
+            "version": started["version"],
+            "title": "开始后仍可调整",
+            "location": "更新后的活动室",
+            "capacity": 4,
+            "targetGradeIds": [],
+            "targetGroupIds": [group["id"]],
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    activity = updated.json()["activity"]
+    assert activity["title"] == "开始后仍可调整"
+    assert activity["location"] == "更新后的活动室"
+    assert activity["capacity"] == 4
+    assert activity["targetGroups"][0]["source_group_id"] == group["id"]
