@@ -12,7 +12,7 @@ from .dormitories import begin_immediate
 from .errors import ApiError
 from .markdown import markdown_summary, render_markdown
 from .rate_limit import enforce_rate_limit
-from .selection_groups import selectable_groups
+from .selection_groups import admin_selectable_groups, selectable_groups
 
 router = APIRouter(prefix="/api/activities")
 DB = Annotated[Session, Depends(get_db)]
@@ -254,10 +254,11 @@ def validate_targets(db: Session, user: dict, body: dict, personal: bool) -> tup
         raise ApiError(400, "INVALID_ACTIVITY_TARGET", "目标年级无效")
     if personal and any(grade_id != user["grade_id"] for grade_id in grade_ids):
         raise ApiError(403, "ACTIVITY_TARGET_FORBIDDEN", "个人活动只能选择自己的年级")
-    if user["account_type"] == "SUPER_ADMIN":
-        allowed_groups = all_rows(db, "SELECT *,'ADMIN' AS source FROM student_selection_groups ORDER BY id")
-    else:
-        allowed_groups = selectable_groups(db, user["id"])
+    allowed_groups = (
+        admin_selectable_groups(db, user["id"])
+        if user["account_type"] == "SUPER_ADMIN"
+        else selectable_groups(db, user["id"])
+    )
     groups_by_id = {group["id"]: group for group in allowed_groups}
     if any(group_id not in groups_by_id for group_id in group_ids):
         raise ApiError(400, "INVALID_ACTIVITY_TARGET", "目标群组无效")
@@ -316,10 +317,14 @@ def expand_target_members(db: Session, user: dict, activity: dict) -> int:
     if any(group["source_group_id"] is None for group in target_groups):
         raise ApiError(400, "INVALID_ACTIVITY_TARGET", "目标群组已被删除")
     group_ids = [group["source_group_id"] for group in target_groups]
-    if user["account_type"] == "SUPER_ADMIN":
-        allowed_group_ids = set(group_ids)
-    else:
-        allowed_group_ids = {group["id"] for group in selectable_groups(db, user["id"])}
+    allowed_group_ids = {
+        group["id"]
+        for group in (
+            admin_selectable_groups(db, user["id"])
+            if user["account_type"] == "SUPER_ADMIN"
+            else selectable_groups(db, user["id"])
+        )
+    }
     if any(group_id not in allowed_group_ids for group_id in group_ids):
         raise ApiError(400, "INVALID_ACTIVITY_TARGET", "目标群组不可用")
     members: dict[int, dict] = {}

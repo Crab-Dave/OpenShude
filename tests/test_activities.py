@@ -387,3 +387,21 @@ def test_started_activity_settings_remain_editable(client: TestClient):
     assert activity["location"] == "更新后的活动室"
     assert activity["capacity"] == 4
     assert activity["targetGroups"][0]["source_group_id"] == group["id"]
+
+
+def test_super_admin_cannot_target_user_private_groups(client: TestClient):
+    login(client, "2026001")
+    private = client.post(
+        "/api/student-selection-groups",
+        json={"name": "用户私有目标", "description": "", "memberIds": [3]},
+    ).json()["group"]
+
+    admin = TestClient(client.app)
+    login(admin, "admin", "Admin123!")
+    rejected = admin.post(
+        "/api/activities",
+        json=activity_body(targetGradeIds=[], targetGroupIds=[private["id"]], organizerGroupId=1),
+    )
+    assert rejected.status_code == 400
+    assert rejected.json()["error"]["code"] == "INVALID_ACTIVITY_TARGET"
+    admin.close()
