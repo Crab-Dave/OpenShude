@@ -205,6 +205,7 @@ input, select, textarea {
   outline: none;
 }
 input, select { height: 42px; padding: 0 12px; }
+input[type="checkbox"] { width: 14px; height: 14px; padding: 0; flex: none; accent-color: var(--primary); }
 textarea { min-height: 96px; padding: 11px 12px; resize: vertical; line-height: 1.55; }
 input:focus, select:focus, textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(111, 66, 193, 0.14); }
 input:disabled { color: #62586d; background: #f0edf4; cursor: not-allowed; }
@@ -556,7 +557,7 @@ input:disabled { color: #62586d; background: #f0edf4; cursor: not-allowed; }
 .activity-month-day { position: relative; min-width: 0; overflow: hidden; padding: 8px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: white; }
 .activity-month-day:nth-child(7n) { border-right: 0; }
 .activity-month-day:hover { background: #faf7ff; }
-.activity-month-day.outside { color: var(--muted); background: #fbfafd; }
+.activity-month-day.outside { color: #655b70; background: #eeeaf3; }
 .activity-month-day.selected { box-shadow: inset 0 0 0 2px var(--primary); background: #faf7ff; }
 .activity-day-number { width: 100%; min-height: 25px; display: flex; align-items: center; justify-content: space-between; padding: 0; border: 0; color: inherit; background: transparent; text-align: left; }
 .activity-day-number span { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; font-size: 12px; font-weight: 750; }
@@ -686,7 +687,6 @@ input:disabled { color: #62586d; background: #f0edf4; cursor: not-allowed; }
 .activity-form-section > h2,
 .activity-publish-panel h2 { margin: 0 0 13px; font-size: 15px; }
 .activity-form-section .form-field + .form-field { margin-top: 13px; }
-.activity-form-layout input[type="checkbox"] { width: 16px; height: 16px; flex: none; accent-color: var(--primary); }
 .activity-form-layout .checkbox-row { width: fit-content; display: flex; align-items: center; gap: 7px; margin-bottom: 12px; font-weight: 650; }
 .activity-template-note { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 18px; padding: 14px; border: 1px solid #d4c1ee; border-radius: 8px; background: var(--primary-soft); }
 .activity-template-note svg { flex: none; }
