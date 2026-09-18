@@ -1017,15 +1017,9 @@ async function renderActivityDetail() {
       if (navigator.clipboard?.writeText) {
         copied = await navigator.clipboard.writeText(text).then(() => true, () => false);
       }
-      if (!copied) {
-        const input = document.createElement('textarea');
-        input.value = text;
-        input.style.position = 'fixed';
-        input.style.opacity = '0';
-        document.body.append(input);
-        input.select();
-        copied = document.execCommand('copy');
-        input.remove();
+      if (!copied && navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
+        const item = new ClipboardItem({ 'text/plain': new Blob([text], { type: 'text/plain' }) });
+        copied = await navigator.clipboard.write([item]).then(() => true, () => false);
       }
       if (!copied) throw new Error('copy failed');
       toast('活动链接已复制');
@@ -1186,8 +1180,10 @@ async function renderActivityGroups() {
   const data = await activityGroupData();
   const groups = data.groups.map((group) => {
     const actions = group.owned ? `<div class="cell-actions"><button class="btn btn-secondary" data-edit-activity-group="${group.id}">${icon('pencil')}编辑</button><button class="btn btn-danger" data-delete-activity-group="${group.id}">${icon('trash-2')}删除</button></div>` : '';
-    const visibility = data.admin ? (group.is_public ? ' · 已公开' : ' · 仅管理员') : '';
-    return `<section class="panel activity-group-card"><div><span class="activity-badge ${group.owned ? 'joined' : ''}">${group.owned ? `可管理${visibility}` : '管理员共享'}</span><h2>${escapeHtml(group.name)}</h2><p>${escapeHtml(group.description || '暂无说明')}</p><small>${group.members.map((member) => escapeHtml(member.name)).join('、')}</small></div>${actions}</section>`;
+    let visibility = '';
+    if (data.admin) visibility = group.is_public ? ' · 已公开' : ' · 仅管理员';
+    const badge = group.owned ? `可管理${visibility}` : '管理员共享';
+    return `<section class="panel activity-group-card"><div><span class="activity-badge ${group.owned ? 'joined' : ''}">${badge}</span><h2>${escapeHtml(group.name)}</h2><p>${escapeHtml(group.description || '暂无说明')}</p><small>${group.members.map((member) => escapeHtml(member.name)).join('、')}</small></div>${actions}</section>`;
   }).join('') || emptyState('users-round', '还没有目标群组', '新建群组后可在活动表单中直接选择');
   setPage(`<div class="toolbar"><div><strong>活动目标群组</strong><div class="field-hint">个人群组仅本人可选择；管理员可决定共享群组是否公开</div></div><div class="toolbar-spacer"></div><button class="btn btn-primary" data-create-activity-group>${icon('plus')}新建群组</button></div><div class="activity-group-list">${groups}</div>`);
   document.querySelector('[data-create-activity-group]').addEventListener('click', () => showActivityGroupEditor(null, data));
@@ -1211,7 +1207,8 @@ function showActivityGroupEditor(group, data) {
     return `<div class="candidate" data-person-name="${escapeHtml(candidate.name.toLowerCase())}"><input type="checkbox" name="memberIds" value="${candidate.id}" id="activity-group-member-${candidate.id}" ${memberIds.has(candidate.id) ? 'checked' : ''} ${currentUser ? 'disabled' : ''}><label for="activity-group-member-${candidate.id}">${icon('user-round')}<span>${escapeHtml(candidate.name)}${currentUser ? '（我）' : ''}<small>${escapeHtml(candidate.grade)}${currentUser ? ' · 创建者自动加入' : ''}</small></span></label></div>`;
   }).join('');
   const reason = data.admin && group ? '<div class="form-field"><label>变更原因</label><input name="reason" maxlength="200" value="活动目标群组管理" required></div>' : '';
-  const visibility = data.admin ? `<label class="checkbox-row"><input type="checkbox" name="isPublic" ${group?.is_public ? 'checked' : ''}>公开给所有用户作为活动目标群组</label><p class="field-hint">未公开时仅管理员可维护，普通用户无法选择。</p>` : '<p class="field-hint">个人群组仅你自己可在活动表单中选择。</p>';
+  const publicChecked = group?.is_public ? 'checked' : '';
+  const visibility = data.admin ? `<label class="checkbox-row"><input type="checkbox" name="isPublic" ${publicChecked}>公开给所有用户作为活动目标群组</label><p class="field-hint">未公开时仅管理员可维护，普通用户无法选择。</p>` : '<p class="field-hint">个人群组仅你自己可在活动表单中选择。</p>';
   const modal = openModal(group ? '编辑目标群组' : '新建目标群组', `<form id="activity-group-form"><div class="form-grid"><div class="form-field"><label>群组名称</label><input name="name" maxlength="80" required value="${escapeHtml(group?.name || '')}"></div><div class="form-field"><label>说明</label><input name="description" maxlength="500" value="${escapeHtml(group?.description || '')}"></div></div><div class="section"><div class="section-heading"><div><h2>群组成员</h2><p>只展示正常状态学生的必要身份信息</p></div></div><div class="person-picker-tools"><div class="search-field">${icon('search')}<input data-activity-group-search placeholder="按姓名搜索"></div></div><div class="candidate-grid" data-activity-group-candidates>${candidates}</div></div>${visibility}${reason}<div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>取消</button><button class="btn btn-primary">${icon('save')}保存群组</button></div></form>`, { wide: true });
   modal.querySelector('[data-cancel]').addEventListener('click', closeModal);
   modal.querySelector('[data-activity-group-search]').addEventListener('input', (event) => {
@@ -3022,10 +3019,14 @@ async function openSelectionGroupManager() {
 
 function showSelectionGroups() {
   const groups = state.selectionGroups;
-  const groupList = groups.length ? groups.map((group) => {
-    const visibility = group.owner_type === 'SUPER_ADMIN' ? (group.is_public ? '已公开共享' : '仅管理员') : '用户个人群组';
-    return `<section class="selection-group-item" data-selection-group-card="${group.id}"><div><strong>${escapeHtml(group.name)}</strong><span class="activity-badge">${visibility}</span><p>${escapeHtml(group.description || '暂无说明')}</p><span>${group.members.map((member) => escapeHtml(member.name)).join('、')}</span></div><div class="cell-actions"><button class="btn btn-secondary btn-sm" data-edit-selection-group="${group.id}">${icon('pencil')}编辑</button><button class="btn btn-danger btn-sm" data-delete-selection-group="${group.id}">${icon('trash-2')}删除</button></div></section>`;
-  }).join('') : emptyState('users-round', '暂无预设群组', '新建群组后，可在选人界面一键添加成员');
+  let groupList = emptyState('users-round', '暂无预设群组', '新建群组后，可在选人界面一键添加成员');
+  if (groups.length) {
+    groupList = groups.map((group) => {
+      let visibility = '用户个人群组';
+      if (group.owner_type === 'SUPER_ADMIN') visibility = group.is_public ? '已公开共享' : '仅管理员';
+      return `<section class="selection-group-item" data-selection-group-card="${group.id}"><div><strong>${escapeHtml(group.name)}</strong><span class="activity-badge">${visibility}</span><p>${escapeHtml(group.description || '暂无说明')}</p><span>${group.members.map((member) => escapeHtml(member.name)).join('、')}</span></div><div class="cell-actions"><button class="btn btn-secondary btn-sm" data-edit-selection-group="${group.id}">${icon('pencil')}编辑</button><button class="btn btn-danger btn-sm" data-delete-selection-group="${group.id}">${icon('trash-2')}删除</button></div></section>`;
+    }).join('');
+  }
   const modal = openModal('预设学生群组', `<div class="toolbar"><div class="search-field">${icon('search')}<input id="selection-group-search" placeholder="按成员姓名搜索"></div><div class="toolbar-spacer"></div><button class="btn btn-primary" id="create-selection-group">${icon('plus')}新建群组</button></div><div class="selection-group-list">${groupList}</div>`, { wide: true });
   modal.querySelector('#selection-group-search').addEventListener('input', (event) => {
     const query = event.target.value.trim().toLowerCase();
@@ -3043,8 +3044,10 @@ function showSelectionGroupForm(group = null) {
   const candidates = state.selectionGroupCandidates || state.roundParticipantCandidates || [];
   const memberIds = new Set(group?.members.map((member) => member.id) || []);
   const canPublish = !group || group.owner_type === 'SUPER_ADMIN';
-  const visibility = canPublish ? `<label class="checkbox-row"><input type="checkbox" name="isPublic" ${group?.is_public ? 'checked' : ''}>公开给所有用户作为活动目标群组</label><p class="field-hint">未公开时仅管理员可在活动中选择。</p>` : '<p class="field-hint">这是用户个人群组，只能由创建者在活动表单中选择。</p>';
-  const modal = openModal(group ? '编辑预设学生群组' : '新建预设学生群组', `<form id="selection-group-form"><div class="form-grid"><div class="form-field"><label>群组名称</label><input name="name" maxlength="80" value="${escapeHtml(group?.name || '')}" required></div><div class="form-field"><label>操作原因</label><input name="reason" maxlength="200" ${group ? 'required' : ''}></div><div class="form-field full"><label>说明</label><textarea name="description" maxlength="500">${escapeHtml(group?.description || '')}</textarea></div></div><div class="section"><div class="section-heading"><div><h2>群组成员</h2><p>群组只保存学生名单，不会随使用它创建的轮次自动变化</p></div></div><div class="person-picker-tools"><div class="search-field">${icon('search')}<input id="selection-group-member-search" placeholder="按姓名搜索"></div></div><div class="candidate-grid" id="selection-group-candidates">${candidates.map((user) => `<div class="candidate" data-person-name="${escapeHtml(user.name.toLowerCase())}"><input type="checkbox" name="memberIds" value="${user.id}" id="selection-user-${user.id}" ${memberIds.has(user.id) ? 'checked' : ''}><label for="selection-user-${user.id}">${icon('user-round')}<span>${escapeHtml(user.name)}<small>${escapeHtml(user.grade)} · ${escapeHtml(user.login_identifier)}</small></span></label></div>`).join('')}</div></div>${visibility}<div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>返回</button><button class="btn btn-primary">${icon('save')}${group ? '保存群组' : '创建群组'}</button></div></form>`, { wide: true });
+  const publicChecked = group?.is_public ? 'checked' : '';
+  const visibility = canPublish ? `<label class="checkbox-row"><input type="checkbox" name="isPublic" ${publicChecked}>公开给所有用户作为活动目标群组</label><p class="field-hint">未公开时仅管理员可在活动中选择。</p>` : '<p class="field-hint">这是用户个人群组，只能由创建者在活动表单中选择。</p>';
+  const candidateMarkup = candidates.map((user) => `<div class="candidate" data-person-name="${escapeHtml(user.name.toLowerCase())}"><input type="checkbox" name="memberIds" value="${user.id}" id="selection-user-${user.id}" ${memberIds.has(user.id) ? 'checked' : ''}><label for="selection-user-${user.id}">${icon('user-round')}<span>${escapeHtml(user.name)}<small>${escapeHtml(user.grade)} · ${escapeHtml(user.login_identifier)}</small></span></label></div>`).join('');
+  const modal = openModal(group ? '编辑预设学生群组' : '新建预设学生群组', `<form id="selection-group-form"><div class="form-grid"><div class="form-field"><label>群组名称</label><input name="name" maxlength="80" value="${escapeHtml(group?.name || '')}" required></div><div class="form-field"><label>操作原因</label><input name="reason" maxlength="200" ${group ? 'required' : ''}></div><div class="form-field full"><label>说明</label><textarea name="description" maxlength="500">${escapeHtml(group?.description || '')}</textarea></div></div><div class="section"><div class="section-heading"><div><h2>群组成员</h2><p>群组只保存学生名单，不会随使用它创建的轮次自动变化</p></div></div><div class="person-picker-tools"><div class="search-field">${icon('search')}<input id="selection-group-member-search" placeholder="按姓名搜索"></div></div><div class="candidate-grid" id="selection-group-candidates">${candidateMarkup}</div></div>${visibility}<div class="modal-actions"><button type="button" class="btn btn-secondary" data-cancel>返回</button><button class="btn btn-primary">${icon('save')}${group ? '保存群组' : '创建群组'}</button></div></form>`, { wide: true });
   modal.querySelector('[data-cancel]').addEventListener('click', showSelectionGroups);
   modal.querySelector('#selection-group-member-search').addEventListener('input', (event) => {
     const query = event.target.value.trim().toLowerCase();
