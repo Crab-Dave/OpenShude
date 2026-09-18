@@ -277,6 +277,7 @@ def create_my_selection_group(request: Request, body: dict, db: DB) -> dict:
         raise ApiError(403, "ACCOUNT_UNAVAILABLE", ACCOUNT_UNAVAILABLE_MESSAGE)
     enforce_rate_limit("selection-group-write-user", str(user["id"]), 20, 60, "SELECTION_GROUP_RATE_LIMITED")
     name, description, member_ids = validate_selection_group(db, body)
+    member_ids = sorted(set(member_ids) | {user["id"]})
     if selection_group_name_exists(db, user["id"], name):
         raise ApiError(409, "DUPLICATE_SELECTION_GROUP_NAME", "群组名称已存在")
     timestamp = now()
@@ -326,6 +327,7 @@ def update_my_selection_group(group_id: int, request: Request, body: dict, db: D
     if not before:
         raise ApiError(404, "SELECTION_GROUP_NOT_FOUND", "群组不存在")
     name, description, member_ids = validate_selection_group(db, body)
+    member_ids = sorted(set(member_ids) | {user["id"]})
     if selection_group_name_exists(db, user["id"], name, group_id):
         raise ApiError(409, "DUPLICATE_SELECTION_GROUP_NAME", "群组名称已存在")
     timestamp = now()

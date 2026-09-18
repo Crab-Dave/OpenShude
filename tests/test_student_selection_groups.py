@@ -18,6 +18,7 @@ def test_user_manages_own_group_and_names_are_scoped_by_owner(client: TestClient
     )
     assert created.status_code == 201, created.text
     group = created.json()["group"]
+    assert {member["id"] for member in group["members"]} == {2, 3}
     assert group["owned"] is True
     assert group["source"] == "OWN"
     assert "created_by" not in group
@@ -36,6 +37,7 @@ def test_user_manages_own_group_and_names_are_scoped_by_owner(client: TestClient
         json={"name": "周末活动搭子", "description": "同名但不同所有者", "memberIds": [2]},
     )
     assert duplicate_for_other_owner.status_code == 201
+    assert group["id"] not in {item["id"] for item in other.get("/api/student-selection-groups").json()["groups"]}
     other.close()
 
     updated = client.patch(
@@ -76,7 +78,7 @@ def test_admin_and_user_groups_share_storage_and_card_export(client: TestClient)
     login(admin, "admin", "Admin123!")
     shared = admin.post(
         "/api/admin/student-selection-groups",
-        json={"name": "管理员共享群组", "description": "共享活动目标", "memberIds": [3, 4]},
+        json={"name": "管理员共享群组", "description": "共享活动目标", "memberIds": [3, 4], "isPublic": True},
     )
     assert shared.status_code == 201, shared.text
     admin_groups = admin.get("/api/admin/student-selection-groups").json()["groups"]
@@ -91,6 +93,7 @@ def test_admin_and_user_groups_share_storage_and_card_export(client: TestClient)
     shared_for_user = next(group for group in visible if group["id"] == shared.json()["group"]["id"])
     assert shared_for_user["owned"] is False
     assert shared_for_user["source"] == "ADMIN"
+    assert shared_for_user["is_public"] == 1
     assert (
         client.patch(
             f"/api/student-selection-groups/{shared_for_user['id']}",
@@ -112,3 +115,30 @@ def test_group_candidates_and_members_require_active_users(client: TestClient):
     )
     assert invalid.status_code == 400
     assert invalid.json()["error"]["code"] == "INVALID_SELECTION_GROUP_MEMBER"
+
+
+def test_admin_private_group_is_hidden_until_published(client: TestClient):
+    admin = TestClient(client.app)
+    login(admin, "admin", "Admin123!")
+    private = admin.post(
+        "/api/admin/student-selection-groups",
+        json={"name": "管理员内部群组", "description": "暂不公开", "memberIds": [3], "isPublic": False},
+    ).json()["group"]
+
+    login(client, "2026001")
+    assert private["id"] not in {group["id"] for group in client.get("/api/student-selection-groups").json()["groups"]}
+
+    published = admin.patch(
+        f"/api/admin/student-selection-groups/{private['id']}",
+        json={
+            "name": private["name"],
+            "description": private["description"],
+            "memberIds": [3],
+            "isPublic": True,
+            "reason": "开放活动选择",
+        },
+    )
+    assert published.status_code == 200
+    assert published.json()["group"]["is_public"] == 1
+    assert private["id"] in {group["id"] for group in client.get("/api/student-selection-groups").json()["groups"]}
+    admin.close()

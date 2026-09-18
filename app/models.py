@@ -261,6 +261,7 @@ class StudentSelectionGroup(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(Text)
     description: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    is_public: Mapped[int] = mapped_column(server_default=text("0"))
     created_by: Mapped[int | None] = mapped_column(ForeignKey(USERS_ID, ondelete=SET_NULL))
     created_at: Mapped[str] = mapped_column(Text)
     updated_at: Mapped[str] = mapped_column(Text)

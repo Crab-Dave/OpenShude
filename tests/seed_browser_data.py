@@ -407,8 +407,8 @@ def main() -> None:
         student_ids = dict(db.execute(text("SELECT login_identifier,id FROM users WHERE account_type='USER'")).all())
         shared_group_id = db.execute(
             text(
-                """INSERT INTO student_selection_groups(name,description,created_by,created_at,updated_at)
-                VALUES('2026 级志愿服务队','管理员共享活动目标',:admin,:now,:now) RETURNING id"""
+                """INSERT INTO student_selection_groups(name,description,is_public,created_by,created_at,updated_at)
+                VALUES('2026 级志愿服务队','管理员共享活动目标',1,:admin,:now,:now) RETURNING id"""
             ),
             {"admin": admin_id, "now": timestamp},
         ).scalar_one()
@@ -421,7 +421,7 @@ def main() -> None:
         ).scalar_one()
         for group_id, logins in (
             (shared_group_id, ["2026002", "2026003", "2026006"]),
-            (own_group_id, ["2026002", "2026010"]),
+            (own_group_id, ["2026001", "2026002", "2026010"]),
         ):
             for login_identifier in logins:
                 db.execute(
