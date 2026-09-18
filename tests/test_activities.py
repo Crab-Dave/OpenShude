@@ -366,7 +366,9 @@ def test_started_activity_settings_remain_editable(client: TestClient):
     started = publish_activity(client, create_activity(client, capacity=3))
     with SessionLocal.begin() as db:
         db.execute(
-            text("UPDATE activities SET start_at='2026-01-01T06:00:00.000Z',end_at='2026-01-01T08:00:00.000Z' WHERE id=:id"),
+            text(
+                "UPDATE activities SET start_at='2026-01-01T06:00:00.000Z',end_at='2026-01-01T08:00:00.000Z' WHERE id=:id"
+            ),
             {"id": started["id"]},
         )
 
