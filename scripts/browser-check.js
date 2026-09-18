@@ -615,7 +615,7 @@ let browser;
   const groupAdmin = await browser.newPage({ viewport: { width: 1200, height: 800 }, deviceScaleFactor: 1 });
   groupAdmin.on('console', (message) => { if (message.type() === 'error' && !message.text().startsWith('Failed to load resource')) errors.push(`group admin console: ${message.text()}`); });
   groupAdmin.on('pageerror', (error) => errors.push(`group admin page: ${error.message}`));
-  await login(groupAdmin, '2026005', 'Student123!');
+  await login(groupAdmin, '2026001', 'Student123!');
   await groupAdmin.waitForSelector('.roommate-card');
   assert.equal(await groupAdmin.locator('#switch-mode').count(), 1);
   assert.match(await groupAdmin.locator('#switch-mode').textContent(), /进入管理工作台/);
