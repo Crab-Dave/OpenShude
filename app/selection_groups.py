@@ -59,3 +59,14 @@ def selectable_groups(db: Session, user_id: int) -> list[dict]:
         ORDER BY CASE WHEN g.created_by=:user THEN 0 ELSE 1 END,g.name,g.id""",
         {"user": user_id},
     )
+
+
+def admin_selectable_groups(db: Session, admin_id: int) -> list[dict]:
+    return all_rows(
+        db,
+        """SELECT g.*,CASE WHEN g.created_by=:admin THEN 'OWN' ELSE 'ADMIN' END AS source
+        FROM student_selection_groups g JOIN users creator ON creator.id=g.created_by
+        WHERE creator.account_type='SUPER_ADMIN'
+        ORDER BY CASE WHEN g.created_by=:admin THEN 0 ELSE 1 END,g.name,g.id""",
+        {"admin": admin_id},
+    )

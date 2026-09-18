@@ -986,7 +986,11 @@ def selection_groups(request: Request, db: DB, search: str = "") -> dict:
     require_super_admin(admin_user(request, db))
     groups = [
         selection_group_details(db, group, True)
-        for group in all_rows(db, "SELECT * FROM student_selection_groups ORDER BY name,id")
+        for group in all_rows(
+            db,
+            """SELECT groups.*,creator.account_type AS owner_type FROM student_selection_groups groups
+            LEFT JOIN users creator ON creator.id=groups.created_by ORDER BY groups.name,groups.id""",
+        )
     ]
     if search.strip():
         value = search.strip().lower()
@@ -1230,7 +1234,8 @@ def update_selection_group(group_id: int, request: Request, body: dict, db: DB) 
     if not before:
         raise ApiError(404, "SELECTION_GROUP_NOT_FOUND", SELECTION_GROUP_NOT_FOUND_MESSAGE)
     name, description, member_ids = validate_selection_group(db, body)
-    is_public = int(body.get("isPublic") is True)
+    owner = one(db, "SELECT account_type FROM users WHERE id=:id", {"id": before["created_by"]})
+    is_public = int(owner["account_type"] == "SUPER_ADMIN" and body.get("isPublic", bool(before["is_public"])) is True)
     reason = clean_text(body.get("reason"), 200, True)
     if selection_group_name_exists(db, before["created_by"], name, group_id):
         raise ApiError(409, "DUPLICATE_SELECTION_GROUP_NAME", "预设群组名称已存在")

@@ -85,6 +85,18 @@ def test_admin_and_user_groups_share_storage_and_card_export(client: TestClient)
     own_from_admin = next(group for group in admin_groups if group["id"] == own["id"])
     assert own_from_admin["created_by"] == 2
     assert "login_identifier" in own_from_admin["members"][0]
+    private_update = admin.patch(
+        f"/api/admin/student-selection-groups/{own['id']}",
+        json={
+            "name": own["name"],
+            "description": own["description"],
+            "memberIds": [2, 3],
+            "isPublic": True,
+            "reason": "维护个人群组",
+        },
+    )
+    assert private_update.status_code == 200
+    assert private_update.json()["group"]["is_public"] == 0
     export = admin.post("/api/admin/roommate-cards/export", json={"groupIds": [own["id"]]})
     assert export.status_code == 200
     admin.close()
