@@ -254,6 +254,17 @@ let browser;
   assert.equal(await desktop.locator('[data-activity-copy-link]').count(), 1);
   assert.equal(await desktop.locator('.activity-detail-meta [data-lucide="user-round-check"]').count(), 1);
   await desktop.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: baseUrl });
+  await desktop.evaluate(() => {
+    const readText = navigator.clipboard.readText.bind(navigator.clipboard);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        readText,
+        writeText: () => Promise.reject(new Error('async clipboard unavailable')),
+        write: () => Promise.reject(new Error('async clipboard unavailable')),
+      },
+    });
+  });
   await desktop.locator('[data-activity-copy-link]').click();
   assert.match(await desktop.locator('.toast').last().textContent(), /活动链接已复制/);
   assert.equal(await desktop.evaluate(() => navigator.clipboard.readText()), desktop.url());
