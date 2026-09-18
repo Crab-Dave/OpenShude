@@ -294,7 +294,7 @@ let browser;
   assert.ok((await visibleActivityMembers.count()) > 1);
   await desktop.locator('#activity-group-form [data-select-visible="activity-group"]').click();
   assert.equal(await visibleActivityMembers.evaluateAll((inputs) => inputs.every((input) => input.checked)), true);
-  assert.equal(await desktop.locator('#activity-group-form .candidate', { hasText: '陈遇' }).locator('input').isChecked(), false);
+  assert.equal(await desktop.locator('#activity-group-form .candidate', { hasText: '周屿' }).locator('input').isChecked(), false);
   await desktop.locator('#activity-group-form .btn-primary').click();
   await desktop.waitForFunction(() => document.querySelector('.activity-group-list')?.textContent.includes('浏览器验收群组'));
   await desktop.locator('[data-view="activities-calendar"]').first().click();
