@@ -380,7 +380,7 @@ def main() -> None:
                 {"round": round_id, "user": user_id, "admin": admin_id, "now": timestamp},
             )
 
-        for index in range(1, 11):
+        for index in range(1, 12):
             password = hash_password("Student123!")
             user_id = db.execute(
                 text("""INSERT INTO users(login_identifier,password_hash,password_salt,role,account_type,
@@ -392,7 +392,7 @@ def main() -> None:
                     "hash": password.hash,
                     "salt": password.salt,
                     "name": f"分页同学{index:02d}",
-                    "status": "PENDING_ACTIVATION" if index == 10 else "ACTIVE",
+                    "status": "PENDING_ACTIVATION" if index == 11 else "ACTIVE",
                     "grade": grade_ids["2026级"],
                     "admin": admin_id,
                     "created": "2020-01-01T00:00:00.000Z",
