@@ -297,6 +297,30 @@ def test_official_activity_scope_does_not_follow_later_user_grade_changes(client
     assert cancelled.json()["error"]["code"] == "ACTIVITY_NOT_FOUND"
 
 
+def test_pending_group_member_is_included_in_activity_target(client: TestClient):
+    with SessionLocal.begin() as db:
+        db.execute(text("UPDATE users SET status='PENDING_ACTIVATION' WHERE id=3"))
+    login(client, "2026001")
+    group = client.post(
+        "/api/student-selection-groups",
+        json={"name": "待激活活动目标", "description": "", "memberIds": [3]},
+    ).json()["group"]
+    published = publish_activity(
+        client,
+        create_activity(client, targetGradeIds=[], targetGroupIds=[group["id"]]),
+    )
+    with SessionLocal() as db:
+        member_ids = (
+            db.execute(
+                text("SELECT user_id FROM activity_target_members WHERE activity_id=:id ORDER BY user_id"),
+                {"id": published["id"]},
+            )
+            .scalars()
+            .all()
+        )
+    assert member_ids == [2, 3]
+
+
 def test_markdown_preview_audit_and_permanent_delete(client: TestClient):
     login(client, "2026001")
     preview = client.post(

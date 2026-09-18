@@ -271,7 +271,9 @@ def validate_targets(db: Session, user: dict, body: dict, personal: bool) -> tup
             JOIN users u ON u.id=member.user_id WHERE member.group_id=:group""",
             {"group": group["id"]},
         )
-        if not members or any(member["status"] != "ACTIVE" or member["grade_id"] is None for member in members):
+        if not members or any(
+            member["status"] not in ("ACTIVE", "PENDING_ACTIVATION") or member["grade_id"] is None for member in members
+        ):
             raise ApiError(400, "INVALID_ACTIVITY_TARGET", "目标群组包含不可用账号")
         audience_grade_ids.update(member["grade_id"] for member in members)
     return grade_ids, selected_groups, sorted(audience_grade_ids)
@@ -335,7 +337,9 @@ def expand_target_members(db: Session, user: dict, activity: dict) -> int:
             JOIN users u ON u.id=member.user_id WHERE member.group_id=:group""",
             {"group": group_id},
         )
-        if not rows or any(row["status"] != "ACTIVE" or row["grade_id"] is None for row in rows):
+        if not rows or any(
+            row["status"] not in ("ACTIVE", "PENDING_ACTIVATION") or row["grade_id"] is None for row in rows
+        ):
             raise ApiError(400, "INVALID_ACTIVITY_TARGET", "目标群组包含不可用账号")
         members.update({row["id"]: row for row in rows})
     if grade_ids:

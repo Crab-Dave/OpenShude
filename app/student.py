@@ -263,8 +263,9 @@ def selection_group_candidates(request: Request, db: DB) -> dict:
     return {
         "candidates": all_rows(
             db,
-            """SELECT id,name,grade,status FROM users
-            WHERE account_type='USER' AND status='ACTIVE' ORDER BY grade,name,id""",
+            """SELECT id,login_identifier,name,grade,major,status FROM users
+            WHERE account_type='USER' AND status IN('ACTIVE','PENDING_ACTIVATION')
+            ORDER BY grade,name,id""",
         )
     }
 
