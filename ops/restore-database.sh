@@ -26,7 +26,8 @@ wait_for_healthy() {
       status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container")
       if [[ "$status" == "healthy" ]] && \
          curl --fail --silent --show-error --max-time 5 \
-           -H 'Host: 39.96.36.207' http://127.0.0.1/api/health >/dev/null; then
+         --resolve 'shudecollege.com:443:127.0.0.1' \
+         https://shudecollege.com/api/health >/dev/null; then
         return 0
       fi
     fi

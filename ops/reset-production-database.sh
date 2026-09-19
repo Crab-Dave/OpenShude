@@ -14,7 +14,7 @@ fi
 export INITIAL_ADMIN_PASSWORD="$initial_admin_password"
 
 deploy_dir=${DEPLOY_DIR:-/opt/myapp}
-public_host=${PUBLIC_HOST:-39.96.36.207}
+public_host=${PUBLIC_HOST:-shudecollege.com}
 cd "$deploy_dir"
 
 image_tag=$(<.deployed-image-tag)
@@ -34,7 +34,8 @@ wait_for_healthy() {
       status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container")
       if [[ "$status" == "healthy" ]] && \
          curl --fail --silent --show-error --max-time 5 \
-           -H "Host: $public_host" http://127.0.0.1/api/health >/dev/null; then
+         --resolve "$public_host:443:127.0.0.1" \
+         "https://$public_host/api/health" >/dev/null; then
         return 0
       fi
     fi
