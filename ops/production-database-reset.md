@@ -11,12 +11,12 @@
 
 1. 生产版本已包含“导入账号首次强制改密”和“登录页移除演示账号”两个修复。
 2. GitHub Actions 的 CI 和 Production Deploy 均已成功。
-3. `http://39.96.36.207/api/health` 返回当前目标提交版本。
+3. `https://shudecollege.com/api/health` 返回当前目标提交版本。
 4. 已安排维护窗口，并确认当前数据库没有需要保留的首页、账号、私信、卡片、宿舍或审计数据。
 5. 服务器 `/opt/myapp` 中存在 `reset-production-database.sh`、`compose.prod.yml` 和 `.deployed-image-tag`。
 
-系统当前继续使用 HTTP，因此 `AUTH_COOKIE_SECURE=false`、公网 IP Host 和 HTTP Origin 配置保持不变。Access Token 有效期为 15 分钟，Refresh Token 绝对有效期为 7 天。
-正式账号密码和个人信息会以明文 HTTP 传输，应通过安全组、校园网或 VPN 限制访问范围。
+系统通过 `https://shudecollege.com` 提供 HTTPS 访问，`AUTH_COOKIE_SECURE=true`，允许来源为 `https://shudecollege.com` 和 `https://www.shudecollege.com`。Access Token 有效期为 15 分钟，Refresh Token 绝对有效期为 7 天。
+证书由 Certbot 安装在 `/etc/letsencrypt/live/shudecollege.com/`，续期后需要确认 Nginx 已加载新证书。
 
 ## 一次性演练
 
@@ -44,7 +44,8 @@ cd /opt/myapp
 ```bash
 cat .deployed-image-tag
 IMAGE_TAG=$(<.deployed-image-tag) docker compose -f compose.prod.yml ps
-curl --fail --show-error -H 'Host: 39.96.36.207' http://127.0.0.1/api/health
+curl --fail --show-error --resolve 'shudecollege.com:443:127.0.0.1' \
+  https://shudecollege.com/api/health
 ```
 
 通过终端静默输入一次性管理员密码，避免写入 Shell 历史。密码至少 12 位且不得复用其他系统密码：
@@ -59,11 +60,11 @@ unset INITIAL_ADMIN_PASSWORD
 ```
 
 脚本依次执行：停止 Web 容器、删除旧数据库文件、迁移空库、创建 `admin`、校验 Alembic、校验数据库约束、
-断言全部业务表为空、启动容器并验证 Nginx HTTP 反代。
+断言全部业务表为空、启动容器并验证 Nginx HTTPS 反代。
 
 ## 执行后验收
 
-1. `http://39.96.36.207/` 可打开默认首页。
+1. `https://shudecollege.com/` 可打开默认首页，`http://shudecollege.com/` 会跳转到 HTTPS。
 2. `/login` 不展示演示账号。
 3. 只能用刚设置的一次性 `admin` 密码登录。
 4. 首次登录强制修改管理员密码。

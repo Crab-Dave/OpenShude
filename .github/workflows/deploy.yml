@@ -265,7 +265,8 @@ jobs:
 
             for ((attempt = 1; attempt <= 15; attempt++)); do
               if response=$(curl --fail --silent --show-error --max-time 5 \
-                -H 'Host: 39.96.36.207' "http://127.0.0.1${health_path}"); then
+                --resolve 'shudecollege.com:443:127.0.0.1' \
+                "https://shudecollege.com${health_path}"); then
                 if [[ "$tag" != "$IMAGE_TAG" || "$response" == *"\"version\":\"$tag\""* ]]; then
                   return 0
                 fi

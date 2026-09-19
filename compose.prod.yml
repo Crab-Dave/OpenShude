@@ -27,9 +27,9 @@ services:
       LOGIN_PASSWORD_CONCURRENCY: "2"
       ACCESS_TOKEN_MINUTES: "15"
       REFRESH_TOKEN_DAYS: "7"
-      AUTH_COOKIE_SECURE: "false"
-      ALLOWED_HOSTS: '["39.96.36.207","127.0.0.1","localhost"]'
-      ALLOWED_ORIGINS: '["http://39.96.36.207"]'
+      AUTH_COOKIE_SECURE: "true"
+      ALLOWED_HOSTS: '["shudecollege.com","www.shudecollege.com","39.96.36.207","127.0.0.1","localhost"]'
+      ALLOWED_ORIGINS: '["https://shudecollege.com","https://www.shudecollege.com"]'
 
     ports:
       - "127.0.0.1:4173:4173"
